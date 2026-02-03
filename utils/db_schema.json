@@ -1,0 +1,5189 @@
+{
+  "Permission": {
+    "tableName": "ms_permissions",
+    "attributes": {
+      "permission_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "permission_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "permission_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "module": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsToMany",
+        "targetModel": "Role",
+        "as": "roles",
+        "foreignKey": "permission_id"
+      }
+    ]
+  },
+  "Role": {
+    "tableName": "ms_roles",
+    "attributes": {
+      "role_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "role_name": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "role_code": {
+        "type": "VARCHAR(30)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_system_role": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsToMany",
+        "targetModel": "Permission",
+        "as": "permissions",
+        "foreignKey": "role_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "AdminUser",
+        "as": "users",
+        "foreignKey": "role_id"
+      }
+    ]
+  },
+  "RolePermission": {
+    "tableName": "ms_role_permissions",
+    "attributes": {
+      "role_permission_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "role_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": "ms_role_permissions_permission_id_role_id_unique",
+        "references": {
+          "model": "ms_roles",
+          "key": "role_id"
+        }
+      },
+      "permission_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": "ms_role_permissions_permission_id_role_id_unique",
+        "references": {
+          "model": "ms_permissions",
+          "key": "permission_id"
+        }
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "ApplicantMaster": {
+    "tableName": "ms_applicant_master",
+    "attributes": {
+      "applicant_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_no": {
+        "type": "VARCHAR(20)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "email": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mobile_no": {
+        "type": "VARCHAR(15)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "password_hash": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_verified": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "failed_login_attempts": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "locked_until": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "activation_token": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "activation_token_expires_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "email_verified_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "password_reset_token": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "password_reset_token_expires_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "last_login_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "last_login_ip": {
+        "type": "VARCHAR(45)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasOne",
+        "targetModel": "ApplicantPersonal",
+        "as": "personal",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasOne",
+        "targetModel": "ApplicantAddress",
+        "as": "address",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantEducation",
+        "as": "education",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantExperience",
+        "as": "experience",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantSkill",
+        "as": "skills",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantDocument",
+        "as": "documents",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "Application",
+        "as": "applications",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAcknowledgement",
+        "as": "acknowledgements",
+        "foreignKey": "applicant_id"
+      }
+    ]
+  },
+  "AdminUser": {
+    "tableName": "ms_admin_users",
+    "attributes": {
+      "admin_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "username": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "password_hash": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "full_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "email": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mobile_no": {
+        "type": "VARCHAR(15)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "role_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "roles",
+          "key": "role_id"
+        }
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "district_master",
+          "key": "district_id"
+        }
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "admin_users",
+          "key": "admin_id"
+        }
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "last_login": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "password_reset_token": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "password_reset_token_expires_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "failed_login_attempts": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "account_locked_until": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "last_login_ip": {
+        "type": "VARCHAR(45)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "Role",
+        "as": "role",
+        "foreignKey": "role_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "creator",
+        "foreignKey": "created_by"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "AdminUser",
+        "as": "createdUsers",
+        "foreignKey": "created_by"
+      }
+    ]
+  },
+  "ApplicantPersonal": {
+    "tableName": "ms_applicant_personal",
+    "attributes": {
+      "personal_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "full_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "dob": {
+        "type": "DATE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "age": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "gender": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "category": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "category_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "category_master",
+          "key": "category_id"
+        }
+      },
+      "domicile_maharashtra": {
+        "type": "BOOLEAN",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "aadhar_no": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "pan_no": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "father_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mother_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "marital_status": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "photo_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "aadhaar_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "pan_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "resume_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "domicile_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "signature_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "CategoryMaster",
+        "as": "categoryMaster",
+        "foreignKey": "category_id"
+      }
+    ]
+  },
+  "ApplicantAddress": {
+    "tableName": "ms_applicant_address",
+    "attributes": {
+      "address_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "address_line": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "address_line2": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "district_master",
+          "key": "district_id"
+        }
+      },
+      "taluka_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "taluka_master",
+          "key": "taluka_id"
+        }
+      },
+      "pincode": {
+        "type": "VARCHAR(10)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "permanent_address_same": {
+        "type": "BOOLEAN",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "permanent_address_line": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "permanent_address_line2": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "permanent_district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_district_master",
+          "key": "district_id"
+        }
+      },
+      "permanent_taluka_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_taluka_master",
+          "key": "taluka_id"
+        }
+      },
+      "permanent_pincode": {
+        "type": "VARCHAR(10)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "TalukaMaster",
+        "as": "taluka",
+        "foreignKey": "taluka_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "permanentDistrict",
+        "foreignKey": "permanent_district_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "TalukaMaster",
+        "as": "permanentTaluka",
+        "foreignKey": "permanent_taluka_id"
+      }
+    ]
+  },
+  "ApplicantEducation": {
+    "tableName": "ms_applicant_education",
+    "attributes": {
+      "education_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "education_level_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "education_levels",
+          "key": "level_id"
+        }
+      },
+      "stream_subject": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "qualification_level": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "degree_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "specialization": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "university_board": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "passing_year": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "percentage": {
+        "type": "DECIMAL(5,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "certificate_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "EducationLevel",
+        "as": "educationLevel",
+        "foreignKey": "education_level_id"
+      }
+    ]
+  },
+  "ApplicantExperience": {
+    "tableName": "ms_applicant_experience",
+    "attributes": {
+      "experience_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "organization_name": {
+        "type": "VARCHAR(200)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "designation": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "domain_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "experience_domains",
+          "key": "id"
+        }
+      },
+      "work_domain": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "employer_type": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_relevant_for_eligibility": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "total_months": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "start_date": {
+        "type": "DATE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "end_date": {
+        "type": "DATE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_current": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "certificate_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "ExperienceDomain",
+        "as": "domain",
+        "foreignKey": "domain_id"
+      }
+    ]
+  },
+  "ApplicantSkill": {
+    "tableName": "ms_applicant_skills",
+    "attributes": {
+      "applicant_skill_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "skill_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_skill_master",
+          "key": "skill_id"
+        }
+      },
+      "notes": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "certificate_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "ApplicantMaster",
+        "as": "applicant",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "SkillMaster",
+        "as": "skill",
+        "foreignKey": "skill_id"
+      }
+    ]
+  },
+  "ApplicantDocument": {
+    "tableName": "ms_applicant_documents",
+    "attributes": {
+      "document_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "doc_type_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "document_types",
+          "key": "doc_type_id"
+        }
+      },
+      "doc_type": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "file_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "original_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "file_size": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mime_type": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_verified": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verified_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verified_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "DocumentType",
+        "as": "documentType",
+        "foreignKey": "doc_type_id"
+      }
+    ]
+  },
+  "Application": {
+    "tableName": "ms_applications",
+    "attributes": {
+      "application_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "post_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "post_master",
+          "key": "post_id"
+        }
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "district_master",
+          "key": "district_id"
+        }
+      },
+      "application_no": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "status": {
+        "type": "VARCHAR(50)",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_locked": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "declaration_accepted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "submitted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "gender": {
+        "type": "VARCHAR(10)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "date_of_birth": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "aadhaar_number": {
+        "type": "VARCHAR(12)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "address_line1": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "address_line2": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "city": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "state": {
+        "type": "VARCHAR(100)",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "pincode": {
+        "type": "VARCHAR(6)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_local_resident": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "local_resident_proof_type": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "local_resident_years": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "system_eligibility": {
+        "type": "BOOLEAN",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "system_eligibility_reason": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "admin_eligibility_override": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "admin_eligibility_decision": {
+        "type": "VARCHAR(20)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "document_verified": {
+        "type": "BOOLEAN",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verified_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "admin_users",
+          "key": "admin_id"
+        }
+      },
+      "verified_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verification_remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "rejection_reason": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "merit_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "eligibility_checked_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "selection_status": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "selected_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "auto_rejected_reason": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "ApplicantMaster",
+        "as": "applicant",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "PostMaster",
+        "as": "post",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "verifier",
+        "foreignKey": "verified_by"
+      },
+      {
+        "type": "HasOne",
+        "targetModel": "EligibilityResult",
+        "as": "eligibility",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "HasOne",
+        "targetModel": "MeritList",
+        "as": "merit",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicationStatusHistory",
+        "as": "statusHistory",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAcknowledgement",
+        "as": "acknowledgements",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "DocumentVerification",
+        "as": "documentVerifications",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicationStageHistory",
+        "as": "stageHistory",
+        "foreignKey": "application_id"
+      }
+    ]
+  },
+  "EligibilityResult": {
+    "tableName": "ms_eligibility_results",
+    "attributes": {
+      "eligibility_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applications",
+          "key": "application_id"
+        }
+      },
+      "is_eligible": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "eligibility_status": {
+        "type": "VARCHAR(20)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "rejection_reasons": {
+        "type": "JSONB",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "checked_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "checked_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "MeritList": {
+    "tableName": "ms_merit_lists",
+    "attributes": {
+      "merit_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applications",
+          "key": "application_id"
+        }
+      },
+      "post_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "post_master",
+          "key": "post_id"
+        }
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "district_master",
+          "key": "district_id"
+        }
+      },
+      "score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "rank": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "category_rank": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "education_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "marks_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "experience_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "age_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "local_preference_score": {
+        "type": "DECIMAL(10,2)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_local_candidate": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "selection_status": {
+        "type": "VARCHAR(30)",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "generated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "generated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      }
+    ]
+  },
+  "ApplicationStatusHistory": {
+    "tableName": "ms_application_status_history",
+    "attributes": {
+      "history_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_applications",
+          "key": "application_id"
+        }
+      },
+      "old_status": {
+        "type": "VARCHAR(30)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "new_status": {
+        "type": "VARCHAR(30)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "changed_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_admin_users",
+          "key": "admin_id"
+        }
+      },
+      "changed_by_type": {
+        "type": "VARCHAR(20)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "metadata": {
+        "type": "JSONB",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "Application",
+        "as": "application",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "changedByUser",
+        "foreignKey": "changed_by"
+      }
+    ]
+  },
+  "Component": {
+    "tableName": "ms_components",
+    "attributes": {
+      "component_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "component_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "component_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "component_name_mr": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_district_master",
+          "key": "district_id"
+        }
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostMaster",
+        "as": "posts",
+        "foreignKey": "component_id"
+      }
+    ]
+  },
+  "Department": {
+    "tableName": "ms_departments",
+    "attributes": {
+      "department_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "department_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "department_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "department_name_mr": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "DistrictMaster": {
+    "tableName": "ms_district_master",
+    "attributes": {
+      "district_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "district_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "district_name_mr": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "AdminUser",
+        "as": "admins",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "TalukaMaster",
+        "as": "talukas",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAddress",
+        "as": "applicantAddresses",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAddress",
+        "as": "permanentApplicantAddresses",
+        "foreignKey": "permanent_district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "Application",
+        "as": "applications",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "Component",
+        "as": "components",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostMaster",
+        "as": "posts",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "MeritList",
+        "as": "meritLists",
+        "foreignKey": "district_id"
+      }
+    ]
+  },
+  "SkillMaster": {
+    "tableName": "ms_skill_master",
+    "attributes": {
+      "skill_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "skill_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "skill_name_mr": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantSkill",
+        "as": "applicantSkills",
+        "foreignKey": "skill_id"
+      }
+    ]
+  },
+  "TalukaMaster": {
+    "tableName": "ms_taluka_master",
+    "attributes": {
+      "taluka_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "taluka_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "taluka_name_mr": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "district_master",
+          "key": "district_id"
+        }
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAddress",
+        "as": "applicantAddresses",
+        "foreignKey": "taluka_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantAddress",
+        "as": "permanentApplicantAddresses",
+        "foreignKey": "permanent_taluka_id"
+      }
+    ]
+  },
+  "PostMaster": {
+    "tableName": "ms_post_master",
+    "attributes": {
+      "post_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "post_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "post_name_mr": {
+        "type": "VARCHAR(200)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "min_qualification": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "min_experience_months": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "district_specific": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "component_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "components",
+          "key": "component_id"
+        }
+      },
+      "district_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_district_master",
+          "key": "district_id"
+        }
+      },
+      "post_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "eligibility_criteria": {
+        "type": "JSONB",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "required_domains": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "required_stream_group": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "min_experience_years": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "min_education_level_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "education_levels",
+          "key": "level_id"
+        }
+      },
+      "max_education_level_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "education_levels",
+          "key": "level_id"
+        }
+      },
+      "experience_domain_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_experience_domains",
+          "key": "id"
+        }
+      },
+      "min_age": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "max_age": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "female_only": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "local_resident_required": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "local_resident_preferred": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "counselling_experience_required": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "computer_proficiency_required": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "education_text": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "experience_text": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "opening_date": {
+        "type": "DATE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "closing_date": {
+        "type": "DATE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "total_positions": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "filled_positions": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_state_level": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_closed": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "closed_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "closed_by": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "Component",
+        "as": "component",
+        "foreignKey": "component_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "EducationLevel",
+        "as": "minEducationLevel",
+        "foreignKey": "min_education_level_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "ExperienceDomain",
+        "as": "experienceDomain",
+        "foreignKey": "experience_domain_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DistrictMaster",
+        "as": "district",
+        "foreignKey": "district_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostDocumentRequirement",
+        "as": "documentRequirements",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "HasOne",
+        "targetModel": "PostAllotmentUpload",
+        "as": "allotmentUpload",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "BelongsToMany",
+        "targetModel": "CategoryMaster",
+        "as": "allowedCategories",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostCategory",
+        "as": "postCategories",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "EducationLevel",
+        "as": "maxEducationLevel",
+        "foreignKey": "max_education_level_id"
+      }
+    ]
+  },
+  "DocumentType": {
+    "tableName": "ms_document_types",
+    "attributes": {
+      "doc_type_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "doc_type_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "doc_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "doc_type_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "doc_type_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_mandatory": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_mandatory_for_all": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "required_for_eligibility": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "check_against": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "field_linked_to": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "allowed_formats": {
+        "type": "VARCHAR(100)",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "allowed_file_types": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "max_size_mb": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "max_file_size_mb": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "multiple_files_allowed": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "EducationLevel",
+        "as": "educationLevels",
+        "foreignKey": "doc_type_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ExperienceDomain",
+        "as": "experienceDomains",
+        "foreignKey": "doc_type_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostDocumentRequirement",
+        "as": "postRequirements",
+        "foreignKey": "doc_type_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantDocument",
+        "as": "applicantDocuments",
+        "foreignKey": "doc_type_id"
+      }
+    ]
+  },
+  "ApplicationStatus": {
+    "tableName": "ms_application_statuses",
+    "attributes": {
+      "status_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "status_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "status_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "status_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "EducationLevel": {
+    "tableName": "ms_education_levels",
+    "attributes": {
+      "level_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "doc_type_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_document_types",
+          "key": "doc_type_id"
+        }
+      },
+      "level_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "level_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "level_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "level_category": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "PostMaster",
+        "as": "posts",
+        "foreignKey": "min_education_level_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DocumentType",
+        "as": "documentType",
+        "foreignKey": "doc_type_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantEducation",
+        "as": "applicantEducations",
+        "foreignKey": "education_level_id"
+      }
+    ]
+  },
+  "AuditLog": {
+    "tableName": "ms_audit_log",
+    "attributes": {
+      "log_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "user_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "user_type": {
+        "type": "VARCHAR(20)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "action": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "entity_type": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "entity_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "details": {
+        "type": "JSONB",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "ip_address": {
+        "type": "INET",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "NotificationLog": {
+    "tableName": "ms_notification_log",
+    "attributes": {
+      "notification_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "admin_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "admin_users",
+          "key": "admin_id"
+        }
+      },
+      "channel": {
+        "type": "VARCHAR(20)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "message": {
+        "type": "TEXT",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "status": {
+        "type": "VARCHAR(20)",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "sent_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "OtpLog": {
+    "tableName": "ms_otp_logs",
+    "attributes": {
+      "otp_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "mobile_no": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "otp_hash": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "purpose": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "expires_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "attempts": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_verified": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verified_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "RefreshToken": {
+    "tableName": "ms_refresh_tokens",
+    "attributes": {
+      "token_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "user_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "user_type": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "token_hash": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "expires_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_revoked": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "device_info": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "ip_address": {
+        "type": "INET",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "revoked_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "LoginAttempt": {
+    "tableName": "ms_login_attempts",
+    "attributes": {
+      "attempt_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "mobile_or_username": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "user_type": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "attempt_time": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "success": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "ip_address": {
+        "type": "INET",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "locked_until": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "BannerMaster": {
+    "tableName": "ms_banner_master",
+    "attributes": {
+      "banner_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "banner_image_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "banner_image_path_mr": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "CategoryMaster": {
+    "tableName": "ms_category_master",
+    "attributes": {
+      "category_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "category_code": {
+        "type": "VARCHAR(20)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "category_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "category_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantPersonal",
+        "as": "applicants",
+        "foreignKey": "category_id"
+      },
+      {
+        "type": "BelongsToMany",
+        "targetModel": "PostMaster",
+        "as": "posts",
+        "foreignKey": "category_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "PostCategory",
+        "as": "categoryPosts",
+        "foreignKey": "category_id"
+      }
+    ]
+  },
+  "PostCategory": {
+    "tableName": "ms_post_categories",
+    "attributes": {
+      "id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "post_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": "ms_post_categories_category_id_post_id_unique",
+        "references": {
+          "model": "ms_post_master",
+          "key": "post_id"
+        }
+      },
+      "category_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": "ms_post_categories_category_id_post_id_unique",
+        "references": {
+          "model": "ms_category_master",
+          "key": "category_id"
+        }
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "PostMaster",
+        "as": "post",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "CategoryMaster",
+        "as": "category",
+        "foreignKey": "category_id"
+      }
+    ]
+  },
+  "PostAllotmentUpload": {
+    "tableName": "ms_post_allotment_uploads",
+    "attributes": {
+      "upload_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "post_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_post_master",
+          "key": "post_id"
+        }
+      },
+      "file_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "original_name": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "file_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "file_size": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mime_type": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "PostMaster",
+        "as": "post",
+        "foreignKey": "post_id"
+      }
+    ]
+  },
+  "ExperienceDomain": {
+    "tableName": "ms_experience_domains",
+    "attributes": {
+      "id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "doc_type_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_document_types",
+          "key": "doc_type_id"
+        }
+      },
+      "domain_code": {
+        "type": "VARCHAR(30)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "domain_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "domain_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description_mr": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_deleted": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "deleted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "HasMany",
+        "targetModel": "PostMaster",
+        "as": "posts",
+        "foreignKey": "experience_domain_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DocumentType",
+        "as": "documentType",
+        "foreignKey": "doc_type_id"
+      },
+      {
+        "type": "HasMany",
+        "targetModel": "ApplicantExperience",
+        "as": "experiences",
+        "foreignKey": "domain_id"
+      }
+    ]
+  },
+  "StreamGroup": {
+    "tableName": "ms_stream_groups",
+    "attributes": {
+      "id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "group_code": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "group_name": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "group_name_mr": {
+        "type": "VARCHAR(100)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "streams": {
+        "type": "TEXT[]",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "PostDocumentRequirement": {
+    "tableName": "ms_post_document_requirements",
+    "attributes": {
+      "id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "post_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "post_master",
+          "key": "id"
+        }
+      },
+      "doc_type_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "document_types",
+          "key": "id"
+        }
+      },
+      "requirement_type": {
+        "type": "VARCHAR(1)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mandatory_at_application": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "mandatory_before_engagement": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "PostMaster",
+        "as": "post",
+        "foreignKey": "post_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "DocumentType",
+        "as": "documentType",
+        "foreignKey": "doc_type_id"
+      }
+    ]
+  },
+  "RejectionReason": {
+    "tableName": "ms_rejection_reasons",
+    "attributes": {
+      "id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "reason_code": {
+        "type": "VARCHAR(30)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": true,
+        "references": null
+      },
+      "reason_text": {
+        "type": "VARCHAR(200)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "reason_text_mr": {
+        "type": "VARCHAR(200)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "description": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "category": {
+        "type": "VARCHAR(50)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "display_order": {
+        "type": "INTEGER",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "is_active": {
+        "type": "BOOLEAN",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": []
+  },
+  "ApplicantAcknowledgement": {
+    "tableName": "ms_applicant_acknowledgements",
+    "attributes": {
+      "acknowledgement_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "applicant_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_applicant_master",
+          "key": "applicant_id"
+        }
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_applications",
+          "key": "application_id"
+        }
+      },
+      "action_type": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "checkbox_code": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "checkbox_label": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "accepted_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "ip_address": {
+        "type": "VARCHAR(45)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "user_agent": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "place": {
+        "type": "VARCHAR(255)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "ApplicantMaster",
+        "as": "applicant",
+        "foreignKey": "applicant_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "Application",
+        "as": "application",
+        "foreignKey": "application_id"
+      }
+    ]
+  },
+  "DocumentVerification": {
+    "tableName": "ms_document_verifications",
+    "attributes": {
+      "verification_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_applications",
+          "key": "application_id"
+        }
+      },
+      "document_type": {
+        "type": "VARCHAR(100)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "document_reference_id": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "document_path": {
+        "type": "VARCHAR(500)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verification_status": {
+        "type": "VARCHAR(20)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "verified_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_admin_users",
+          "key": "admin_id"
+        }
+      },
+      "verified_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "updated_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "Application",
+        "as": "application",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "verifier",
+        "foreignKey": "verified_by"
+      }
+    ]
+  },
+  "ApplicationStageHistory": {
+    "tableName": "ms_application_stage_history",
+    "attributes": {
+      "stage_history_id": {
+        "type": "INTEGER",
+        "primaryKey": true,
+        "autoIncrement": true,
+        "unique": false,
+        "references": null
+      },
+      "application_id": {
+        "type": "INTEGER",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_applications",
+          "key": "application_id"
+        }
+      },
+      "stage": {
+        "type": "VARCHAR(50)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "entered_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "exited_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "entered_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_admin_users",
+          "key": "admin_id"
+        }
+      },
+      "entered_by_type": {
+        "type": "VARCHAR(20)",
+        "allowNull": false,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "exited_by": {
+        "type": "INTEGER",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": {
+          "model": "ms_admin_users",
+          "key": "admin_id"
+        }
+      },
+      "exited_by_type": {
+        "type": "VARCHAR(20)",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "remarks": {
+        "type": "TEXT",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "metadata": {
+        "type": "JSONB",
+        "allowNull": true,
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      },
+      "created_at": {
+        "type": "TIMESTAMP WITH TIME ZONE",
+        "primaryKey": false,
+        "autoIncrement": false,
+        "unique": false,
+        "references": null
+      }
+    },
+    "associations": [
+      {
+        "type": "BelongsTo",
+        "targetModel": "Application",
+        "as": "application",
+        "foreignKey": "application_id"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "enteredByUser",
+        "foreignKey": "entered_by"
+      },
+      {
+        "type": "BelongsTo",
+        "targetModel": "AdminUser",
+        "as": "exitedByUser",
+        "foreignKey": "exited_by"
+      }
+    ]
+  }
+}

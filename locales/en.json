@@ -1,0 +1,80 @@
+{
+  "common": {
+    "success": "Success",
+    "error": "Error",
+    "created": "Created successfully",
+    "updated": "Updated successfully",
+    "deleted": "Deleted successfully",
+    "notFound": "Not found",
+    "unauthorized": "Unauthorized access",
+    "forbidden": "Forbidden",
+    "invalidInput": "Invalid input",
+    "serverError": "Internal server error"
+  },
+  "auth": {
+    "loginSuccess": "Login successful",
+    "logoutSuccess": "Logout successful",
+    "registrationSuccess": "Registration successful",
+    "invalidCredentials": "Invalid credentials",
+    "accountLocked": "Account is locked. Please try again later.",
+    "emailVerified": "Email verified successfully",
+    "otpSent": "OTP sent to your email",
+    "otpInvalid": "Invalid or expired OTP",
+    "passwordReset": "Password reset successful",
+    "passwordChanged": "Password changed successfully"
+  },
+  "validation": {
+    "required": "{{field}} is required",
+    "invalid": "Invalid {{field}}",
+    "minLength": "{{field}} must be at least {{min}} characters",
+    "maxLength": "{{field}} must not exceed {{max}} characters",
+    "email": "Invalid email address",
+    "mobile": "Invalid mobile number",
+    "password": "Password must contain at least 8 characters, one uppercase, one lowercase, and one number",
+    "confirmPassword": "Passwords do not match",
+    "fileSize": "File size must not exceed {{size}}MB",
+    "fileType": "Invalid file type. Allowed types: {{types}}"
+  },
+  "applicant": {
+    "profileIncomplete": "Please complete your profile before applying",
+    "alreadyApplied": "You have already applied to this post",
+    "applicationSubmitted": "Application submitted successfully. Your application number is {{applicationNo}}",
+    "applicationWithdrawn": "Application withdrawn successfully",
+    "documentUploaded": "Document uploaded successfully",
+    "documentDeleted": "Document deleted successfully"
+  },
+  "admin": {
+    "userCreated": "User created successfully",
+    "userUpdated": "User updated successfully",
+    "userDeleted": "User deleted successfully",
+    "roleAssigned": "Role assigned successfully",
+    "permissionAssigned": "Permission assigned successfully",
+    "postCreated": "Post created successfully",
+    "postPublished": "Post published successfully",
+    "postClosed": "Post closed successfully",
+    "statusUpdated": "Status updated successfully"
+  },
+  "status": {
+    "DRAFT": "Draft",
+    "SUBMITTED": "Submitted",
+    "UNDER_REVIEW": "Under Review",
+    "DOCUMENTS_VERIFIED": "Documents Verified",
+    "ELIGIBLE": "Eligible",
+    "NOT_ELIGIBLE": "Not Eligible",
+    "SHORTLISTED": "Shortlisted",
+    "SELECTED": "Selected",
+    "REJECTED": "Rejected",
+    "WITHDRAWN": "Withdrawn"
+  },
+  "docTypes": {
+    "PHOTO": "Passport Photo",
+    "SIGNATURE": "Signature",
+    "AADHAR": "Aadhar Card",
+    "PAN": "PAN Card",
+    "DOMICILE": "Domicile Certificate",
+    "EDUCATION": "Education Certificate",
+    "EXPERIENCE": "Experience Certificate",
+    "CASTE": "Caste Certificate",
+    "DISABILITY": "Disability Certificate"
+  }
+}

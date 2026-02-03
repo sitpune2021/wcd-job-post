@@ -1,0 +1,80 @@
+{
+  "common": {
+    "success": "यशस्वी",
+    "error": "त्रुटी",
+    "created": "यशस्वीरित्या तयार केले",
+    "updated": "यशस्वीरित्या अद्यतनित केले",
+    "deleted": "यशस्वीरित्या हटवले",
+    "notFound": "सापडले नाही",
+    "unauthorized": "अनधिकृत प्रवेश",
+    "forbidden": "निषिद्ध",
+    "invalidInput": "अवैध इनपुट",
+    "serverError": "अंतर्गत सर्व्हर त्रुटी"
+  },
+  "auth": {
+    "loginSuccess": "लॉगिन यशस्वी",
+    "logoutSuccess": "लॉगआउट यशस्वी",
+    "registrationSuccess": "नोंदणी यशस्वी",
+    "invalidCredentials": "अवैध क्रेडेन्शियल्स",
+    "accountLocked": "खाते लॉक आहे. कृपया नंतर पुन्हा प्रयत्न करा.",
+    "emailVerified": "ईमेल यशस्वीरित्या सत्यापित",
+    "otpSent": "तुमच्या ईमेलवर OTP पाठवला",
+    "otpInvalid": "अवैध किंवा कालबाह्य OTP",
+    "passwordReset": "पासवर्ड रीसेट यशस्वी",
+    "passwordChanged": "पासवर्ड यशस्वीरित्या बदलला"
+  },
+  "validation": {
+    "required": "{{field}} आवश्यक आहे",
+    "invalid": "अवैध {{field}}",
+    "minLength": "{{field}} किमान {{min}} वर्ण असणे आवश्यक आहे",
+    "maxLength": "{{field}} {{max}} वर्णांपेक्षा जास्त नसावे",
+    "email": "अवैध ईमेल पत्ता",
+    "mobile": "अवैध मोबाइल नंबर",
+    "password": "पासवर्डमध्ये किमान 8 वर्ण, एक मोठे अक्षर, एक लहान अक्षर आणि एक संख्या असणे आवश्यक आहे",
+    "confirmPassword": "पासवर्ड जुळत नाहीत",
+    "fileSize": "फाइलचा आकार {{size}}MB पेक्षा जास्त नसावा",
+    "fileType": "अवैध फाइल प्रकार. परवानगी असलेले प्रकार: {{types}}"
+  },
+  "applicant": {
+    "profileIncomplete": "कृपया अर्ज करण्यापूर्वी तुमचे प्रोफाइल पूर्ण करा",
+    "alreadyApplied": "तुम्ही या पदासाठी आधीच अर्ज केला आहे",
+    "applicationSubmitted": "अर्ज यशस्वीरित्या सबमिट केला. तुमचा अर्ज क्रमांक {{applicationNo}} आहे",
+    "applicationWithdrawn": "अर्ज यशस्वीरित्या मागे घेतला",
+    "documentUploaded": "दस्तऐवज यशस्वीरित्या अपलोड केला",
+    "documentDeleted": "दस्तऐवज यशस्वीरित्या हटवला"
+  },
+  "admin": {
+    "userCreated": "वापरकर्ता यशस्वीरित्या तयार केला",
+    "userUpdated": "वापरकर्ता यशस्वीरित्या अद्यतनित केला",
+    "userDeleted": "वापरकर्ता यशस्वीरित्या हटवला",
+    "roleAssigned": "भूमिका यशस्वीरित्या नियुक्त केली",
+    "permissionAssigned": "परवानगी यशस्वीरित्या नियुक्त केली",
+    "postCreated": "पद यशस्वीरित्या तयार केले",
+    "postPublished": "पद यशस्वीरित्या प्रकाशित केले",
+    "postClosed": "पद यशस्वीरित्या बंद केले",
+    "statusUpdated": "स्थिती यशस्वीरित्या अद्यतनित केली"
+  },
+  "status": {
+    "DRAFT": "मसुदा",
+    "SUBMITTED": "सबमिट केले",
+    "UNDER_REVIEW": "पुनरावलोकनाधीन",
+    "DOCUMENTS_VERIFIED": "कागदपत्रे सत्यापित",
+    "ELIGIBLE": "पात्र",
+    "NOT_ELIGIBLE": "अपात्र",
+    "SHORTLISTED": "शॉर्टलिस्ट केले",
+    "SELECTED": "निवडले",
+    "REJECTED": "नाकारले",
+    "WITHDRAWN": "मागे घेतले"
+  },
+  "docTypes": {
+    "PHOTO": "पासपोर्ट फोटो",
+    "SIGNATURE": "स्वाक्षरी",
+    "AADHAR": "आधार कार्ड",
+    "PAN": "पॅन कार्ड",
+    "DOMICILE": "अधिवास प्रमाणपत्र",
+    "EDUCATION": "शैक्षणिक प्रमाणपत्र",
+    "EXPERIENCE": "अनुभव प्रमाणपत्र",
+    "CASTE": "जात प्रमाणपत्र",
+    "DISABILITY": "अपंगत्व प्रमाणपत्र"
+  }
+}
