@@ -726,22 +726,37 @@ router.post('/applications', auditLog('CREATE_APPLICATION'), async (req, res, ne
   }
 });
 
-// to make both action in 1 api
+// ============================================================================
+// PAYMENT INTEGRATION - APPLICATION SUBMISSION WITH RAZORPAY
+// ============================================================================
+
 /**
  * @route POST /api/v1/applicant/applications/apply
- * @desc Create draft (if needed) and submit application in a single call
+ * @desc Step 1: Validate application and handle payment requirement
+ *       - If payment required: Creates Razorpay order, stores data in payment metadata, returns payment details
+ *       - If no payment: Directly creates application + acknowledgement in transaction
  * @access Private (Applicant)
+ * @body {number} post_id - Post ID
+ * @body {number} district_id - District ID (optional)
+ * @body {boolean} declaration_accepted - Declaration acceptance (required)
+ * @body {string} place - Place of submission (required)
+ * @returns {Object} Payment order details OR completed application
  */
-router.post('/applications/apply', auditLog('APPLY_AND_SUBMIT_APPLICATION'), async (req, res, next) => {
+router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, res, next) => {
   try {
     const { post_id, district_id, declaration_accepted, place } = req.body;
 
+    // === VALIDATION: Required Fields ===
     if (!post_id) {
       throw new ApiError(400, 'Post ID is required');
     }
 
     if (!declaration_accepted) {
       throw new ApiError(400, 'You must accept the declaration to submit the application');
+    }
+
+    if (!place || !place.trim()) {
+      throw new ApiError(400, 'Place is required');
     }
 
     // STEP 1: Check application restrictions (post name, OSC, district limits)
@@ -755,75 +770,369 @@ router.post('/applications/apply', auditLog('APPLY_AND_SUBMIT_APPLICATION'), asy
       });
     }
 
-    // STEP 2: Check profile completion first (MUST be 100%)
+    // STEP 2: Check profile completion (MUST be 100%)
     const completion = await eligibilityService.getProfileCompletion(req.user.applicant_id);
     if (!completion.canApply) {
       return res.status(400).json({
         success: false,
         message: 'Profile incomplete. Cannot apply.',
-        profileCompletion: completion
+        profileCompletion: completion,
+        code: 'PROFILE_INCOMPLETE'
       });
     }
 
     // STEP 3: Check eligibility for this specific post
     const eligibility = await eligibilityService.checkEligibility(req.user.applicant_id, post_id);
+    if (!eligibility.isEligible) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are not eligible for this post',
+        eligibility: eligibility,
+        code: 'NOT_ELIGIBLE'
+      });
+    }
 
-    // STEP 4: Check if applicant has uploaded required documents for this post
+    // === STEP 4: Check Required Documents ===
+    // All mandatory documents must be uploaded
     const docCheck = await eligibilityService.checkRequiredDocuments(req.user.applicant_id, post_id);
     if (!docCheck.complete) {
       return res.status(400).json({
         success: false,
         message: 'Required documents not uploaded',
         missingDocuments: docCheck.missing,
-        uploadedDocuments: docCheck.uploaded
+        uploadedDocuments: docCheck.uploaded,
+        code: 'DOCUMENTS_INCOMPLETE'
       });
     }
 
-    // STEP 5: Create draft if not exists (or reuse existing draft)
+    // === STEP 5: Get Post Details ===
     const db = require('../models');
-    const existing = await db.Application.findOne({
-      where: { applicant_id: req.user.applicant_id, post_id }
+    const paymentService = require('../services/paymentService');
+    
+    const post = await db.PostMaster.findByPk(post_id, {
+      attributes: ['post_id', 'post_name', 'district_id']
     });
 
-    let applicationId;
+    if (!post) {
+      throw new ApiError(404, 'Post not found');
+    }
 
-    if (existing) {
-      // Allow continuing an existing draft; block if already submitted/processed
-      const status = (existing.status || '').toString();
-      if (status === 'Draft') {
-        await existing.update({ status: 'DRAFT' });
-      }
+    const finalDistrictId = district_id || post.district_id;
 
-      if (status !== 'DRAFT' && status !== 'Draft') {
+    // === STEP 6: Check Payment Requirement ===
+    // Payment required only for distinct post names (max 2)
+    // Same post name in same district = FREE (no additional payment)
+    const paymentCheck = await paymentService.checkPaymentRequired(
+      req.user.applicant_id,
+      post_id,
+      post.post_name,
+      finalDistrictId
+    );
+
+    // === CASE A: PAYMENT REQUIRED ===
+    // Create Razorpay order and store application data in payment metadata
+    // Application will be created later in verify-payment API after payment success
+    if (paymentCheck.required) {
+      const paymentOrder = await paymentService.createPaymentOrder(
+        req.user.applicant_id,
+        post_id,
+        post.post_name,
+        finalDistrictId,
+        {
+          declaration_accepted,
+          place: place.trim(),
+          ip_address: req.ip,
+          user_agent: req.get('user-agent')
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Validation successful. Payment required.',
+        paymentRequired: true,
+        paymentOrder: {
+          razorpay_order_id: paymentOrder.razorpay_order_id,
+          amount: paymentOrder.amount,
+          breakdown: paymentOrder.breakdown,
+          razorpay_key_id: paymentOrder.razorpay_key_id
+        },
+        post: {
+          post_id: post.post_id,
+          post_name: post.post_name,
+          district_id: finalDistrictId
+        }
+      });
+    }
+
+    // === CASE B: NO PAYMENT REQUIRED ===
+    // Directly create application + acknowledgement in single transaction
+    // No need to call verify-payment API
+    const transaction = await db.sequelize.transaction();
+
+    try {
+      // Re-check eligibility (already validated above, but needed for application creation)
+      const eligibility = await eligibilityService.checkEligibility(req.user.applicant_id, post_id);
+      const docCheck = await eligibilityService.checkRequiredDocuments(req.user.applicant_id, post_id);
+
+      // Check if already applied to this post
+      const existing = await db.Application.findOne({
+        where: { applicant_id: req.user.applicant_id, post_id },
+        transaction
+      });
+
+      if (existing && existing.status !== 'DRAFT' && existing.status !== 'Draft') {
+        await transaction.rollback();
         throw new ApiError(400, 'You have already applied for this post');
       }
 
+      let applicationId;
+
+      if (existing) {
+        applicationId = existing.application_id;
+      } else {
+        // Create application within transaction
+        const created = await applicantService.createApplication(
+          req.user.applicant_id,
+          {
+            post_id,
+            district_id: finalDistrictId,
+            eligibility,
+            docCheck
+          },
+          transaction
+        );
+
+        applicationId = created?.application?.application_id;
+      }
+
+      if (!applicationId) {
+        await transaction.rollback();
+        throw new ApiError(500, 'Failed to create application');
+      }
+
+      // Submit application within transaction
+      const submitted = await applicantService.finalSubmitApplication(
+        req.user.applicant_id,
+        applicationId,
+        declaration_accepted,
+        {
+          ip_address: req.ip,
+          user_agent: req.get('user-agent'),
+          place: place.trim()
+        },
+        transaction
+      );
+
+      // Commit transaction
+      await transaction.commit();
+
+      return res.status(200).json({
+        ...submitted,
+        paymentRequired: false,
+        paymentStatus: 'NOT_REQUIRED'
+      });
+
+    } catch (txError) {
+      await transaction.rollback();
+      throw txError;
+    }
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// STEP 2: VERIFY PAYMENT AND COMPLETE APPLICATION SUBMISSION
+// ============================================================================
+
+/**
+ * @route POST /api/v1/applicant/applications/verify-payment
+ * @desc Step 2: Verify Razorpay payment and create application + acknowledgement in single transaction
+ *       All application data (declaration, place, etc.) is retrieved from payment metadata
+ * @access Private (Applicant)
+ * @body {string} razorpay_order_id - Razorpay order ID (required)
+ * @body {string} razorpay_payment_id - Razorpay payment ID (required)
+ * @body {string} razorpay_signature - Razorpay signature (required)
+ * @returns {Object} Completed application details
+ */
+router.post('/applications/verify-payment', auditLog('VERIFY_PAYMENT_AND_SUBMIT'), async (req, res, next) => {
+  const db = require('../models');
+  const paymentService = require('../services/paymentService');
+  let transaction;
+
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    // === VALIDATION: Required Payment Fields ===
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment details incomplete. All payment fields are required.',
+        code: 'PAYMENT_DETAILS_INCOMPLETE'
+      });
+    }
+
+    // === START DATABASE TRANSACTION ===
+    // All operations (payment update, application creation, acknowledgement) happen atomically
+    transaction = await db.sequelize.transaction();
+
+    // === STEP 1: Find Payment Record ===
+    const payment = await db.Payment.findOne({
+      where: {
+        razorpay_order_id: razorpay_order_id,
+        applicant_id: req.user.applicant_id,
+        is_deleted: false
+      },
+      transaction
+    });
+
+    if (!payment) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment order. Order not found or does not belong to you.',
+        code: 'INVALID_PAYMENT_ORDER'
+      });
+    }
+
+    // === STEP 2: Check if Payment Already Processed ===
+    if (payment.payment_status === 'SUCCESS') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Payment already processed. Application may already be submitted.',
+        code: 'PAYMENT_ALREADY_PROCESSED'
+      });
+    }
+
+    // === STEP 3: Verify Payment Signature with Razorpay ===
+    const isValid = paymentService.verifyPaymentSignature(
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature
+    );
+
+    if (!isValid) {
+      // Mark payment as FAILED within transaction
+      await payment.update({
+        payment_status: 'FAILED',
+        failure_reason: 'Invalid payment signature - Razorpay verification failed'
+      }, { transaction });
+
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed. Invalid signature.',
+        code: 'PAYMENT_VERIFICATION_FAILED'
+      });
+    }
+
+    // === STEP 4: Update Payment Status to SUCCESS ===
+    await payment.update({
+      razorpay_payment_id: razorpay_payment_id,
+      razorpay_signature: razorpay_signature,
+      payment_status: 'SUCCESS',
+      paid_at: new Date()
+    }, { transaction });
+
+    // === STEP 5: Retrieve Application Data from Payment Metadata ===
+    // Data was stored during payment order creation in apply API
+    const applicationData = payment.metadata?.application_data || {};
+    const finalPostId = payment.post_id;
+    const finalDistrictId = payment.district_id;
+
+    // === STEP 6: Get Post Details ===
+    const post = await db.PostMaster.findByPk(finalPostId, {
+      attributes: ['post_id', 'post_name', 'district_id'],
+      transaction
+    });
+
+    if (!post) {
+      await transaction.rollback();
+      throw new ApiError(404, 'Post not found');
+    }
+
+    const finalDistrictIdResolved = finalDistrictId || post.district_id;
+
+    // === STEP 7: Re-check Eligibility ===
+    // Ensures applicant still meets requirements at time of submission
+    const eligibility = await eligibilityService.checkEligibility(req.user.applicant_id, finalPostId);
+    const docCheck = await eligibilityService.checkRequiredDocuments(req.user.applicant_id, finalPostId);
+
+    // === STEP 8: Check for Duplicate Application ===
+    const existing = await db.Application.findOne({
+      where: { applicant_id: req.user.applicant_id, post_id: finalPostId },
+      transaction
+    });
+
+    if (existing && existing.status !== 'DRAFT' && existing.status !== 'Draft') {
+      await transaction.rollback();
+      throw new ApiError(400, 'You have already applied for this post');
+    }
+
+    // === STEP 9: Create Application Record ===
+    let applicationId;
+
+    if (existing) {
+      // Reuse existing draft
       applicationId = existing.application_id;
     } else {
-      const created = await applicantService.createApplication(req.user.applicant_id, {
-        post_id,
-        district_id,
-        eligibility,
-        docCheck
-      });
+      // Create new application within transaction
+      const created = await applicantService.createApplication(
+        req.user.applicant_id,
+        {
+          post_id: finalPostId,
+          district_id: finalDistrictIdResolved,
+          eligibility,
+          docCheck
+        },
+        transaction
+      );
 
       applicationId = created?.application?.application_id;
     }
 
     if (!applicationId) {
+      await transaction.rollback();
       throw new ApiError(500, 'Failed to create application');
     }
 
-    // STEP 6: Submit draft
+    // === STEP 10: Link Payment to Application ===
+    await payment.update(
+      { application_id: applicationId },
+      { transaction }
+    );
+
+    // === STEP 11: Submit Application + Create Acknowledgement ===
+    // This creates the final application record and acknowledgement entry
     const submitted = await applicantService.finalSubmitApplication(
       req.user.applicant_id,
       applicationId,
-      true,
-      { ip_address: req.ip, user_agent: req.get('user-agent'), place }
+      applicationData.declaration_accepted || true,
+      {
+        ip_address: applicationData.ip_address,
+        user_agent: applicationData.user_agent,
+        place: applicationData.place
+      },
+      transaction
     );
 
-    return res.status(200).json(submitted);
+    // === COMMIT TRANSACTION ===
+    // All operations successful - payment verified, application created, acknowledgement saved
+    await transaction.commit();
+
+    return res.status(200).json({
+      ...submitted,
+      paymentStatus: 'PAID'
+    });
+
   } catch (error) {
+    // === ROLLBACK TRANSACTION ON ERROR ===
+    // Ensures no partial data is saved (payment, application, acknowledgement all rolled back)
+    if (transaction) {
+      await transaction.rollback();
+    }
     next(error);
   }
 });
@@ -948,6 +1257,29 @@ router.post('/applications/:id/pdf', auditLog('EXPORT_APPLICATION_PDF'), async (
       order: [['accepted_at', 'DESC'], ['acknowledgement_id', 'DESC']]
     });
 
+    // Fetch payment data for this application OR the original payment for same post_name + district_id
+    let payment = await db.Payment.findOne({
+      where: {
+        application_id: req.params.id,
+        payment_status: 'SUCCESS'
+      },
+      order: [['paid_at', 'DESC'], ['payment_id', 'DESC']]
+    });
+
+    // If no payment found for this application, find the original payment for same post_name + district_id
+    // (This happens when user applies to same post_name in same district but different OSC - free application)
+    if (!payment && application?.post_id && application?.district_id) {
+      payment = await db.Payment.findOne({
+        where: {
+          applicant_id: req.user.applicant_id,
+          post_name: application.post?.post_name,
+          district_id: application.district_id,
+          payment_status: 'SUCCESS'
+        },
+        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']] // Get the FIRST payment (original)
+      });
+    }
+
     const applicant = application?.applicant || {};
     const personal = applicant?.personal || {};
     const docs = Array.isArray(applicant?.documents) ? applicant.documents : [];
@@ -958,11 +1290,16 @@ router.post('/applications/:id/pdf', auditLog('EXPORT_APPLICATION_PDF'), async (
     const photoUrl = includeImages ? buildFileUrl(req, photoPath) : null;
     const signatureUrl = includeImages ? buildFileUrl(req, signaturePath) : null;
 
+    // Check if payment is from a different application (free application scenario)
+    const isFreeApplication = payment && payment.application_id !== parseInt(req.params.id);
+
     const html = buildApplicationPdfHtml(req, application, {
       includeImages,
       photoUrl,
       signatureUrl,
-      acknowledgement: acknowledgement ? acknowledgement.toJSON() : null
+      acknowledgement: acknowledgement ? acknowledgement.toJSON() : null,
+      payment: payment ? payment.toJSON() : null,
+      isFreeApplication
     });
 
     const safeNo = application?.application_no || application?.application_id || req.params.id;

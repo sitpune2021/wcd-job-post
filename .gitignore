@@ -51,3 +51,5 @@ coverage/
 # # PM2
 # .pm2/
 # ecosystem.config.js
+
+*.txt

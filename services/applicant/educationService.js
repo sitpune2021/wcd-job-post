@@ -38,8 +38,8 @@ const assertProfileEditable = async (applicantId) => {
  * @returns {Promise<Object>} - Created education record
  */
 const addEducation = async (applicantId, data, fileData = null) => {
-  const { 
-    education_level_id, qualification_level, degree_name, 
+  const {
+    education_level_id, qualification_level, degree_name, seatNumber,
     university_board, passing_year, percentage, specialization, stream_subject
   } = data;
 
@@ -64,6 +64,7 @@ const addEducation = async (applicantId, data, fileData = null) => {
       qualification_level,
       degree_name,
       university_board,
+      seatNumber,
       passing_year,
       percentage,
       specialization,

@@ -254,9 +254,10 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
  * Create draft application for a post
  * @param {number} applicantId - Applicant ID
  * @param {Object} data - Application data with eligibility
+ * @param {Object} transaction - Optional Sequelize transaction
  * @returns {Promise<Object>} - Created draft application
  */
-const createApplication = async (applicantId, data) => {
+const createApplication = async (applicantId, data, transaction = null) => {
   const { post_id, district_id, eligibility } = data;
 
   try {
@@ -349,7 +350,7 @@ const createApplication = async (applicantId, data) => {
       // Store eligibility result
       system_eligibility: eligibility?.isEligible || null,
       system_eligibility_reason: eligibility?.failedChecks?.join('; ') || null
-    });
+    }, transaction ? { transaction } : {});
 
     logger.info(`Draft application created for applicant: ${applicantId}, post: ${post_id}`);
 
@@ -358,7 +359,8 @@ const createApplication = async (applicantId, data) => {
       include: [
         { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
         { model: DistrictMaster, as: 'district' }
-      ]
+      ],
+      transaction
     });
 
     return {
@@ -377,9 +379,11 @@ const createApplication = async (applicantId, data) => {
  * @param {number} applicantId - Applicant ID
  * @param {number} applicationId - Application ID
  * @param {boolean} declarationAccepted - Whether declaration was accepted
+ * @param {Object} meta - Metadata (ip_address, user_agent, place)
+ * @param {Object} transaction - Optional Sequelize transaction
  * @returns {Promise<Object>} - Submitted application with eligibility result
  */
-const finalSubmitApplication = async (applicantId, applicationId, declarationAccepted, meta = {}) => {
+const finalSubmitApplication = async (applicantId, applicationId, declarationAccepted, meta = {}, transaction = null) => {
   try {
     // Find the draft application
     const application = await Application.findOne({
@@ -387,7 +391,8 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
         application_id: applicationId,
         applicant_id: applicantId,
         status: APPLICATION_STATUS.DRAFT
-      }
+      },
+      transaction
     });
 
     if (!application) {
@@ -438,7 +443,7 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
       system_eligibility: isEligible,
       system_eligibility_reason: eligibilityReason,
       eligibility_checked_at: submissionTimestamp
-    });
+    }, transaction ? { transaction } : {});
 
     // Store declaration acceptance as a durable acknowledgement record
     await ApplicantAcknowledgement.create({
@@ -451,23 +456,23 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
       ip_address: meta?.ip_address || null,
       user_agent: meta?.user_agent || null,
       place: meta?.place || null
-    });
+    }, transaction ? { transaction } : {});
 
     // Save eligibility result snapshot
-    let eligResult = await EligibilityResult.findOne({ where: { application_id: applicationId } });
+    let eligResult = await EligibilityResult.findOne({ where: { application_id: applicationId }, transaction });
     if (eligResult) {
       await eligResult.update({
         is_eligible: isEligible,
         eligibility_criteria: JSON.stringify(eligibilityResult.checks || []),
         checked_at: submissionTimestamp
-      });
+      }, transaction ? { transaction } : {});
     } else {
       eligResult = await EligibilityResult.create({
         application_id: applicationId,
         is_eligible: isEligible,
         eligibility_criteria: JSON.stringify(eligibilityResult.checks || []),
         checked_at: submissionTimestamp
-      });
+      }, transaction ? { transaction } : {});
     }
 
     // Record status history: DRAFT -> (submit) -> ELIGIBLE/NOT_ELIGIBLE
@@ -482,7 +487,7 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
       remarks: 'Declaration accepted and submitted',
       metadata: { submitted_at: submissionTimestamp, declaration_accepted: declarationAccepted },
       created_at: submissionTimestamp
-    });
+    }, transaction ? { transaction } : {});
 
     // Record eligibility result
     await db.ApplicationStatusHistory.create({
@@ -497,12 +502,10 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
         checked_at: submissionTimestamp
       },
       created_at: submissionTimestamp
-    });
+    }, transaction ? { transaction } : {});
 
-    // Calculate merit score if eligible
-    if (isEligible) {
-      await workflowService.calculateMeritScore(applicationId);
-    }
+    // NOTE: Merit score is NOT calculated here anymore - it's computed live when needed
+    // (e.g., in review/merit list pages) to avoid slowing down application submission
 
     logger.info(`Application ${applicationNo} submitted and processed: ${finalStatus} by applicant: ${applicantId}`);
 
@@ -512,7 +515,8 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
         { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
         { model: DistrictMaster, as: 'district' },
         { model: EligibilityResult, as: 'eligibility' }
-      ]
+      ],
+      transaction
     });
 
     return {

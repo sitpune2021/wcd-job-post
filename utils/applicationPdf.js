@@ -90,6 +90,8 @@ const buildApplicationPdfHtml = (req, application, options = {}) => {
   const photoUrl = options.photoUrl || null;
   const signatureUrl = options.signatureUrl || null;
   const acknowledgement = options.acknowledgement || null;
+  const payment = options.payment || null;
+  const isFreeApplication = options.isFreeApplication || false;
   const applicant = application?.applicant || {};
   const personal = applicant?.personal || {};
   const address = applicant?.address || {};
@@ -571,6 +573,79 @@ const buildApplicationPdfHtml = (req, application, options = {}) => {
         </tbody>
       </table>
     </div>
+
+    ${payment ? `
+    <div class="section">
+      <h2>पेमेंट तपशील</h2>
+      <!-- <h2>Payment Details</h2> -->
+      ${isFreeApplication ? `
+      <div style="background: #d1ecf1; border: 2px solid #0c5460; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+        <p style="margin: 0; font-size: 14px; font-weight: 600; color: #0c5460;">
+          <span style="font-size: 16px; margin-right: 6px;">ℹ</span>
+          <strong>मोफत अर्ज / Free Application</strong>
+        </p>
+        <p style="margin: 6px 0 0 0; font-size: 13px; color: #0c5460; line-height: 1.5;">
+          या अर्जासाठी पेमेंट आवश्यक नाही कारण तुम्ही याच जिल्ह्यात समान पदनामासाठी आधीच पेमेंट केले आहे. खालील तपशील तुमच्या मूळ पेमेंटचे आहेत.<br/>
+          <em>No payment required for this application as you have already paid for a similar post name in this district. Details below show your original payment.</em>
+        </p>
+      </div>
+      ` : ''}
+      <div class="payment-card" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 2px solid #28a745;">
+          <div>
+            <p style="margin: 0; font-size: 14px; color: #6c757d;">पेमेंट स्थिती / Payment Status</p>
+            <p style="margin: 4px 0 0 0; font-size: 18px; font-weight: 700; color: #28a745;">
+              <span style="display: inline-block; width: 10px; height: 10px; background: #28a745; border-radius: 50%; margin-right: 6px;"></span>
+              यशस्वी / SUCCESS
+            </p>
+          </div>
+          <div style="text-align: right;">
+            <p style="margin: 0; font-size: 14px; color: #6c757d;">${isFreeApplication ? 'मूळ पेमेंट तारीख / Original Payment Date' : 'पेमेंट तारीख / Payment Date'}</p>
+            <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: 600; color: #212529;">${escapeHtml(payment.paid_at ? fmtDateTimeAmPm(payment.paid_at).date : '-')}</p>
+            <p style="margin: 2px 0 0 0; font-size: 13px; color: #6c757d;">${escapeHtml(payment.paid_at ? fmtDateTimeAmPm(payment.paid_at).time : '-')}</p>
+          </div>
+        </div>
+
+        <table class="kv" style="margin-bottom: 12px;">
+          <tr>
+            <td class="key" style="width: 50%;">व्यवहार क्रमांक / Transaction ID</td>
+            <td style="font-family: monospace; font-size: 12px; color: #495057;">${escapeHtml(payment.razorpay_payment_id || payment.razorpay_order_id || '-')}</td>
+          </tr>
+          <tr>
+            <td class="key">ऑर्डर क्रमांक / Order ID</td>
+            <td style="font-family: monospace; font-size: 12px; color: #495057;">${escapeHtml(payment.razorpay_order_id || '-')}</td>
+          </tr>
+        </table>
+
+        <div style="background: white; border-radius: 6px; padding: 12px; border: 1px solid #e9ecef;">
+          <p style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600; color: #495057;">रक्कम तपशील / Amount Breakdown</p>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr style="border-bottom: 1px solid #e9ecef;">
+              <td style="padding: 6px 0; font-size: 13px; color: #6c757d;">मूळ शुल्क / Base Fee</td>
+              <td style="padding: 6px 0; text-align: right; font-size: 13px; font-weight: 500;">₹ ${escapeHtml(parseFloat(payment.base_fee || 0).toFixed(2))}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e9ecef;">
+              <td style="padding: 6px 0; font-size: 13px; color: #6c757d;">प्लॅटफॉर्म शुल्क / Platform Fee</td>
+              <td style="padding: 6px 0; text-align: right; font-size: 13px; font-weight: 500;">₹ ${escapeHtml(parseFloat(payment.platform_fee || 0).toFixed(2))}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e9ecef;">
+              <td style="padding: 6px 0; font-size: 13px; color: #6c757d;">CGST (9%)</td>
+              <td style="padding: 6px 0; text-align: right; font-size: 13px; font-weight: 500;">₹ ${escapeHtml(parseFloat(payment.cgst || 0).toFixed(2))}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e9ecef;">
+              <td style="padding: 6px 0; font-size: 13px; color: #6c757d;">SGST (9%)</td>
+              <td style="padding: 6px 0; text-align: right; font-size: 13px; font-weight: 500;">₹ ${escapeHtml(parseFloat(payment.sgst || 0).toFixed(2))}</td>
+            </tr>
+            <tr style="background: #f8f9fa;">
+              <td style="padding: 10px 8px; font-size: 15px; font-weight: 700; color: #212529;">एकूण रक्कम / Total Amount</td>
+              <td style="padding: 10px 8px; text-align: right; font-size: 16px; font-weight: 700; color: #28a745;">₹ ${escapeHtml(parseFloat(payment.amount || 0).toFixed(2))}</td>
+            </tr>
+          </table>
+        </div>
+
+      </div>
+    </div>
+    ` : ''}
 
     <div class="section page-break">
       <h2>घोषणापत्र</h2>

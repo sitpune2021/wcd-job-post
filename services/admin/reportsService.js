@@ -173,9 +173,50 @@ const getComponentWiseReport = async (filters = {}) => {
   return rows;
 };
 
+const getHubWiseReport = async (filters = {}) => {
+  const hubId = parseOptionalInt(filters.hub_id);
+  const districtId = parseOptionalInt(filters.district_id);
+
+  const rows = await db.sequelize.query(
+    `
+    SELECT
+      h.hub_id,
+      h.hub_name,
+      h.hub_name_mr,
+      COUNT(a.application_id) FILTER (
+        WHERE a.application_id IS NOT NULL
+          AND (:districtId IS NULL OR a.district_id = :districtId)
+      )::int AS application_count,
+      COUNT(a.application_id) FILTER (
+        WHERE a.application_id IS NOT NULL
+          AND a.status = 'SELECTED'
+          AND (:districtId IS NULL OR a.district_id = :districtId)
+      )::int AS selected_count
+    FROM ms_hub_master h
+    LEFT JOIN ms_post_master pm
+      ON pm.hub_id = h.hub_id
+     AND pm.is_deleted = false
+    LEFT JOIN ms_applications a
+      ON a.post_id = pm.post_id
+     AND a.is_deleted = false
+    WHERE h.is_deleted = false
+      AND (:hubId IS NULL OR h.hub_id = :hubId)
+    GROUP BY h.hub_id, h.hub_name, h.hub_name_mr
+    ORDER BY h.hub_name ASC
+    `,
+    {
+      replacements: { hubId, districtId },
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return rows;
+};
+
 module.exports = {
   getPostWiseReport,
   getPostSelectedCandidatesReport,
   getDistrictWiseReport,
-  getComponentWiseReport
+  getComponentWiseReport,
+  getHubWiseReport
 };

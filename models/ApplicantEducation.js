@@ -46,6 +46,12 @@ const ApplicantEducation = sequelize.define('ApplicantEducation', {
     type: DataTypes.STRING(100),
     allowNull: true
   },
+  seatnumber: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    field: 'seatnumber',
+    comment: 'Seat number or roll number'
+  },
   passing_year: {
     type: DataTypes.INTEGER,
     allowNull: true
@@ -89,7 +95,7 @@ const ApplicantEducation = sequelize.define('ApplicantEducation', {
 });
 
 // Instance method to get total months of education
-ApplicantEducation.prototype.getEducationLevel = async function() {
+ApplicantEducation.prototype.getEducationLevel = async function () {
   if (this.education_level_id) {
     const EducationLevel = require('./EducationLevel');
     return await EducationLevel.findByPk(this.education_level_id);

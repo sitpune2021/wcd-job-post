@@ -80,13 +80,13 @@ const changeStatus = async (applicationId, newStatus, options = {}) => {
 };
 
 /**
- * Calculate merit score for an application
+ * Calculate merit score for an application based on multiple criteria
  * 
- * RANKING LOGIC (lexicographic - higher score = better candidate):
- * 1. Education Level Rank (display_order from EducationLevel master) - PRIMARY
- * 2. Highest Percentage/Marks WITHIN THE SAME HIGHEST EDUCATION LEVEL - SECONDARY  
- * 3. Locality Match (permanent district matches post district) - TERTIARY
- * 4. Total Experience Months (sum of all experience) - QUATERNARY
+ * Merit Score Calculation (5-tier system):
+ * 1. Education Level (highest display_order) - PRIMARY
+ * 2. Percentage in highest education level - SECONDARY
+ * 3. Local Resident (same district as post) - TERTIARY
+ * 4. Relevant Experience (months) - QUATERNARY
  * 5. Age Preference (OLDER or YOUNGER as per config) - QUINARY
  * 
  * Score formula: 
@@ -95,9 +95,10 @@ const changeStatus = async (applicationId, newStatus, options = {}) => {
  * Final tie-breakers (at query time): submitted_at ASC, application_no ASC
  * 
  * @param {number|Object} applicationOrId - Application ID or pre-fetched Application object with includes
+ * @param {Object} transaction - Optional Sequelize transaction
  * @returns {Promise<number>} Calculated merit score
  */
-const calculateMeritScore = async (applicationOrId) => {
+const calculateMeritScore = async (applicationOrId, transaction = null) => {
   try {
     let application;
 
@@ -106,7 +107,7 @@ const calculateMeritScore = async (applicationOrId) => {
       application = applicationOrId;
     } else {
       // Otherwise fetch from DB with all required associations
-      application = await Application.findByPk(applicationOrId, {
+      const queryOptions = {
         include: [
           { model: db.PostMaster, as: 'post', attributes: ['post_id', 'district_id'] },
           {
@@ -124,7 +125,13 @@ const calculateMeritScore = async (applicationOrId) => {
             ]
           }
         ]
-      });
+      };
+
+      if (transaction) {
+        queryOptions.transaction = transaction;
+      }
+
+      application = await Application.findByPk(applicationOrId, queryOptions);
     }
 
     if (!application) {

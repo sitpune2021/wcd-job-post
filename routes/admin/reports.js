@@ -503,6 +503,54 @@ router.get('/component-wise/export', requirePermission('reports.view'), auditLog
 });
 
 /**
+ * @route GET /api/admin/reports/hub-wise
+ */
+router.get('/hub-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_HUB_WISE'), async (req, res, next) => {
+  try {
+    const rows = await reportsService.getHubWiseReport({
+      hub_id: req.query.hub_id,
+      district_id: req.query.district_id
+    });
+    return ApiResponse.success(res, { rows, total: rows.length }, 'Hub wise report generated successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/admin/reports/hub-wise/export
+ */
+router.get('/hub-wise/export', requirePermission('reports.view'), auditLog('EXPORT_REPORT_HUB_WISE'), async (req, res, next) => {
+  try {
+    const format = String(req.query.format || '').toLowerCase();
+    if (!format || !['csv', 'pdf', 'xlsx'].includes(format)) {
+      throw new ApiError(400, 'Invalid export format.');
+    }
+
+    const rows = await reportsService.getHubWiseReport({
+      hub_id: req.query.hub_id,
+      district_id: req.query.district_id
+    });
+
+    const columns = [
+      { key: 'sr_no', header: 'Sr No.', width: 10, value: (_r, idx) => idx + 1 },
+      { key: 'hub_name', header: 'Hub Name', width: 40 },
+      { key: 'application_count', header: 'Applications', width: 20 },
+      { key: 'selected_count', header: 'Selected', width: 20 }
+    ];
+
+    const filename = sanitizeFileName('hub_wise_report');
+    if (format === 'csv') return await sendCsvFromRows(res, filename, columns, rows);
+    if (format === 'xlsx') return await sendXlsxFromRows(res, filename, columns, rows);
+
+    const html = buildSimpleReportHtml('Hub Wise Report', columns, rows);
+    return await sendPdfFromHtml(res, filename, html);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/admin/reports/post-selected/export
  * @desc Export post-selected report in CSV or PDF
  * @access Private (Admin with reports.view permission)

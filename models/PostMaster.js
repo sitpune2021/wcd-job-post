@@ -36,6 +36,15 @@ const PostMaster = sequelize.define('PostMaster', {
       key: 'component_id'
     }
   },
+  hub_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_hub_master',
+      key: 'hub_id'
+    },
+    comment: 'Linked hub for the post'
+  },
   district_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
@@ -111,6 +120,10 @@ const PostMaster = sequelize.define('PostMaster', {
     allowNull: true
   },
   female_only: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  male_only: {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },

@@ -31,6 +31,7 @@ db.EligibilityResult = require('./EligibilityResult');
 db.MeritList = require('./MeritList');
 db.ApplicationStatusHistory = require('./ApplicationStatusHistory');
 db.Component = require('./Component');
+db.Hub = require('./Hub');
 db.Department = require('./Department');
 db.DistrictMaster = require('./DistrictMaster');
 db.SkillMaster = require('./SkillMaster');
@@ -67,7 +68,8 @@ db.ApplicationStageHistory = require('./ApplicationStageHistory');
 // Allotment Email Distribution System
 db.AllotmentEmailSchedule = require('./AllotmentEmailSchedule');
 db.AllotmentEmailTracking = require('./AllotmentEmailTracking');
-
+// Payment Gateway Integration
+db.Payment = require('./Payment');
 // Set up associations
 // Role <-> Permission (Many-to-Many)
 db.Role.belongsToMany(db.Permission, { 
@@ -138,9 +140,17 @@ db.ApplicationStatusHistory.belongsTo(db.AdminUser, { foreignKey: 'changed_by', 
 db.Component.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
 db.DistrictMaster.hasMany(db.Component, { foreignKey: 'district_id', as: 'components' });
 
+// Hub -> District
+db.Hub.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
+db.DistrictMaster.hasMany(db.Hub, { foreignKey: 'district_id', as: 'hubs' });
+
 // PostMaster -> Component
 db.PostMaster.belongsTo(db.Component, { foreignKey: 'component_id', as: 'component' });
 db.Component.hasMany(db.PostMaster, { foreignKey: 'component_id', as: 'posts' });
+
+// PostMaster -> Hub
+db.PostMaster.belongsTo(db.Hub, { foreignKey: 'hub_id', as: 'hub' });
+db.Hub.hasMany(db.PostMaster, { foreignKey: 'hub_id', as: 'posts' });
 
 // PostMaster -> EducationLevel (min education requirement)
 db.PostMaster.belongsTo(db.EducationLevel, { foreignKey: 'min_education_level_id', as: 'minEducationLevel' });

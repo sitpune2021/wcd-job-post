@@ -100,6 +100,76 @@ class EligibilityService {
   }
 
   /**
+   * OPTIMIZED: Inline eligibility check using pre-fetched applicant data
+   * Returns boolean only (no detailed checks) for performance
+   * Used in getEligiblePosts to avoid N database queries
+   * boosted performance inste do f calculation every tim eit does onec and show final output ture fase 
+   */
+  checkEligibilityInline(applicant, post) {
+    if (!applicant || !post) return false;
+
+    const personal = applicant.personal;
+    const education = applicant.education || [];
+    const experience = applicant.experience || [];
+
+    // 1. Age check
+    if (personal?.dob) {
+      const today = new Date();
+      const birthDate = new Date(personal.dob);
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      const minAge = post.min_age || 18;
+      const maxAge = post.max_age || 65;
+      if (age < minAge || age > maxAge) return false;
+    } else {
+      return false; // DOB required
+    }
+
+    // 2. Education check (using display_order)
+    const minEduLevel = post.minEducationLevel;
+    const maxEduLevel = post.maxEducationLevel;
+    
+    if (minEduLevel || maxEduLevel) {
+      const minDisplayOrder = minEduLevel?.display_order || 0;
+      const maxDisplayOrder = maxEduLevel?.display_order || 999;
+
+      let highestApplicantOrder = 0;
+      for (const edu of education) {
+        const eduOrder = edu.educationLevel?.display_order || 0;
+        if (eduOrder > highestApplicantOrder) {
+          highestApplicantOrder = eduOrder;
+        }
+      }
+
+      if (highestApplicantOrder < minDisplayOrder || highestApplicantOrder > maxDisplayOrder) {
+        return false;
+      }
+    }
+
+    // 3. Experience check
+    const minRequired = post.min_experience_months || 0;
+    if (minRequired > 0) {
+      let totalMonths = 0;
+      for (const exp of experience) {
+        if (exp.total_months) {
+          totalMonths += exp.total_months;
+        } else if (exp.start_date) {
+          const startDate = new Date(exp.start_date);
+          const endDate = exp.is_current || !exp.end_date ? new Date() : new Date(exp.end_date);
+          const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+          totalMonths += Math.max(0, months);
+        }
+      }
+      if (totalMonths < minRequired) return false;
+    }
+
+    return true; // All checks passed
+  }
+
+  /**
    * Simple category check - applicant's category must be in post's allowed categories
    */
   checkCategorySimple(personal, post) {
@@ -869,54 +939,41 @@ class EligibilityService {
         order: [['post_id', 'ASC'], ['requirement_type', 'DESC'], ['id', 'ASC']]
       });
 
-      const postDocsByPostId = new Map();
-      for (const row of postDocRows) {
-        const postId = row.post_id;
-        const docType = row.documentType;
-        if (!postDocsByPostId.has(postId)) {
-          postDocsByPostId.set(postId, []);
-        }
+      // ========== PERFORMANCE OPTIMIZATION: Fetch applicant data ONCE ==========
+      // Instead of fetching applicant data for each post in checkEligibility loop,
+      // fetch it once here and reuse for all eligibility checks
+      const applicant = await db.ApplicantMaster.findByPk(applicantId, {
+        include: [
+          { model: db.ApplicantPersonal, as: 'personal', required: false },
+          {
+            model: db.ApplicantEducation,
+            as: 'education',
+            required: false,
+            include: [{ model: db.EducationLevel, as: 'educationLevel', required: false }]
+          },
+          { model: db.ApplicantExperience, as: 'experience', required: false }
+        ]
+      });
 
-        postDocsByPostId.get(postId).push({
-          doc_type_id: row.doc_type_id,
-          doc_code: docType?.doc_code || docType?.doc_type_code || null,
-          doc_type_name: docType?.doc_type_name || null,
-          requirement_type: row.requirement_type,
-          mandatory_at_application: !!row.mandatory_at_application
-        });
+      if (!applicant) {
+        throw new Error('Applicant not found');
       }
 
+      // ========== BULK ELIGIBILITY CHECK ==========
       const results = [];
       for (const post of availablePosts) {
-        const eligibility = await this.checkEligibility(applicantId, post.post_id);
-
-        logger.info('Eligibility check summary', {
-          applicantId,
-          post_id: post.post_id,
-          isEligible: eligibility?.isEligible === true,
-          failed_checks_count: Array.isArray(eligibility?.failedChecks)
-            ? eligibility.failedChecks.length
-            : 0,
-          failed_checks: Array.isArray(eligibility?.failedChecks)
-            ? eligibility.failedChecks.slice(0, 10).map((c) => {
-              if (typeof c === 'string') return c;
-              return c?.criterion || c?.name || c?.message || JSON.stringify(c);
-            })
-            : []
-        });
+        // Perform inline eligibility check using already-fetched applicant data
+        const isEligible = this.checkEligibilityInline(applicant, post);
 
         // Skip non-eligible posts if requested
-        if (onlyEligible && !eligibility.isEligible) {
-          logger.info('getEligiblePosts filtered non-eligible post', {
-            applicantId,
-            post_id: post.post_id
-          });
+        if (onlyEligible && !isEligible) {
           continue;
         }
 
         const component = post.component || {};
         const district = post.district || {};
 
+        // Return only fields used by frontend (removed eligibility_checks, failed_checks, warnings, post_document_requirements)
         results.push({
           post_id: post.post_id,
           post_code: post.post_code,
@@ -928,11 +985,7 @@ class EligibilityService {
           component: component?.component_name,
           component_name_mr: component?.component_name_mr,
           component_code: component?.component_code,
-          is_eligible: eligibility.isEligible,
-          eligibility_checks: eligibility.checks,
-          failed_checks: eligibility.failedChecks,
-          warnings: eligibility.warnings,
-          post_document_requirements: postDocsByPostId.get(post.post_id) || []
+          is_eligible: isEligible
         });
       }
 

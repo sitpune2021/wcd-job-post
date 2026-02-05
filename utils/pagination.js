@@ -169,8 +169,7 @@ const paginatedQuery = async (model, options = {}) => {
     order,
     limit,
     offset,
-    attributes,
-    distinct: true // Important for accurate count with includes
+    attributes
   });
 
   const transformedRows = transform ? rows.map(transform) : rows;

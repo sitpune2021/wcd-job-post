@@ -15,23 +15,57 @@ class CronService {
    * @returns {Promise<Object>} - Result with count of closed posts
    */
   async closeExpiredPosts() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Get current date in IST timezone at midnight
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istTime = new Date(now.getTime() + istOffset + (now.getTimezoneOffset() * 60 * 1000));
+    
+    // Set to start of day (midnight IST)
+    istTime.setHours(0, 0, 0, 0);
+    
+    // Convert back to UTC for database comparison
+    const todayUTC = new Date(istTime.getTime() - istOffset - (now.getTimezoneOffset() * 60 * 1000));
+    
+    // Format as YYYY-MM-DD for DATEONLY comparison
+    const todayDateString = istTime.toISOString().split('T')[0];
     
     try {
+      // Find posts that need to be closed
+      const postsToClose = await db.PostMaster.findAll({
+        where: {
+          closing_date: { [Op.lt]: todayDateString },
+          is_active: true,
+          is_closed: false,
+          is_deleted: false
+        },
+        attributes: ['post_id', 'post_code', 'post_name', 'closing_date']
+      });
+      
+      if (postsToClose.length === 0) {
+        logger.info('CRON: No expired posts found to close');
+        return { success: true, closedCount: 0 };
+      }
+      
+      // Log posts being closed
+      logger.info(`CRON: Found ${postsToClose.length} expired posts to close:`, 
+        postsToClose.map(p => ({ 
+          post_id: p.post_id, 
+          post_code: p.post_code, 
+          closing_date: p.closing_date 
+        }))
+      );
+      
+      // Update posts to closed status
       const result = await db.PostMaster.update(
         {
           is_active: false,
           is_closed: true,
-          closed_at: new Date(),
+          closed_at: new Date(), // Current timestamp
           closed_by: 'CRON_JOB'
         },
         {
           where: {
-            closing_date: { [Op.lt]: today },
-            is_active: true,
-            is_closed: false,
-            is_deleted: false
+            post_id: { [Op.in]: postsToClose.map(p => p.post_id) }
           }
         }
       );
@@ -39,10 +73,10 @@ class CronService {
       const closedCount = result[0];
       
       if (closedCount > 0) {
-        logger.info(`CRON: Closed ${closedCount} expired posts`);
+        logger.info(`CRON: Successfully closed ${closedCount} expired posts`);
       }
       
-      return { success: true, closedCount };
+      return { success: true, closedCount, closedPosts: postsToClose };
     } catch (error) {
       logger.error('CRON: Error closing expired posts:', error);
       throw error;

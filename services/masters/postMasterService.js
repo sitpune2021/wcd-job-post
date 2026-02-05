@@ -6,7 +6,7 @@
 // ============================================================================
 
 const db = require('../../models');
-const { PostMaster, Component, CategoryMaster, PostCategory, ExperienceDomain } = db;
+const { PostMaster, Component, Hub, CategoryMaster, PostCategory, ExperienceDomain } = db;
 const { Op } = require('sequelize');
 const logger = require('../../config/logger');
 const { paginatedQuery, isPaginatedResponse } = require('../../utils/pagination');
@@ -65,6 +65,12 @@ const transformPost = (language = 'en') => (p) => ({
     component_code: p.component.component_code,
     component_name: localizeField(p.component, 'component_name', language)
   } : null,
+  hub_id: p.hub_id || null,
+  hub: p.hub ? {
+    hub_id: p.hub.hub_id,
+    hub_code: p.hub.hub_code,
+    hub_name: localizeField(p.hub, 'hub_name', language)
+  } : null,
   experience_domain_id: p.experience_domain_id || null,
   min_qualification: p.min_qualification,
   min_experience_months: p.min_experience_months,
@@ -83,6 +89,8 @@ const transformPost = (language = 'en') => (p) => ({
   closing_date: p.closing_date,
   total_positions: p.total_positions,
   filled_positions: p.filled_positions,
+  female_only: p.female_only,
+  male_only: p.male_only,
   is_active: p.is_active,
   created_at: p.created_at,
   updated_at: p.updated_at,
@@ -226,6 +234,7 @@ const getPosts = async (query = {}) => {
       searchFields: ['post_name', 'post_name_mr', 'post_code', 'description'],
       filterConfig: {
         component_id: { field: 'component_id', type: 'number' },
+        hub_id: { field: 'hub_id', type: 'number' },
         district_specific: { field: 'district_specific', type: 'boolean' },
         district_id: { field: 'district_id', type: 'number' }
       },
@@ -233,6 +242,11 @@ const getPosts = async (query = {}) => {
         model: Component,
         as: 'component',
         attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
+      }, {
+        model: Hub,
+        as: 'hub',
+        required: false,
+        attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
       }, {
         model: ExperienceDomain,
         as: 'experienceDomain',
@@ -286,6 +300,11 @@ const getPostById = async (postId, language = 'en') => {
         as: 'component',
         attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
       }, {
+        model: Hub,
+        as: 'hub',
+        required: false,
+        attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
+      }, {
         model: ExperienceDomain,
         as: 'experienceDomain',
         required: false,
@@ -323,6 +342,12 @@ const getPostById = async (postId, language = 'en') => {
         component_code: post.component.component_code,
         component_name: localizeField(post.component, 'component_name', language)
       } : null,
+      hub_id: post.hub_id || null,
+      hub: post.hub ? {
+        hub_id: post.hub.hub_id,
+        hub_code: post.hub.hub_code,
+        hub_name: localizeField(post.hub, 'hub_name', language)
+      } : null,
       experience_domain_id: post.experience_domain_id || null,
       min_qualification: post.min_qualification,
       min_experience_months: post.min_experience_months,
@@ -341,6 +366,8 @@ const getPostById = async (postId, language = 'en') => {
       closing_date: post.closing_date,
       total_positions: post.total_positions,
       filled_positions: post.filled_positions,
+      female_only: post.female_only,
+      male_only: post.male_only,
       is_active: post.is_active,
       created_at: post.created_at,
       updated_at: post.updated_at,
@@ -366,8 +393,24 @@ const createPost = async (data, userId) => {
     const minEducationLevelId = parseOptionalInt(data.min_education_level_id);
     const maxEducationLevelId = parseOptionalInt(data.max_education_level_id);
     const componentId = parseOptionalInt(data.component_id);
+    const hubId = parseOptionalInt(data.hub_id);
     const experienceDomainId = parseOptionalInt(data.experience_domain_id);
     const districtId = parseOptionalInt(data.district_id);
+
+    // Validate dates
+    const openingDate = parseOptionalDate(data.opening_date);
+    const closingDate = parseOptionalDate(data.closing_date);
+    
+    if (openingDate && closingDate) {
+      const opening = new Date(openingDate);
+      const closing = new Date(closingDate);
+      
+      if (closing <= opening) {
+        const error = new Error('Closing date must be after opening date');
+        error.statusCode = 400;
+        throw error;
+      }
+    }
 
     const post = await PostMaster.create({
       post_code: data.post_code,
@@ -376,6 +419,7 @@ const createPost = async (data, userId) => {
       description: data.description || null,
       description_mr: data.description_mr || null,
       component_id: componentId,
+      hub_id: hubId,
       min_qualification: data.min_qualification || null,
       min_experience_months: parseOptionalInt(data.min_experience_months) || 0,
       min_education_level_id: minEducationLevelId,
@@ -387,10 +431,12 @@ const createPost = async (data, userId) => {
       district_specific: parseOptionalBool(data.district_specific) || false,
       required_domains: data.required_domains || null,
       eligibility_criteria: data.eligibility_criteria || null,
-      opening_date: data.opening_date || null,
-      closing_date: data.closing_date || null,
+      opening_date: openingDate,
+      closing_date: closingDate,
       total_positions: parseOptionalInt(data.total_positions) || 1,
       filled_positions: parseOptionalInt(data.filled_positions) || 0,
+      female_only: parseOptionalBool(data.female_only) || false,
+      male_only: parseOptionalBool(data.male_only) || false,
       display_order: parseOptionalInt(data.display_order) || 0,
       is_active: data.is_active !== undefined ? data.is_active : true,
       is_deleted: parseOptionalBool(data.is_deleted) || false,
@@ -431,20 +477,20 @@ const updatePost = async (postId, data, userId) => {
     const updateData = { updated_by: userId, updated_at: new Date() };
     const fields = [
       'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
-      'component_id', 'min_qualification', 'min_experience_months', 'min_age', 'max_age',
+      'component_id', 'hub_id', 'min_qualification', 'min_experience_months', 'min_age', 'max_age',
       'district_specific', 'required_domains', 'eligibility_criteria',
-      'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'is_active'
+      'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only', 'is_active'
     ];
     
     fields.forEach(field => {
       if (data[field] === undefined) return;
 
-      if (['component_id', 'min_experience_months', 'min_age', 'max_age', 'total_positions', 'filled_positions'].includes(field)) {
+      if (['component_id', 'hub_id', 'min_experience_months', 'min_age', 'max_age', 'total_positions', 'filled_positions'].includes(field)) {
         updateData[field] = parseOptionalInt(data[field]);
         return;
       }
 
-      if (field === 'district_specific') {
+      if (['district_specific', 'female_only', 'male_only'].includes(field)) {
         updateData[field] = parseOptionalBool(data[field]) || false;
         return;
       }
@@ -478,6 +524,21 @@ const updatePost = async (postId, data, userId) => {
     }
     if (Object.prototype.hasOwnProperty.call(data, 'display_order')) {
       updateData.display_order = parseOptionalInt(data.display_order) || 0;
+    }
+
+    // Validate dates after all updates are prepared
+    const finalOpeningDate = updateData.opening_date !== undefined ? updateData.opening_date : post.opening_date;
+    const finalClosingDate = updateData.closing_date !== undefined ? updateData.closing_date : post.closing_date;
+    
+    if (finalOpeningDate && finalClosingDate) {
+      const opening = new Date(finalOpeningDate);
+      const closing = new Date(finalClosingDate);
+      
+      if (closing <= opening) {
+        const error = new Error('Closing date must be after opening date');
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     await post.update(updateData);

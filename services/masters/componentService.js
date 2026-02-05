@@ -50,7 +50,7 @@ const getComponents = async (query = {}) => {
     const language = query.lang || 'en';
     const includeInactive = query.include_inactive === 'true';
 
-    const baseWhere = {};
+    const baseWhere = { is_deleted: false };
     if (!includeInactive) {
       baseWhere.is_active = true;
     }
@@ -64,9 +64,10 @@ const getComponents = async (query = {}) => {
       },
       baseWhere,
       include: [{
-        model: DistrictMaster,
+        model: DistrictMaster.scope('withDeleted'), // Include deleted districts
         as: 'district',
-        attributes: ['district_id', 'district_name', 'district_name_mr']
+        attributes: ['district_id', 'district_name', 'district_name_mr'],
+        required: false // LEFT JOIN instead of INNER JOIN
       }],
       order: [['component_id', 'DESC']],
       dataKey: 'components',

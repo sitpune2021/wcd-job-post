@@ -211,6 +211,29 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
       order: [['accepted_at', 'DESC'], ['acknowledgement_id', 'DESC']]
     });
 
+    // Fetch payment data for this application OR the original payment for same post_name + district_id
+    let payment = await db.Payment.findOne({
+      where: {
+        application_id: req.params.id,
+        payment_status: 'SUCCESS'
+      },
+      order: [['paid_at', 'DESC'], ['payment_id', 'DESC']]
+    });
+
+    // If no payment found for this application, find the original payment for same post_name + district_id
+    // (This happens when user applies to same post_name in same district but different OSC - free application)
+    if (!payment && application?.post_id && application?.district_id && application?.applicant_id) {
+      payment = await db.Payment.findOne({
+        where: {
+          applicant_id: application.applicant_id,
+          post_name: application.post?.post_name,
+          district_id: application.district_id,
+          payment_status: 'SUCCESS'
+        },
+        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']] // Get the FIRST payment (original)
+      });
+    }
+
     const applicant = application?.applicant || {};
     const personal = applicant?.personal || {};
     const docs = Array.isArray(applicant?.documents) ? applicant.documents : [];
@@ -221,11 +244,16 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
     const photoUrl = includeImages ? buildFileUrl(req, photoPath) : null;
     const signatureUrl = includeImages ? buildFileUrl(req, signaturePath) : null;
 
+    // Check if payment is from a different application (free application scenario)
+    const isFreeApplication = payment && payment.application_id !== parseInt(req.params.id);
+
     const html = buildApplicationPdfHtml(req, application, {
       includeImages,
       photoUrl,
       signatureUrl,
-      acknowledgement: acknowledgement ? acknowledgement.toJSON() : null
+      acknowledgement: acknowledgement ? acknowledgement.toJSON() : null,
+      payment: payment ? payment.toJSON() : null,
+      isFreeApplication
     });
 
     const safeNo = application?.application_no || application?.application_id || req.params.id;
