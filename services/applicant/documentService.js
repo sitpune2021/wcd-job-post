@@ -309,6 +309,13 @@ module.exports = {
         doc_type_ids: rows.slice(0, 50).map(r => r.doc_type_id)
       });
 
+      logger.info('getRequiredDocumentTypes post check', {
+        applicantId,
+        postId,
+        includePostRequirements,
+        postIdType: typeof postId
+      });
+
       const postRequirementRows = includePostRequirements ? await PostDocumentRequirement.findAll({
         where: {
           post_id: postId,
@@ -340,6 +347,13 @@ module.exports = {
         }],
         order: [['id', 'ASC']]
       }) : [];
+
+      logger.info('getRequiredDocumentTypes post requirements fetched', {
+        applicantId,
+        postId,
+        postRequirementRowsCount: postRequirementRows.length,
+        postRequirementIds: postRequirementRows.map(r => r.id)
+      });
 
       // De-dupe by doc_type_id and flatten to required payload
       const seen = new Set();
@@ -379,6 +393,13 @@ module.exports = {
       });
 
       result.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
+      logger.info('getRequiredDocumentTypes final result', {
+        applicantId,
+        postId,
+        resultCount: result.length,
+        resultDocTypeIds: result.map(r => r.doc_type_id)
+      });
 
       return result;
     } catch (error) {

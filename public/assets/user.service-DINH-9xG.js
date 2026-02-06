@@ -1,1 +1,0 @@
-import{a as t}from"./index-BLGg1PeM.js";const r=async a=>{const s=await t.get("/admin/users",{params:a});return{users:s.data.data.users,pagination:s.data.data.pagination}},o=async a=>(await t.get(`/admin/users/${a}`)).data.data,d=async a=>(await t.post("/admin/users",a)).data.data,p=async(a,s)=>(await t.put(`/admin/users/${a}`,s)).data.data;export{o as a,d as c,r as g,p as u};

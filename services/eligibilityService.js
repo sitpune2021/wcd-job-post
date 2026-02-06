@@ -959,6 +959,23 @@ class EligibilityService {
         throw new Error('Applicant not found');
       }
 
+      // Build a map of post_id -> document requirements for quick lookup
+      const postDocMap = new Map();
+      postDocRows.forEach(row => {
+        if (!postDocMap.has(row.post_id)) {
+          postDocMap.set(row.post_id, []);
+        }
+        if (row.documentType) {
+          postDocMap.get(row.post_id).push({
+            doc_type_id: row.documentType.doc_type_id,
+            doc_code: row.documentType.doc_code || row.documentType.doc_type_code,
+            doc_type_name: row.documentType.doc_type_name,
+            requirement_type: row.requirement_type,
+            mandatory_at_application: row.mandatory_at_application
+          });
+        }
+      });
+
       // ========== BULK ELIGIBILITY CHECK ==========
       const results = [];
       for (const post of availablePosts) {
@@ -973,7 +990,10 @@ class EligibilityService {
         const component = post.component || {};
         const district = post.district || {};
 
-        // Return only fields used by frontend (removed eligibility_checks, failed_checks, warnings, post_document_requirements)
+        // Get post-specific document requirements
+        const postDocRequirements = postDocMap.get(post.post_id) || [];
+
+        // Return optimized fields for frontend (eligibility_checks, failed_checks, warnings removed for performance; post_document_requirements included)
         results.push({
           post_id: post.post_id,
           post_code: post.post_code,
@@ -985,7 +1005,8 @@ class EligibilityService {
           component: component?.component_name,
           component_name_mr: component?.component_name_mr,
           component_code: component?.component_code,
-          is_eligible: isEligible
+          is_eligible: isEligible,
+          post_document_requirements: postDocRequirements
         });
       }
 
