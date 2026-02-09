@@ -197,7 +197,10 @@ router.get('/applications/:id/required-documents', requirePermission('applicatio
 router.post('/applications/:id/pdf', requirePermission('applications.view'), auditLog('EXPORT_APPLICATION_PDF'), async (req, res, next) => {
   try {
     const includeImages = toBool(req?.query?.include_images ?? req?.body?.include_images, true);
+    logger.info(`PDF export started for application ${req.params.id}`, { includeImages });
+    
     const application = await applicationReviewService.getApplicationDetail(req.params.id);
+    logger.info(`Application data retrieved`, { appNo: application?.application_no });
 
     const db = require('../../models');
     const acknowledgement = await db.ApplicantAcknowledgement.findOne({
@@ -210,6 +213,7 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
       },
       order: [['accepted_at', 'DESC'], ['acknowledgement_id', 'DESC']]
     });
+    logger.info(`Acknowledgement retrieved`, { hasAck: !!acknowledgement });
 
     // Fetch payment data for this application OR the original payment for same post_name + district_id
     let payment = await db.Payment.findOne({
@@ -221,7 +225,6 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
     });
 
     // If no payment found for this application, find the original payment for same post_name + district_id
-    // (This happens when user applies to same post_name in same district but different OSC - free application)
     if (!payment && application?.post_id && application?.district_id && application?.applicant_id) {
       payment = await db.Payment.findOne({
         where: {
@@ -230,9 +233,10 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
           district_id: application.district_id,
           payment_status: 'SUCCESS'
         },
-        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']] // Get the FIRST payment (original)
+        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']]
       });
     }
+    logger.info(`Payment retrieved`, { hasPayment: !!payment });
 
     const applicant = application?.applicant || {};
     const personal = applicant?.personal || {};
@@ -243,10 +247,11 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
 
     const photoUrl = includeImages ? buildFileUrl(req, photoPath) : null;
     const signatureUrl = includeImages ? buildFileUrl(req, signaturePath) : null;
+    logger.info(`Image URLs built`, { hasPhoto: !!photoUrl, hasSignature: !!signatureUrl });
 
-    // Check if payment is from a different application (free application scenario)
     const isFreeApplication = payment && payment.application_id !== parseInt(req.params.id);
 
+    logger.info(`Building PDF HTML...`);
     const html = buildApplicationPdfHtml(req, application, {
       includeImages,
       photoUrl,
@@ -255,10 +260,17 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
       payment: payment ? payment.toJSON() : null,
       isFreeApplication
     });
+    logger.info(`PDF HTML built successfully`);
 
     const safeNo = application?.application_no || application?.application_id || req.params.id;
+    logger.info(`Sending PDF response...`);
     return await sendApplicationPdfFromHtml(res, `application_${safeNo}`, html);
   } catch (error) {
+    logger.error(`PDF export failed for application ${req.params.id}:`, {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     next(error);
   }
 });

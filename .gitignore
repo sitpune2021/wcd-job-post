@@ -1,55 +1,55 @@
 # # Dependencies
 node_modules/
 
-# Environment variables
-# .env
-.env.local
-.env.development
-.env.production
+# # Environment variables
+# # .env
+# .env.local
+# .env.development
+# .env.production
 
-# # Logs
-logs/
-*.log
-npm-debug.log*
+# # # Logs
+# logs/
+# *.log
+# npm-debug.log*
 
 
-# scripts
-scripts/
-*scripts
+# # scripts
+# scripts/
+# *scripts
 
-# # OS files
-.DS_Store
-__MACOSX/
-Thumbs.db
+# # # OS files
+# .DS_Store
+# __MACOSX/
+# Thumbs.db
 
-# # IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# # # IDE
+# .vscode/
+# .idea/
+# *.swp
+# *.swo
 
-# # Uploads (development)
-uploads/*
-!uploads/.gitkeep
+# # # Uploads (development)
+# uploads/*
+# !uploads/.gitkeep
 
-# # Database dumps
-*.sql
-*.dump
+# # # Database dumps
+# *.sql
+# *.dump
 
-# # Archives
-*.zip
-*.md
+# # # Archives
+# *.zip
+# *.md
 
-# # Build
-dist/
-build/
+# # # Build
+# dist/
+# build/
 
-# # Testing
-coverage/
-.nyc_output/
+# # # Testing
+# coverage/
+# .nyc_output/
 
-# # PM2
-# .pm2/
-# ecosystem.config.js
+# # # PM2
+# # .pm2/
+# # ecosystem.config.js
 
-*.txt
+# *.txt
