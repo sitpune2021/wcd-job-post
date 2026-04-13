@@ -362,6 +362,8 @@ router.get('/posts', async (req, res, next) => {
             { '$district.district_name_mr$': { [Op.iLike]: `%${search}%` } },
             { '$component.component_name$': { [Op.iLike]: `%${search}%` } },
             { '$component.component_name_mr$': { [Op.iLike]: `%${search}%` } },
+            { '$hub.hub_name$': { [Op.iLike]: `%${search}%` } },
+            { '$hub.hub_name_mr$': { [Op.iLike]: `%${search}%` } },
             { '$minEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
             { '$minEducationLevel.level_name_mr$': { [Op.iLike]: `%${search}%` } },
             { '$maxEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
@@ -375,19 +377,26 @@ router.get('/posts', async (req, res, next) => {
       attributes: [
         'post_id', 'post_code', 'post_name', 'post_name_mr', 
         'description', 'description_mr',
-        'min_age', 'max_age', 'female_only',
+        'min_age', 'max_age', 'female_only', 'male_only',
         'min_experience_months',
         'education_text', 'display_order',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions',
         'district_specific', 'is_state_level', 'is_active', 'created_at', 'updated_at',
         'min_education_level_id', 'max_education_level_id',
-        'component_id', 'district_id'
+        'component_id', 'district_id', 'hub_id'
       ],
       include: [
         { 
           model: db.Component, 
           as: 'component',
+          required: false,
           attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
+        },
+        {
+          model: db.Hub,
+          as: 'hub',
+          required: false,
+          attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
         },
         {
           model: db.DistrictMaster,
@@ -421,11 +430,18 @@ router.get('/posts', async (req, res, next) => {
         post_name_mr: row.post_name_mr,
         description_en: row.description,
         description_mr: row.description_mr,
+        female_only: row.female_only,
+        male_only: row.male_only,
         component_id: row.component?.component_id || row.component_id || null,
         component_code: row.component?.component_code || null,
         component_name: row.component?.component_name || null,
         component_name_en: row.component?.component_name || null,
         component_name_mr: row.component?.component_name_mr || null,
+        hub_id: row.hub?.hub_id || row.hub_id || null,
+        hub_code: row.hub?.hub_code || null,
+        hub_name: row.hub?.hub_name || null,
+        hub_name_en: row.hub?.hub_name || null,
+        hub_name_mr: row.hub?.hub_name_mr || null,
         district_id: row.district?.district_id || row.district_id || null,
         district_name: row.district?.district_name || null,
         district_name_en: row.district?.district_name || null,
@@ -451,7 +467,8 @@ router.get('/posts', async (req, res, next) => {
           (row.total_positions || 0) - (row.filled_positions || 0)
         ),
         district: row.district || null,
-        component: row.component || null
+        component: row.component || null,
+        hub: row.hub || null
       };
     });
 
@@ -490,6 +507,12 @@ router.get('/posts/:postId', async (req, res, next) => {
           model: db.Component, 
           as: 'component',
           attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr'],
+          required: false
+        },
+        {
+          model: db.Hub,
+          as: 'hub',
+          attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr'],
           required: false
         },
         {
@@ -534,10 +557,12 @@ router.get('/posts/:postId', async (req, res, next) => {
       throw new ApiError(404, 'Post not found');
     }
 
-    const { component, district, ...rest } = post.toJSON();
+    const { component, hub, district, ...rest } = post.toJSON();
 
     const formatted = {
       ...rest,
+      female_only: rest.female_only,
+      male_only: rest.male_only,
       available_positions: Math.max(
         0,
         (post.total_positions || 0) - (post.filled_positions || 0)
@@ -546,6 +571,11 @@ router.get('/posts/:postId', async (req, res, next) => {
       component_name: component?.component_name || null,
       component_name_en: component?.component_name || null,
       component_name_mr: component?.component_name_mr || null,
+      hub_id: hub?.hub_id || rest.hub_id || null,
+      hub_code: hub?.hub_code || null,
+      hub_name: hub?.hub_name || null,
+      hub_name_en: hub?.hub_name || null,
+      hub_name_mr: hub?.hub_name_mr || null,
       district_name: district?.district_name || null,
       district_name_en: district?.district_name || null,
       district_name_mr: district?.district_name_mr || null,

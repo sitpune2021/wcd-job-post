@@ -94,19 +94,54 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter
-const fileFilter = (req, file, cb) => {
-  const allowedMimes = [
+// Get allowed file types from environment or use defaults
+// Supports ALLOWED_FILE_TYPES for backward compatibility
+const getAllowedMimes = () => {
+  const envMimes = process.env.ALLOWED_FILE_TYPES;
+  if (envMimes) {
+    return envMimes.split(',').map(mime => mime.trim());
+  }
+  
+  // Default allowed MIME types
+  return [
     'application/pdf',
     'image/jpeg',
     'image/jpg',
-    'image/png'
+    'image/png',
+    'image/gif',
+    'image/bmp',
+    'image/webp',
+    'image/tiff'
   ];
+};
+
+// Get file size limit from environment or use default (2MB)
+// Supports both MAX_FILE_SIZE (bytes) and MAX_FILE_SIZE_MB (MB) for backward compatibility
+const getFileSizeLimit = () => {
+  // First check for MAX_FILE_SIZE_MB (MB format)
+  const envLimitMB = process.env.MAX_FILE_SIZE_MB;
+  if (envLimitMB && !isNaN(envLimitMB)) {
+    return parseInt(envLimitMB) * 1024 * 1024; // Convert MB to bytes
+  }
+  
+  // Then check for MAX_FILE_SIZE (bytes format) - for backward compatibility
+  const envLimitBytes = process.env.MAX_FILE_SIZE;
+  if (envLimitBytes && !isNaN(envLimitBytes)) {
+    return parseInt(envLimitBytes);
+  }
+  
+  return 2 * 1024 * 1024; // Default 2MB
+};
+
+// File filter
+const fileFilter = (req, file, cb) => {
+  const allowedMimes = getAllowedMimes();
+  const mimeList = allowedMimes.join(', ');
 
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only PDF, JPEG, and PNG are allowed.'), false);
+    cb(new Error(`Invalid file type. Only ${mimeList} are allowed.`), false);
   }
 };
 
@@ -115,7 +150,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 2 * 1024 * 1024 // 2MB limit
+    fileSize: getFileSizeLimit()
   }
 });
 
@@ -148,7 +183,59 @@ const uploadSingle = (fieldName, folderName = 'misc') => {
   return multer({
     storage: fixedStorage,
     fileFilter,
-    limits: { fileSize: 2 * 1024 * 1024 }
+    limits: { fileSize: getFileSizeLimit() }
+  }).single(fieldName);
+};
+
+/**
+ * Create HRM upload middleware with employee folder and duplicate prevention
+ * @param {string} fieldName - Form field name for the file
+ * @param {string} docType - Document type (attendance, leave, etc.)
+ * @returns {Function} - Multer upload middleware with employee folder structure
+ */
+const uploadHrmFile = (fieldName, docType) => {
+  const storage = multer.diskStorage({
+    destination: async (req, file, cb) => {
+      try {
+        // Get employee code from request (should be set by middleware)
+        const employeeCode = req.employee?.employee_code || req.user?.employee_code;
+        
+        if (!employeeCode) {
+          return cb(new Error('Employee code is required for HRM file uploads'));
+        }
+
+        // Create systematic folder structure: uploads/hrm/{docType}/{employee_code}/
+        const folder = `hrm/${docType}/${sanitizePathSegment(employeeCode, 'EMP')}`;
+        const uploadPath = path.join(__dirname, '..', 'uploads', folder);
+        
+        await ensureDir(uploadPath);
+        cb(null, uploadPath);
+      } catch (error) {
+        cb(error);
+      }
+    },
+    filename: (req, file, cb) => {
+      try {
+        // Get employee code and doc type for folder path
+        const employeeCode = req.employee?.employee_code || req.user?.employee_code;
+        
+        // Generate unique filename with timestamp
+        const timestamp = Date.now();
+        const randomSuffix = Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.originalname);
+        const nameWithoutExt = path.basename(file.originalname, ext);
+        
+        cb(null, `${nameWithoutExt}_${timestamp}_${randomSuffix}${ext}`);
+      } catch (error) {
+        cb(error);
+      }
+    }
+  });
+
+  return multer({
+    storage,
+    fileFilter,
+    limits: { fileSize: getFileSizeLimit() }
   }).single(fieldName);
 };
 
@@ -163,13 +250,13 @@ const compressImage = async (filePath, quality = 80) => {
     const ext = path.extname(filePath).toLowerCase();
     
     // Only compress images, not PDFs
-    if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
+    if (!['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'].includes(ext)) {
       return filePath;
     }
 
     const dir = path.dirname(filePath);
     const filename = path.basename(filePath, ext);
-    const compressedPath = path.join(dir, `${filename}_compressed${ext}`);
+    const compressedPath = path.join(dir, `${filename}_compressed.jpg`); // Always output as JPG for compression
 
     await sharp(filePath)
       .resize(1920, 1920, {
@@ -177,7 +264,6 @@ const compressImage = async (filePath, quality = 80) => {
         withoutEnlargement: true
       })
       .jpeg({ quality, mozjpeg: true })
-      .png({ quality, compressionLevel: 9 })
       .toFile(compressedPath);
 
     logger.info(`Image compressed: ${filePath} -> ${compressedPath}`);
@@ -200,13 +286,13 @@ const generateThumbnail = async (filePath, width = 200, height = 200) => {
     const ext = path.extname(filePath).toLowerCase();
     
     // Only generate thumbnails for images
-    if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
+    if (!['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'].includes(ext)) {
       return null;
     }
 
     const dir = path.dirname(filePath);
     const filename = path.basename(filePath, ext);
-    const thumbnailPath = path.join(dir, `${filename}_thumb${ext}`);
+    const thumbnailPath = path.join(dir, `${filename}_thumb.jpg`); // Always output as JPG
 
     await sharp(filePath)
       .resize(width, height, {
@@ -214,7 +300,6 @@ const generateThumbnail = async (filePath, width = 200, height = 200) => {
         position: 'center'
       })
       .jpeg({ quality: 70 })
-      .png({ quality: 70 })
       .toFile(thumbnailPath);
 
     logger.info(`Thumbnail generated: ${thumbnailPath}`);
@@ -305,6 +390,7 @@ const getFileSize = async (filePath) => {
 module.exports = {
   upload,
   uploadSingle,
+  uploadHrmFile,
   compressImage,
   generateThumbnail,
   deleteFile,

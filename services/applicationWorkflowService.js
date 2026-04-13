@@ -8,6 +8,7 @@
 const db = require('../models');
 const { Application, ApplicationStatusHistory, EligibilityResult } = db;
 const logger = require('../config/logger');
+const cache = require('../utils/cache');
 const { ApiError } = require('../middleware/errorHandler');
 const {
   APPLICATION_STATUS,
@@ -101,11 +102,24 @@ const changeStatus = async (applicationId, newStatus, options = {}) => {
 const calculateMeritScore = async (applicationOrId, transaction = null) => {
   try {
     let application;
+    let applicationId;
 
     // If an object is passed, assume it's the application with necessary includes
     if (typeof applicationOrId === 'object' && applicationOrId !== null) {
       application = applicationOrId;
+      applicationId = application.application_id;
     } else {
+      applicationId = applicationOrId;
+    }
+
+    // Check cache first (works for both ID and object input)
+    const cacheKey = `merit_score:${applicationId}`;
+    const cachedScore = await cache.get(cacheKey);
+    if (cachedScore !== null) {
+      return cachedScore;
+    }
+
+    if (!application) {
       // Otherwise fetch from DB with all required associations
       const queryOptions = {
         include: [
@@ -250,6 +264,10 @@ const calculateMeritScore = async (applicationOrId, transaction = null) => {
 
     // NOTE: We do NOT store merit_score in database anymore for live view,
     // though we return it for the API response.
+    
+    // Cache the score for 10 minutes
+    await cache.set(`merit_score:${appId}`, score, 600);
+    
     logger.info(`Merit score calculated for app ${appId}: ${score} (edu=${highestEduRank}, pct=${highestPercentageInTopLevel}, local=${localityBonus}, exp=${totalExperienceMonths}, age_pre=${APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE})`);
     return score;
   } catch (error) {

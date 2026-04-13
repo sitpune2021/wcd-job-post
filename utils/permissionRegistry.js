@@ -1,23 +1,11 @@
 /**
- * Permission Registry - Dynamic API-based Permission System
+ * Permission Registry - Matches Exactly What's Used in Routes
  * 
- * This utility provides industry-standard dynamic permission management:
- * 1. Auto-registers permissions from API routes
- * 2. Supports wildcard permissions (e.g., masters.* grants all master permissions)
- * 3. Follows resource.action naming convention
- * 4. Syncs permissions to database on startup
+ * This registry defines ONLY the 68 permissions actively used in route files
+ * Scanned from: /routes and /modules/hrm/routes
+ * Date: 2026-04-07
  * 
- * Permission Code Format: {module}.{resource}.{action}
- * Examples:
- *   - users.view, users.create, users.edit, users.delete
- *   - masters.districts.view, masters.districts.create
- *   - applications.review, applications.approve
- * 
- * Wildcard Examples:
- *   - users.* → all user permissions
- *   - masters.* → all master data permissions
- *   - *.view → all view permissions (read-only access)
- *   - * → superadmin (all permissions)
+ * These permissions match exactly what requirePermission() calls use
  */
 
 const logger = require('../config/logger');
@@ -25,294 +13,639 @@ const logger = require('../config/logger');
 // In-memory registry of all permissions
 const permissionRegistry = new Map();
 
-// Action to HTTP method mapping
-const ACTION_METHOD_MAP = {
-  view: ['GET'],
-  list: ['GET'],
-  create: ['POST'],
-  edit: ['PUT', 'PATCH'],
-  delete: ['DELETE'],
-  manage: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  export: ['GET'],
-  import: ['POST'],
-  approve: ['POST', 'PUT'],
-  reject: ['POST', 'PUT'],
-  publish: ['POST', 'PUT'],
-  assign: ['POST', 'PUT'],
-  reset: ['POST'],
-  verify: ['POST', 'PUT']
-};
-
-// Standard actions for CRUD operations
-const STANDARD_ACTIONS = ['view', 'create', 'edit', 'delete'];
-
 /**
  * Register a permission in the registry
  * @param {Object} permission - Permission object
- * @param {string} permission.code - Permission code (e.g., 'users.view')
- * @param {string} permission.name - Human-readable name
- * @param {string} permission.description - Description
- * @param {string} permission.module - Module name
- * @param {string} permission.resource - Resource name (optional)
- * @param {string} permission.action - Action name (optional)
- * @param {string} permission.httpMethod - HTTP method (optional)
- * @param {string} permission.apiPath - API path pattern (optional)
  */
 const registerPermission = (permission) => {
-  const { code, name, description, module, resource, action, httpMethod, apiPath } = permission;
-  
-  if (!code || !name || !module) {
-    logger.warn(`Invalid permission registration: ${JSON.stringify(permission)}`);
-    return false;
+  if (!permission.code || !permission.name) {
+    throw new Error('Permission must have code and name');
   }
-
-  permissionRegistry.set(code, {
-    code,
-    name,
-    description: description || `${name} permission`,
-    module,
-    resource: resource || null,
-    action: action || null,
-    httpMethod: httpMethod || null,
-    apiPath: apiPath || null,
-    isActive: true,
-    registeredAt: new Date()
-  });
-
-  return true;
-};
-
-/**
- * Register multiple permissions for a resource with standard CRUD actions
- * @param {string} module - Module name (e.g., 'users', 'masters')
- * @param {string} resource - Resource name (e.g., 'districts', 'posts')
- * @param {Object} options - Options
- * @param {string[]} options.actions - Actions to register (default: CRUD)
- * @param {string} options.basePath - Base API path
- */
-const registerResourcePermissions = (module, resource, options = {}) => {
-  const { actions = STANDARD_ACTIONS, basePath = '' } = options;
-  const resourceName = resource ? `${module}.${resource}` : module;
-  const displayName = resource 
-    ? `${capitalize(resource)}` 
-    : `${capitalize(module)}`;
-
-  actions.forEach(action => {
-    const code = resource ? `${module}.${resource}.${action}` : `${module}.${action}`;
-    const methods = ACTION_METHOD_MAP[action] || ['GET'];
-    
-    registerPermission({
-      code,
-      name: `${getActionLabel(action)} ${displayName}`,
-      description: `${getActionLabel(action)} ${displayName.toLowerCase()} data`,
-      module,
-      resource,
-      action,
-      httpMethod: methods[0],
-      apiPath: basePath
-    });
+  
+  permissionRegistry.set(permission.code, {
+    code: permission.code,
+    name: permission.name,
+    description: permission.description || permission.name,
+    module: permission.module || permission.code.split('.')[0],
+    is_active: true,
+    created_at: new Date(),
+    updated_at: new Date()
   });
 };
 
 /**
- * Register a single API route as a permission
- * @param {string} method - HTTP method
- * @param {string} path - API path
- * @param {string} permissionCode - Permission code
- * @param {Object} options - Additional options
- */
-const registerRoutePermission = (method, path, permissionCode, options = {}) => {
-  const parts = permissionCode.split('.');
-  const module = parts[0];
-  const action = parts[parts.length - 1];
-  const resource = parts.length > 2 ? parts.slice(1, -1).join('.') : null;
-
-  registerPermission({
-    code: permissionCode,
-    name: options.name || `${getActionLabel(action)} ${capitalize(resource || module)}`,
-    description: options.description || `Permission for ${method} ${path}`,
-    module,
-    resource,
-    action,
-    httpMethod: method,
-    apiPath: path
-  });
-};
-
-/**
- * Get all registered permissions
- * @returns {Object[]} Array of permission objects
+ * Get all permissions from registry
  */
 const getAllPermissions = () => {
   return Array.from(permissionRegistry.values());
 };
 
+// ==================== REGISTER EXACTLY USED PERMISSIONS ====================
+
+// Applicants Module (2)
+registerPermission({
+  code: 'applicants.edit',
+  name: 'Edit Applicants',
+  description: 'Edit applicant information',
+  module: 'applicants'
+});
+
+registerPermission({
+  code: 'applicants.view',
+  name: 'View Applicants',
+  description: 'View applicant details',
+  module: 'applicants'
+});
+
+// Applications Module (6)
+registerPermission({
+  code: 'applications.edit',
+  name: 'Edit Applications',
+  description: 'Edit application details',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.final_select',
+  name: 'Final Select Applications',
+  description: 'Final select applications',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.provisional_select',
+  name: 'Provisionally Select Applications',
+  description: 'Provisionally select applications',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.update_status',
+  name: 'Update Application Status',
+  description: 'Update application status',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.verify_documents',
+  name: 'Verify Application Documents',
+  description: 'Verify applicant documents',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.view',
+  name: 'View Applications',
+  description: 'View application details',
+  module: 'applications'
+});
+
+// Dashboard Module (1)
+registerPermission({
+  code: 'dashboard.view',
+  name: 'View Dashboard',
+  description: 'View dashboard',
+  module: 'dashboard'
+});
+
+// Masters Module (37)
+
+// Application Statuses
+registerPermission({
+  code: 'masters.application_statuses.create',
+  name: 'Create Application Status',
+  description: 'Create application status',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.application_statuses.delete',
+  name: 'Delete Application Status',
+  description: 'Delete application status',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.application_statuses.edit',
+  name: 'Edit Application Status',
+  description: 'Edit application status',
+  module: 'masters'
+});
+
+// Banners
+registerPermission({
+  code: 'masters.banners.create',
+  name: 'Create Banner',
+  description: 'Create banner',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.banners.delete',
+  name: 'Delete Banner',
+  description: 'Delete banner',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.banners.edit',
+  name: 'Edit Banner',
+  description: 'Edit banner',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.banners.view',
+  name: 'View Banners',
+  description: 'View banners',
+  module: 'masters'
+});
+
+// Categories
+registerPermission({
+  code: 'masters.categories.create',
+  name: 'Create Category',
+  description: 'Create category',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.categories.delete',
+  name: 'Delete Category',
+  description: 'Delete category',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.categories.edit',
+  name: 'Edit Category',
+  description: 'Edit category',
+  module: 'masters'
+});
+
+// Components
+registerPermission({
+  code: 'masters.components.create',
+  name: 'Create Component',
+  description: 'Create component/OSC',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.components.delete',
+  name: 'Delete Component',
+  description: 'Delete component/OSC',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.components.edit',
+  name: 'Edit Component',
+  description: 'Edit component/OSC',
+  module: 'masters'
+});
+
+// Departments
+registerPermission({
+  code: 'masters.departments.create',
+  name: 'Create Department',
+  description: 'Create department',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.departments.delete',
+  name: 'Delete Department',
+  description: 'Delete department',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.departments.edit',
+  name: 'Edit Department',
+  description: 'Edit department',
+  module: 'masters'
+});
+
+// Districts
+registerPermission({
+  code: 'masters.districts.create',
+  name: 'Create District',
+  description: 'Create district',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.districts.delete',
+  name: 'Delete District',
+  description: 'Delete district',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.districts.edit',
+  name: 'Edit District',
+  description: 'Edit district',
+  module: 'masters'
+});
+
+// Document Types
+registerPermission({
+  code: 'masters.document_types.create',
+  name: 'Create Document Type',
+  description: 'Create document type',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.document_types.delete',
+  name: 'Delete Document Type',
+  description: 'Delete document type',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.document_types.edit',
+  name: 'Edit Document Type',
+  description: 'Edit document type',
+  module: 'masters'
+});
+
+// Education Levels
+registerPermission({
+  code: 'masters.education_levels.create',
+  name: 'Create Education Level',
+  description: 'Create education level',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.education_levels.delete',
+  name: 'Delete Education Level',
+  description: 'Delete education level',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.education_levels.edit',
+  name: 'Edit Education Level',
+  description: 'Edit education level',
+  module: 'masters'
+});
+
+// Hubs
+registerPermission({
+  code: 'masters.hubs.create',
+  name: 'Create Hub',
+  description: 'Create hub',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.hubs.delete',
+  name: 'Delete Hub',
+  description: 'Delete hub',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.hubs.edit',
+  name: 'Edit Hub',
+  description: 'Edit hub',
+  module: 'masters'
+});
+
+// Posts
+registerPermission({
+  code: 'masters.posts.create',
+  name: 'Create Post',
+  description: 'Create post',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.posts.delete',
+  name: 'Delete Post',
+  description: 'Delete post',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.posts.edit',
+  name: 'Edit Post',
+  description: 'Edit post',
+  module: 'masters'
+});
+
+// Skills
+registerPermission({
+  code: 'masters.skills.create',
+  name: 'Create Skill',
+  description: 'Create skill',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.skills.delete',
+  name: 'Delete Skill',
+  description: 'Delete skill',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.skills.edit',
+  name: 'Edit Skill',
+  description: 'Edit skill',
+  module: 'masters'
+});
+
+// Talukas
+registerPermission({
+  code: 'masters.talukas.create',
+  name: 'Create Taluka',
+  description: 'Create taluka',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.talukas.delete',
+  name: 'Delete Taluka',
+  description: 'Delete taluka',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.talukas.edit',
+  name: 'Edit Taluka',
+  description: 'Edit taluka',
+  module: 'masters'
+});
+
+// Permissions Module (4)
+registerPermission({
+  code: 'permissions.create',
+  name: 'Create Permission',
+  description: 'Create permission',
+  module: 'permissions'
+});
+
+registerPermission({
+  code: 'permissions.delete',
+  name: 'Delete Permission',
+  description: 'Delete permission',
+  module: 'permissions'
+});
+
+registerPermission({
+  code: 'permissions.edit',
+  name: 'Edit Permission',
+  description: 'Edit permission',
+  module: 'permissions'
+});
+
+registerPermission({
+  code: 'permissions.view',
+  name: 'View Permissions',
+  description: 'View permissions',
+  module: 'permissions'
+});
+
+// Posts Module (6)
+registerPermission({
+  code: 'posts.close',
+  name: 'Close Posts',
+  description: 'Close posts',
+  module: 'posts'
+});
+
+registerPermission({
+  code: 'posts.create',
+  name: 'Create Post',
+  description: 'Create post',
+  module: 'posts'
+});
+
+registerPermission({
+  code: 'posts.delete',
+  name: 'Delete Post',
+  description: 'Delete post',
+  module: 'posts'
+});
+
+registerPermission({
+  code: 'posts.edit',
+  name: 'Edit Post',
+  description: 'Edit post',
+  module: 'posts'
+});
+
+registerPermission({
+  code: 'posts.publish',
+  name: 'Publish Posts',
+  description: 'Publish posts',
+  module: 'posts'
+});
+
+registerPermission({
+  code: 'posts.view',
+  name: 'View Posts',
+  description: 'View posts',
+  module: 'posts'
+});
+
+// Reports Module (1)
+registerPermission({
+  code: 'reports.view',
+  name: 'View Reports',
+  description: 'View reports',
+  module: 'reports'
+});
+
+// Roles Module (5)
+registerPermission({
+  code: 'roles.create',
+  name: 'Create Role',
+  description: 'Create role',
+  module: 'roles'
+});
+
+registerPermission({
+  code: 'roles.delete',
+  name: 'Delete Role',
+  description: 'Delete role',
+  module: 'roles'
+});
+
+registerPermission({
+  code: 'roles.edit',
+  name: 'Edit Role',
+  description: 'Edit role',
+  module: 'roles'
+});
+
+registerPermission({
+  code: 'roles.manage_permissions',
+  name: 'Manage Role Permissions',
+  description: 'Manage role permissions',
+  module: 'roles'
+});
+
+registerPermission({
+  code: 'roles.view',
+  name: 'View Roles',
+  description: 'View roles',
+  module: 'roles'
+});
+
+// Users Module (6)
+registerPermission({
+  code: 'users.assign_roles',
+  name: 'Assign Roles to Users',
+  description: 'Assign roles to users',
+  module: 'users'
+});
+
+registerPermission({
+  code: 'users.create',
+  name: 'Create User',
+  description: 'Create user',
+  module: 'users'
+});
+
+registerPermission({
+  code: 'users.delete',
+  name: 'Delete User',
+  description: 'Delete user',
+  module: 'users'
+});
+
+registerPermission({
+  code: 'users.edit',
+  name: 'Edit User',
+  description: 'Edit user',
+  module: 'users'
+});
+
+registerPermission({
+  code: 'users.reset_password',
+  name: 'Reset User Password',
+  description: 'Reset user password',
+  module: 'users'
+});
+
+registerPermission({
+  code: 'users.view',
+  name: 'View Users',
+  description: 'View users',
+  module: 'users'
+});
+
+// ==================== PERMISSION HELPER FUNCTIONS ====================
+
 /**
- * Get permissions grouped by module
- * @returns {Object} Permissions grouped by module
- */
-const getPermissionsByModule = () => {
-  const grouped = {};
-  
-  permissionRegistry.forEach((permission) => {
-    if (!grouped[permission.module]) {
-      grouped[permission.module] = [];
-    }
-    grouped[permission.module].push(permission);
-  });
-
-  // Sort permissions within each module
-  Object.keys(grouped).forEach(module => {
-    grouped[module].sort((a, b) => a.code.localeCompare(b.code));
-  });
-
-  return grouped;
-};
-
-/**
- * Check if a user has a specific permission
- * Supports wildcard matching:
- *   - '*' matches all permissions
- *   - 'module.*' matches all permissions in module
- *   - 'module.resource.*' matches all actions on resource
- * 
- * @param {string[]} userPermissions - User's assigned permission codes
- * @param {string} requiredPermission - Required permission code
- * @returns {boolean} True if user has permission
+ * Check if user has a specific permission (with wildcard support)
+ * @param {Array} userPermissions - User's permissions array
+ * @param {string} requiredPermission - Required permission to check
+ * @returns {boolean} - Whether user has the permission
  */
 const hasPermission = (userPermissions, requiredPermission) => {
-  if (!userPermissions || !Array.isArray(userPermissions)) {
+  if (!userPermissions || !requiredPermission) {
     return false;
   }
-
-  // Direct match
+  
+  // Check for wildcard permission
+  if (userPermissions.includes('*')) {
+    return true;
+  }
+  
+  // Check for exact match
   if (userPermissions.includes(requiredPermission)) {
     return true;
   }
-
-  // Check wildcard permissions
-  for (const userPerm of userPermissions) {
-    // Full wildcard (superadmin)
-    if (userPerm === '*') {
+  
+  // Check for wildcard patterns (e.g., 'masters.*' matches 'masters.view')
+  const wildcardPermissions = userPermissions.filter(p => p.endsWith('.*'));
+  for (const wildcard of wildcardPermissions) {
+    const prefix = wildcard.slice(0, -2); // Remove '.*' from end
+    if (requiredPermission.startsWith(prefix + '.')) {
       return true;
     }
-
-    // Module wildcard (e.g., 'users.*' matches 'users.view')
-    if (userPerm.endsWith('.*')) {
-      const prefix = userPerm.slice(0, -1); // Remove '*'
-      if (requiredPermission.startsWith(prefix)) {
-        return true;
-      }
-    }
-
-    // Action wildcard (e.g., '*.view' matches 'users.view')
-    if (userPerm.startsWith('*.')) {
-      const suffix = userPerm.slice(1); // Remove '*'
-      if (requiredPermission.endsWith(suffix)) {
-        return true;
-      }
-    }
   }
-
+  
   return false;
 };
 
 /**
- * Check if user has ANY of the required permissions
- * @param {string[]} userPermissions - User's assigned permission codes
- * @param {string[]} requiredPermissions - Required permission codes (OR logic)
- * @returns {boolean} True if user has at least one permission
+ * Check if user has any of the required permissions
+ * @param {Array} userPermissions - User's permissions array
+ * @param {Array} requiredPermissions - Array of required permissions (OR logic)
+ * @returns {boolean} - Whether user has at least one of the required permissions
  */
 const hasAnyPermission = (userPermissions, requiredPermissions) => {
-  return requiredPermissions.some(perm => hasPermission(userPermissions, perm));
+  if (!userPermissions || !requiredPermissions || requiredPermissions.length === 0) {
+    return false;
+  }
+  
+  // Check if user has wildcard permission
+  if (userPermissions.includes('*')) {
+    return true;
+  }
+  
+  // Check each required permission
+  return requiredPermissions.some(permission => hasPermission(userPermissions, permission));
 };
 
-/**
- * Check if user has ALL of the required permissions
- * @param {string[]} userPermissions - User's assigned permission codes
- * @param {string[]} requiredPermissions - Required permission codes (AND logic)
- * @returns {boolean} True if user has all permissions
- */
-const hasAllPermissions = (userPermissions, requiredPermissions) => {
-  return requiredPermissions.every(perm => hasPermission(userPermissions, perm));
-};
+// ==================== DATABASE SYNC ====================
 
 /**
- * Expand wildcard permissions to actual permission codes
- * @param {string[]} permissions - Permission codes (may include wildcards)
- * @returns {string[]} Expanded permission codes
- */
-const expandWildcards = (permissions) => {
-  const expanded = new Set();
-
-  permissions.forEach(perm => {
-    if (perm === '*') {
-      // Add all permissions
-      permissionRegistry.forEach((_, code) => expanded.add(code));
-    } else if (perm.endsWith('.*')) {
-      // Module wildcard
-      const prefix = perm.slice(0, -1);
-      permissionRegistry.forEach((_, code) => {
-        if (code.startsWith(prefix)) {
-          expanded.add(code);
-        }
-      });
-    } else if (perm.startsWith('*.')) {
-      // Action wildcard
-      const suffix = perm.slice(1);
-      permissionRegistry.forEach((_, code) => {
-        if (code.endsWith(suffix)) {
-          expanded.add(code);
-        }
-      });
-    } else {
-      expanded.add(perm);
-    }
-  });
-
-  return Array.from(expanded);
-};
-
-/**
- * Sync registered permissions to database
+ * Sync permissions to database
  * @param {Object} sequelize - Sequelize instance
  * @returns {Object} Sync result with counts
  */
 const syncToDatabase = async (sequelize) => {
   try {
+    const { Permission } = sequelize.models;
     const permissions = getAllPermissions();
+    
     let created = 0;
     let updated = 0;
     let skipped = 0;
-
-    for (const perm of permissions) {
-      const [result, wasCreated] = await sequelize.query(
-        `INSERT INTO ms_permissions (permission_name, permission_code, description, module, is_active, created_at)
-         VALUES (:name, :code, :description, :module, true, NOW())
-         ON CONFLICT (permission_code) DO UPDATE SET
-           permission_name = EXCLUDED.permission_name,
-           description = EXCLUDED.description,
-           module = EXCLUDED.module,
-           is_active = true
-         RETURNING permission_id, (xmax = 0) as was_inserted`,
-        {
-          replacements: {
-            name: perm.name,
-            code: perm.code,
-            description: perm.description,
-            module: perm.module
+    
+    // Process permissions one by one without transaction to avoid conflicts
+    for (const permission of permissions) {
+      try {
+        const [dbPermission, isNew] = await Permission.findOrCreate({
+          where: { permission_code: permission.code },
+          defaults: {
+            permission_code: permission.code,
+            permission_name: permission.name,
+            description: permission.description,
+            module: permission.module,
+            is_active: true
           }
+        });
+        
+        if (isNew) {
+          created++;
+        } else if (dbPermission.description !== permission.description || 
+                   dbPermission.module !== permission.module) {
+          await dbPermission.update({
+            description: permission.description,
+            module: permission.module,
+            is_active: true
+          });
+          updated++;
+        } else {
+          skipped++;
         }
-      );
-
-      if (result[0]?.was_inserted) {
-        created++;
-      } else {
-        updated++;
+      } catch (error) {
+        // Log error for individual permission but continue with others
+        logger.warn(`Failed to sync permission ${permission.code}:`, error.message);
+        skipped++;
       }
     }
-
-    logger.info(`Permission sync complete: ${created} created, ${updated} updated`);
+    
+    logger.info(`Permission sync complete: ${created} created, ${updated} updated, ${skipped} skipped`);
     return { created, updated, skipped, total: permissions.length };
   } catch (error) {
     logger.error('Error syncing permissions to database:', error);
@@ -320,183 +653,11 @@ const syncToDatabase = async (sequelize) => {
   }
 };
 
-/**
- * Get permission code from HTTP method and path
- * @param {string} method - HTTP method
- * @param {string} path - API path
- * @returns {string|null} Permission code or null
- */
-const getPermissionFromRoute = (method, path) => {
-  // Find matching permission by route
-  for (const [code, perm] of permissionRegistry) {
-    if (perm.httpMethod === method && perm.apiPath === path) {
-      return code;
-    }
-  }
-  return null;
-};
-
-// Helper functions
-function capitalize(str) {
-  if (!str) return '';
-  return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ');
-}
-
-function getActionLabel(action) {
-  const labels = {
-    view: 'View',
-    list: 'List',
-    create: 'Create',
-    edit: 'Edit',
-    delete: 'Delete',
-    manage: 'Manage',
-    export: 'Export',
-    import: 'Import',
-    approve: 'Approve',
-    reject: 'Reject',
-    publish: 'Publish',
-    assign: 'Assign',
-    reset: 'Reset',
-    verify: 'Verify'
-  };
-  return labels[action] || capitalize(action);
-}
-
-// ============================================
-// REGISTER ALL APPLICATION PERMISSIONS
-// ============================================
-
-// User Management
-registerResourcePermissions('users', null, { 
-  actions: ['view', 'create', 'edit', 'delete', 'assign_roles', 'reset_password'] 
-});
-
-// Role Management
-registerResourcePermissions('roles', null, { 
-  actions: ['view', 'create', 'edit', 'delete', 'manage_permissions'] 
-});
-
-// Permission Management
-registerResourcePermissions('permissions', null, { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Districts
-registerResourcePermissions('masters', 'districts', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Talukas
-registerResourcePermissions('masters', 'talukas', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Components
-registerResourcePermissions('masters', 'components', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Posts
-registerResourcePermissions('masters', 'posts', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Document Types
-registerResourcePermissions('masters', 'document_types', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Education Levels
-registerResourcePermissions('masters', 'education_levels', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Categories
-registerResourcePermissions('masters', 'categories', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Experience Domains
-registerResourcePermissions('masters', 'experience_domains', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Application Statuses
-registerResourcePermissions('masters', 'application_statuses', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Master Data - Banners
-registerResourcePermissions('masters', 'banners', { 
-  actions: ['view', 'create', 'edit', 'delete'] 
-});
-
-// Posts/Jobs Management
-registerResourcePermissions('posts', null, { 
-  actions: ['view', 'create', 'edit', 'delete', 'publish'] 
-});
-
-// Application Management
-registerResourcePermissions('applications', null, { 
-  actions: ['view', 'review', 'approve', 'reject', 'export', 'verify'] 
-});
-
-// Applicant Management
-registerResourcePermissions('applicants', null, { 
-  actions: ['view', 'edit', 'verify_documents'] 
-});
-
-// Eligibility & Merit
-registerResourcePermissions('eligibility', null, { 
-  actions: ['check', 'view'] 
-});
-
-registerResourcePermissions('merit', null, { 
-  actions: ['view', 'generate', 'publish'] 
-});
-
-// Reports & Analytics
-registerResourcePermissions('reports', null, { 
-  actions: ['view', 'export'] 
-});
-
-registerResourcePermissions('analytics', null, { 
-  actions: ['view'] 
-});
-
-// Audit & Logs
-registerResourcePermissions('audit', null, { 
-  actions: ['view', 'login_attempts'] 
-});
-
-// Notifications
-registerResourcePermissions('notifications', null, { 
-  actions: ['send', 'view_logs'] 
-});
-
-// Dashboard
-registerResourcePermissions('dashboard', null, { 
-  actions: ['view', 'stats'] 
-});
-
-// System Settings
-registerResourcePermissions('settings', null, { 
-  actions: ['view', 'edit'] 
-});
-
 module.exports = {
   registerPermission,
-  registerResourcePermissions,
-  registerRoutePermission,
   getAllPermissions,
-  getPermissionsByModule,
-  hasPermission,
-  hasAnyPermission,
-  hasAllPermissions,
-  expandWildcards,
   syncToDatabase,
-  getPermissionFromRoute,
   permissionRegistry,
-  STANDARD_ACTIONS,
-  ACTION_METHOD_MAP
+  hasPermission,
+  hasAnyPermission
 };

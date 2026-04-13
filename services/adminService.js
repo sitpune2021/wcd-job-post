@@ -35,7 +35,9 @@ class AdminService {
    * @returns {Promise<Object>} - Created user
    */
   async createUser(data, currentUser) {
-    const { username, password, full_name, email, mobile_no, role_id } = data;
+    const { username, password, full_name, email, mobile_no, role_id, district_id, component_id, hub_id } = data;
+
+    const transaction = await db.sequelize.transaction();
 
     try {
       // Check if username already exists
@@ -58,23 +60,27 @@ class AdminService {
         throw new ApiError(400, 'Invalid role');
       }
 
-      // Hash password
-      const { getBcryptRounds } = require('../config/security');
-      const password_hash = await bcrypt.hash(password, getBcryptRounds());
-
-      // Create user (state-level system, no ZP)
+      // Create admin user (model will hash password in beforeCreate hook)
       const user = await AdminUser.create({
         username,
-        password_hash,
+        password_hash: password, // Pass plain text, model will hash it
         full_name,
         email,
         mobile_no,
         role_id,
+        district_id,
+        component_id,
+        hub_id,
         created_by: currentUser.id,
         is_active: true
-      });
+      }, { transaction });
+
+      await transaction.commit();
 
       logger.info(`Admin user created: ${username} by ${currentUser.username || currentUser.id}`);
+      if (district_id || component_id || hub_id) {
+        logger.info(`Admin user linked to - District: ${district_id || 'None'}, OSC: ${component_id || 'None'}, Hub: ${hub_id || 'None'}`);
+      }
 
       // Fetch user with role
       const createdUser = await AdminUser.findByPk(user.admin_id, {
@@ -84,6 +90,7 @@ class AdminService {
 
       return createdUser;
     } catch (error) {
+      await transaction.rollback();
       logger.error('Create user error:', error);
       throw error;
     }
@@ -189,7 +196,7 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, is_active } = data;
+    const { full_name, email, mobile_no, role_id, district_id, is_active, password } = data;
 
     try {
       const user = await AdminUser.findOne({
@@ -217,15 +224,24 @@ class AdminService {
         }
       }
 
-      // Update user
-      await user.update({
+      // Prepare update data
+      const updateData = {
         full_name: full_name || user.full_name,
         email: email || user.email,
         mobile_no: mobile_no !== undefined ? mobile_no : user.mobile_no,
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
         is_active: is_active !== undefined ? is_active : user.is_active
-      });
+      };
+
+      // Handle password update if provided and not empty (model will hash it in beforeUpdate hook)
+      if (password && password.trim() !== '') {
+        updateData.password_hash = password; // Model will hash this in beforeUpdate hook
+        logger.info(`Password updated for user: ${user.username} by ${currentUser.username || currentUser.id}`);
+      }
+
+      // Update user
+      await user.update(updateData);
 
       logger.info(`Admin user updated: ${user.username} by ${currentUser.username || currentUser.id}`);
 
@@ -265,7 +281,7 @@ class AdminService {
         }
       }
 
-      // Soft delete
+      // Soft delete admin user
       await user.update({
         is_deleted: true,
         deleted_at: new Date(),

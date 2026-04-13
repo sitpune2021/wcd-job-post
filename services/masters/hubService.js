@@ -32,6 +32,10 @@ const transformHub = (language = 'en') => (h) => ({
     district_name: localizeField(h.district, 'district_name', language),
     district_name_mr: h.district.district_name_mr
   } : null,
+  // Geofencing fields
+  latitude: h.latitude,
+  longitude: h.longitude,
+  geofence_radius_meters: h.geofence_radius_meters,
   is_active: h.is_active,
   created_at: h.created_at,
   updated_at: h.updated_at
@@ -94,6 +98,12 @@ const getAllHubs = async (language = 'en', includeInactive = false) => {
 const getHubById = async (hubId, language = 'en') => {
   try {
     const hub = await Hub.findByPk(hubId, {
+      attributes: [
+        'hub_id', 'hub_code', 'hub_name', 'hub_name_mr',
+        'description', 'description_mr', 'district_id', 'is_active',
+        'created_at', 'updated_at', 'created_by', 'updated_by',
+        'latitude', 'longitude', 'geofence_radius_meters'
+      ],
       include: [{
         model: DistrictMaster,
         as: 'district',
@@ -128,6 +138,10 @@ const createHub = async (data, userId) => {
       district_id: data.district_id || null,
       description: data.description || null,
       description_mr: data.description_mr || null,
+      // Geofencing fields
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      geofence_radius_meters: data.geofence_radius_meters || null,
       is_active: data.is_active !== undefined ? data.is_active : true,
       created_by: userId
     });
@@ -161,7 +175,9 @@ const updateHub = async (hubId, data, userId) => {
 
     const fields = [
       'hub_name', 'hub_name_mr', 'district_id', 
-      'description', 'description_mr', 'is_active'
+      'description', 'description_mr', 'is_active',
+      // Geofencing fields
+      'latitude', 'longitude', 'geofence_radius_meters'
     ];
 
     fields.forEach(field => {

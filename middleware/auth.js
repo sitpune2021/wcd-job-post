@@ -18,7 +18,7 @@ const initializePassport = () => {
       try {
         let user;
         
-        // Check if user is applicant or admin
+        // Check if user is applicant, employee, or admin
         if (jwtPayload.role === 'APPLICANT') {
           user = await db.ApplicantMaster.findOne({ 
             where: { 
@@ -33,6 +33,30 @@ const initializePassport = () => {
             user.dataValues.permissions = [];
             // Also expose role directly for routes that read req.user.role
             user.role = 'APPLICANT';
+          }
+        } else if (jwtPayload.role === 'EMPLOYEE') {
+          // Handle HRM app employee tokens
+          const { EmployeeMaster } = require('../modules/hrm/models');
+          
+          user = await EmployeeMaster.findOne({
+            where: {
+              employee_id: jwtPayload.employee_id,
+              is_deleted: false,
+              is_active: true
+            },
+            include: [{
+              model: db.ApplicantMaster,
+              as: 'applicant',
+              attributes: ['applicant_id', 'email', 'mobile_no']
+            }]
+          });
+          
+          if (user) {
+            // Mark this principal as an employee for downstream checks
+            user.dataValues.role = 'EMPLOYEE';
+            user.dataValues.permissions = [];
+            // Also expose role directly for routes that read req.user.role
+            user.role = 'EMPLOYEE';
           }
         } else {
           user = await db.AdminUser.findOne({ 

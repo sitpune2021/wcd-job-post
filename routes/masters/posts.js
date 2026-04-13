@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { postMasterService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const postSchemas = require('../../validators/masters/postSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -31,7 +33,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requirePermission('masters.posts.create'),
+router.post('/', authenticate, requirePermission('masters.posts.create'), validateBody(postSchemas.createPost),
   async (req, res, next) => {
     try {
       const post = await postMasterService.createPost(req.body, req.user.admin_id);
@@ -42,7 +44,7 @@ router.post('/', authenticate, requirePermission('masters.posts.create'),
   }
 );
 
-router.put('/:id', authenticate, requirePermission('masters.posts.edit'),
+router.put('/:id', authenticate, requirePermission('masters.posts.edit'), validateBodyAndParams(postSchemas.updatePost, postSchemas.postIdParam),
   async (req, res, next) => {
     try {
       const post = await postMasterService.updatePost(req.params.id, req.body, req.user.admin_id);

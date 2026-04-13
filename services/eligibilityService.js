@@ -56,10 +56,13 @@ class EligibilityService {
         return { isEligible: false, error: 'Applicant not found', checks: [], failedChecks: ['Applicant not found'] };
       }
 
-      // ========== 1. CATEGORY CHECK (DISABLED - category stored but not used for eligibility) ==========
-      // Category is now stored for data purposes only, not used in eligibility logic
-      // const categoryCheck = this.checkCategorySimple(applicant.personal, post);
-      // result.checks.push(categoryCheck);
+      // ========== 1. GENDER CHECK ==========
+      const genderCheck = this.checkGender(applicant.personal, post);
+      result.checks.push(genderCheck);
+      if (!genderCheck.passed) {
+        result.isEligible = false;
+        result.failedChecks.push(genderCheck.message);
+      }
 
       // ========== 2. AGE CHECK ==========
       const ageCheck = this.checkAgeSimple(applicant.personal, post);
@@ -112,7 +115,17 @@ class EligibilityService {
     const education = applicant.education || [];
     const experience = applicant.experience || [];
 
-    // 1. Age check
+    // 1. Gender check
+    if (personal?.gender) {
+      const gender = personal.gender.toString().toLowerCase();
+      if (post.female_only && gender !== 'female') return false;
+      if (post.male_only && gender !== 'male') return false;
+    } else {
+      // If gender not specified, fail if post is gender-specific
+      if (post.female_only || post.male_only) return false;
+    }
+
+    // 2. Age check
     if (personal?.dob) {
       const today = new Date();
       const birthDate = new Date(personal.dob);
@@ -134,7 +147,10 @@ class EligibilityService {
     
     if (minEduLevel || maxEduLevel) {
       const minDisplayOrder = minEduLevel?.display_order || 0;
-      const maxDisplayOrder = maxEduLevel?.display_order || 999;
+      // If max is not set or set to 0/blank, treat as no upper cap
+      const maxDisplayOrder = (maxEduLevel && maxEduLevel.display_order > 0)
+        ? maxEduLevel.display_order
+        : null;
 
       let highestApplicantOrder = 0;
       for (const edu of education) {
@@ -144,7 +160,11 @@ class EligibilityService {
         }
       }
 
-      if (highestApplicantOrder < minDisplayOrder || highestApplicantOrder > maxDisplayOrder) {
+      // Enforce min and (if provided) max
+      if (highestApplicantOrder < minDisplayOrder) {
+        return false;
+      }
+      if (maxDisplayOrder !== null && highestApplicantOrder > maxDisplayOrder) {
         return false;
       }
     }
@@ -212,6 +232,39 @@ class EligibilityService {
     if (!categoryMatch) {
       check.passed = false;
       check.message = `Applicant category (ID: ${applicantCategoryId}) is not in allowed categories: ${check.required}`;
+    }
+
+    return check;
+  }
+
+  /**
+   * Gender check - if post is female_only, only females allowed; if male_only, only males allowed
+   * If neither flag is set, all genders are allowed
+   */
+  checkGender(personal, post) {
+    const check = {
+      criterion: 'Gender',
+      required: post.female_only ? 'Female only' : post.male_only ? 'Male only' : 'All genders',
+      actual: 'Not specified',
+      passed: true,
+      message: ''
+    };
+
+    const gender = personal?.gender ? personal.gender.toString().toLowerCase() : null;
+    check.actual = gender ? gender.charAt(0).toUpperCase() + gender.slice(1) : 'Not specified';
+
+    if (!gender && (post.female_only || post.male_only)) {
+      check.passed = false;
+      check.message = 'Gender not specified but post requires specific gender';
+      return check;
+    }
+
+    if (post.female_only && gender !== 'female') {
+      check.passed = false;
+      check.message = 'This post is for female candidates only';
+    } else if (post.male_only && gender !== 'male') {
+      check.passed = false;
+      check.message = 'This post is for male candidates only';
     }
 
     return check;
@@ -874,7 +927,9 @@ class EligibilityService {
         where: postWhereClause,
         include: [
           { model: db.Component, as: 'component', required: false },
+          { model: db.Hub, as: 'hub', required: false, attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr'] },
           { model: db.EducationLevel, as: 'minEducationLevel', required: false },
+          { model: db.EducationLevel, as: 'maxEducationLevel', required: false },
           {
             model: db.DistrictMaster,
             as: 'district',
@@ -906,6 +961,9 @@ class EligibilityService {
             post.component?.component_name,
             post.component?.component_name_mr,
             post.component?.component_code,
+            post.hub?.hub_name,
+            post.hub?.hub_name_mr,
+            post.hub?.hub_code,
             post.district?.district_name,
             post.district?.district_name_mr
           ].filter(Boolean).map((value) => value.toString().toLowerCase());
@@ -959,6 +1017,19 @@ class EligibilityService {
         throw new Error('Applicant not found');
       }
 
+      // Filter out posts that don't match applicant's gender
+      const applicantGender = applicant?.personal?.gender
+        ? applicant.personal.gender.toString().toLowerCase()
+        : null;
+
+      if (applicantGender) {
+        availablePosts = availablePosts.filter((post) => {
+          if (post.female_only && applicantGender !== 'female') return false;
+          if (post.male_only && applicantGender !== 'male') return false;
+          return true;
+        });
+      }
+
       // Build a map of post_id -> document requirements for quick lookup
       const postDocMap = new Map();
       postDocRows.forEach(row => {
@@ -988,6 +1059,7 @@ class EligibilityService {
         }
 
         const component = post.component || {};
+        const hub = post.hub || {};
         const district = post.district || {};
 
         // Get post-specific document requirements
@@ -1005,6 +1077,11 @@ class EligibilityService {
           component: component?.component_name,
           component_name_mr: component?.component_name_mr,
           component_code: component?.component_code,
+          hub: hub?.hub_name,
+          hub_name_mr: hub?.hub_name_mr,
+          hub_code: hub?.hub_code,
+          female_only: post.female_only,
+          male_only: post.male_only,
           is_eligible: isEligible,
           post_document_requirements: postDocRequirements
         });

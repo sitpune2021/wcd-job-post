@@ -59,6 +59,7 @@ const sendPdfFromHtml = async (res, filename, html) => {
       {
         format: 'A4',
         printBackground: true,
+        executablePath: process.env.CHROMIUM_PATH,
         margin: { top: '14mm', right: '12mm', bottom: '14mm', left: '12mm' },
         args: [
           '--no-sandbox',
@@ -67,7 +68,8 @@ const sendPdfFromHtml = async (res, filename, html) => {
           '--disable-gpu',
           '--font-render-hinting=medium',
           '--enable-font-antialiasing',
-          '--disable-lcd-text'
+          '--disable-lcd-text',
+          '--disable-software-rasterizer',
         ]
       }
     );
@@ -114,11 +116,11 @@ const buildApplicationPdfHtml = (req, application, options = {}) => {
     // Ensure we're working with a proper date object
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return { date: '-', time: '-' };
-    
+
     // Format options for IST
     const dateOptions = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' };
     const timeOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true };
-    
+
     return {
       date: d.toLocaleDateString('en-IN', dateOptions),
       time: d.toLocaleTimeString('en-IN', timeOptions)

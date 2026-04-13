@@ -45,6 +45,12 @@ const PostMaster = sequelize.define('PostMaster', {
     },
     comment: 'Linked hub for the post'
   },
+  // amount: {
+  //   type: DataTypes.DECIMAL(10, 2),
+  //   allowNull: true,
+  //   defaultValue: 0.00,
+  //   comment: 'Monthly salary amount for payroll calculation'
+  // },
   district_id: {
     type: DataTypes.INTEGER,
     allowNull: true,

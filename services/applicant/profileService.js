@@ -26,8 +26,10 @@ const { getRelativePath, getAbsolutePath } = require('../../utils/fileUpload');
 const { Op } = require('sequelize');
 const documentService = require('./documentService');
 const eligibilityService = require('../eligibilityService');
+const cache = require('../../utils/cache');
 const path = require('path');
 const fs = require('fs');
+const EducationLevel = require('../../models/EducationLevel');
 
 const isProfileLocked = async (applicantId) => {
   const count = await Application.count({
@@ -207,9 +209,13 @@ const setExperiencePreference = async (applicantId, hasExperience) => {
  * @returns {Promise<Object>} - Dashboard data
  */
 const getDashboard = async (applicantId) => {
+  const dashStartTime = Date.now();
+  const dashId = `DASH-${applicantId}-${Date.now()}`;
+  
   try {
-    logger.info(`Dashboard requested for applicantId=${applicantId}`);
+    logger.info(`[${dashId}] Dashboard START for applicantId=${applicantId}`);
 
+    const findStart = Date.now();
     const applicant = await ApplicantMaster.findByPk(applicantId, {
       include: [
         { model: ApplicantPersonal, as: 'personal' },
@@ -220,8 +226,11 @@ const getDashboard = async (applicantId) => {
       ]
     });
 
+    const findTime = Date.now() - findStart;
+    logger.info(`[${dashId}] ApplicantMaster.findByPk: ${findTime}ms`);
+    
     if (!applicant) {
-      logger.warn(`Dashboard: Applicant not found for applicantId=${applicantId}`);
+      logger.warn(`[${dashId}] Dashboard: Applicant not found for applicantId=${applicantId}`);
       throw new ApiError(404, 'Applicant not found');
     }
 
@@ -275,7 +284,10 @@ const getDashboard = async (applicantId) => {
 
     // Documents section (source of truth: /api/v1/applicant/documents/required)
     const documentsMissing = [];
+    const docTypesStart = Date.now();
     const requiredDocTypes = await documentService.getRequiredDocumentTypes(applicantId);
+    const docTypesTime = Date.now() - docTypesStart;
+    logger.info(`[${dashId}] getRequiredDocumentTypes: ${docTypesTime}ms, count=${requiredDocTypes?.length || 0}`);
     const requiredDocTypeIds = (requiredDocTypes || []).map(d => d.doc_type_id).filter(Boolean);
     const uploadedDocTypeIds = new Set(
       documents
@@ -343,10 +355,13 @@ const getDashboard = async (applicantId) => {
     const completion = steps.personal + steps.address + steps.education + steps.experience + steps.documents;
 
     // Get application counts
+    const appCountStart = Date.now();
     const applications = await Application.findAll({
       where: { applicant_id: applicantId, is_deleted: false },
-      attributes: ['status']
+      attributes: ['application_id', 'post_id', 'status']
     });
+    const appCountTime = Date.now() - appCountStart;
+    logger.info(`[${dashId}] Application.findAll: ${appCountTime}ms, count=${applications?.length || 0}`);
 
     const normalizeStatus = (raw) => {
       if (!raw) return null;
@@ -379,21 +394,45 @@ const getDashboard = async (applicantId) => {
       else if (s === 'NOT_ELIGIBLE') counts.not_eligible += 1;
     }
 
-    // Eligible posts count (skipped heavy eligibility computation on dashboard load)
-    const eligiblePosts = [];
-    const eligiblePostsCount = 0;
-    const eligiblePostsTotal = 0;
+    // Get eligible posts count (number of posts applicant can apply to)
+    // Optimized: Cache per user for 5 minutes, and only fetch count not full data
+    let eligiblePostsCount = 0;
+    let eligibleTime = 0;
+    try {
+      const eligibleStart = Date.now();
+      eligiblePostsCount = await cache.wrap(
+        `eligible_count:${applicantId}`,
+        300, // 5 minutes TTL
+        async () => {
+          // Use a direct optimized query instead of full eligibility check
+          const eligiblePostsData = await eligibilityService.getEligiblePosts(applicantId, {
+            onlyEligible: true,
+            includeLocked: false,
+            page: 1,
+            limit: 1
+          });
+          logger.info(`[${dashId}] Eligible posts for applicant ${applicantId}: ${eligiblePostsData?.pagination?.total || 0}`);
+          return eligiblePostsData.pagination.total || 0;
+        }
+      );
+      eligibleTime = Date.now() - eligibleStart;
+      logger.info(`[${dashId}] getEligiblePosts (cached): ${eligibleTime}ms, count=${eligiblePostsCount}`);
+    } catch (err) {
+      eligibleTime = Date.now() - eligibleStart;
+      logger.warn(`[${dashId}] Failed to get eligible posts: ${eligibleTime}ms`, { applicantId, error: err.message });
+      eligiblePostsCount = 0;
+    }
 
     const applicationStats = {
-      total: counts.total,
+      total: counts.total, // Total applications submitted
       draft: counts.draft,
-      eligible: counts.eligible,
-      selected: counts.selected,
+      eligible: eligiblePostsCount, // Posts user can apply to
+      selected: counts.selected, // Posts where user is selected
       rejected: counts.rejected,
       on_hold: counts.on_hold,
       not_eligible: counts.not_eligible,
       eligible_posts: eligiblePostsCount,
-      total_open_posts: Array.isArray(eligiblePosts) ? eligiblePosts.length : 0
+      total_open_posts: eligiblePostsCount
     };
 
     // Profile summary
@@ -402,14 +441,17 @@ const getDashboard = async (applicantId) => {
     const full_name = personal?.full_name || null;
     const email = applicant.email || null;
 
+    const dashTotalTime = Date.now() - dashStartTime;
+    logger.info(`[${dashId}] Dashboard COMPLETE: ${dashTotalTime}ms (findByPk: ${findTime}ms, docTypes: ${docTypesTime}ms, apps: ${appCountTime}ms, eligible: ${eligibleTime}ms)`);
+
+    if (dashTotalTime > 500) {
+      logger.warn(`[${dashId}] SLOW DASHBOARD: ${dashTotalTime}ms for applicant ${applicantId}`);
+    }
+
     return {
       profileCompletion: completion,
       completionSteps: steps,
       applicationStats,
-      eligiblePosts: {
-        total_posts: Array.isArray(eligiblePosts) ? eligiblePosts.length : 0,
-        eligible_count: eligiblePostsCount
-      },
       profile: {
         full_name,
         email,
@@ -453,7 +495,7 @@ const getProfile = async (applicantId) => {
             { model: TalukaMaster, as: 'taluka', required: false }
           ]
         },
-        { model: ApplicantEducation, as: 'education', required: false, where: { is_deleted: false }, required: false },
+        { model: ApplicantEducation, as: 'education', required: false, where: { is_deleted: false }, required: false,include: [{model: EducationLevel,as: 'educationLevel',required: false,attributes: ['level_id', 'level_name', 'level_name_mr']}] },
         { model: ApplicantExperience, as: 'experience', required: false, where: { is_deleted: false }, required: false },
         { model: ApplicantSkill, as: 'skills', required: false, include: [{ model: SkillMaster, as: 'skill', required: false }] },
         { model: ApplicantDocument, as: 'documents', required: false }

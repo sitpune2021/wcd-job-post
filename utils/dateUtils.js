@@ -13,18 +13,18 @@ function formatDateTimeIST(date) {
   const d = new Date(date);
   if (isNaN(d.getTime())) return { date: '-', time: '-' };
   
-  // Convert to IST (UTC+5:30)
+  // Convert to IST (UTC+5:30) using UTC epoch math (avoid double-offset)
   const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-  const istTime = new Date(d.getTime() + istOffset + (d.getTimezoneOffset() * 60 * 1000));
+  const istTime = new Date(d.getTime() + istOffset);
   
   // Format date
-  const day = String(istTime.getDate()).padStart(2, '0');
-  const month = String(istTime.getMonth() + 1).padStart(2, '0');
-  const year = istTime.getFullYear();
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const year = istTime.getUTCFullYear();
   
   // Format time with AM/PM
-  let hours = istTime.getHours();
-  const minutes = String(istTime.getMinutes()).padStart(2, '0');
+  let hours = istTime.getUTCHours();
+  const minutes = String(istTime.getUTCMinutes()).padStart(2, '0');
   const ampm = hours >= 12 ? 'pm' : 'am';
   hours = hours % 12 || 12; // Convert 0 to 12
   

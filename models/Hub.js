@@ -39,6 +39,22 @@ const Hub = sequelize.define('Hub', {
     allowNull: true,
     comment: 'Description in Marathi'
   },
+  latitude: {
+    type: DataTypes.DECIMAL(10, 8),
+    allowNull: true,
+    comment: 'Hub location latitude for geofencing'
+  },
+  longitude: {
+    type: DataTypes.DECIMAL(11, 8),
+    allowNull: true,
+    comment: 'Hub location longitude for geofencing'
+  },
+  geofence_radius_meters: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 100,
+    comment: 'Geofence radius in meters for attendance marking'
+  },
   is_active: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

@@ -129,6 +129,34 @@ const PERMISSIONS = {
     MANAGE: 'system.*'
   },
   
+  // ==================== HRM MODULE ====================
+  HRM: {
+    EMPLOYEES: {
+      VIEW: 'hrm.employees.view',
+      EDIT: 'hrm.employees.edit',
+      ONBOARD: 'hrm.employees.onboard',
+      MANAGE: 'hrm.employees.*'
+    },
+    ONBOARDING: {
+      VIEW: 'hrm.onboarding.view',
+      CONFIRM: 'hrm.onboarding.confirm',
+      REJECT: 'hrm.onboarding.reject',
+      IMPORT: 'hrm.onboarding.import',
+      MANAGE: 'hrm.onboarding.*'
+    },
+    REPORTS: {
+      VIEW: 'hrm.reports.view',
+      EXPORT: 'hrm.reports.export',
+      MANAGE: 'hrm.reports.*'
+    },
+    SETTINGS: {
+      VIEW: 'hrm.settings.view',
+      EDIT: 'hrm.settings.edit',
+      MANAGE: 'hrm.settings.*'
+    },
+    FULL_ACCESS: 'hrm.*'
+  },
+
   // ==================== WILDCARDS ====================
   WILDCARDS: {
     SUPER_ADMIN: '*',

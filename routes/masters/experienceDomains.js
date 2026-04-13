@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { experienceDomainService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const experienceDomainSchemas = require('../../validators/masters/experienceDomainSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -34,7 +36,7 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', authenticate, requirePermission([
   'masters.experience-domains.create',
   'masters.experience_domains.create'
-]),
+]), validateBody(experienceDomainSchemas.createExperienceDomain),
   async (req, res, next) => {
     try {
       const domain = await experienceDomainService.createExperienceDomain(req.body, req.user.admin_id);
@@ -50,7 +52,7 @@ router.put('/:id', authenticate, requirePermission([
   'masters.experience-domains.edit',
   'masters.experience_domains.update',
   'masters.experience_domains.edit'
-]),
+]), validateBodyAndParams(experienceDomainSchemas.updateExperienceDomain, experienceDomainSchemas.experienceDomainIdParam),
   async (req, res, next) => {
     try {
       const domain = await experienceDomainService.updateExperienceDomain(req.params.id, req.body, req.user.admin_id);

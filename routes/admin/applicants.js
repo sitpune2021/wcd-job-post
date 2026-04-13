@@ -65,4 +65,24 @@ router.get('/:id/applications', requirePermission('applicants.view'), auditLog('
   }
 });
 
+/**
+ * @route PATCH /api/v1/admin/applicants/ocr
+ * @desc Bulk toggle OCR for applicants
+ * @access Private (Admin - requires applicants.edit permission)
+ */
+router.patch('/ocr', requirePermission('applicants.edit'), auditLog('ADMIN_UPDATE_APPLICANT_OCR'), async (req, res, next) => {
+  try {
+    const { applicant_ids: applicantIds, ocr_disabled: ocrDisabled } = req.body || {};
+
+    if (!Array.isArray(applicantIds) || applicantIds.length === 0) {
+      throw ApiError.badRequest('applicant_ids array is required');
+    }
+
+    const result = await applicantService.updateApplicantOCR(applicantIds, !!ocrDisabled);
+    return ApiResponse.success(res, result, 'Applicant OCR settings updated successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

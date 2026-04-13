@@ -21,11 +21,13 @@ const {
   PostMaster,
   DistrictMaster,
   TalukaMaster,
+  Hub,
   Component,
   EligibilityResult,
   ApplicationStatusHistory
 } = db;
 const logger = require('../../config/logger');
+const cache = require('../../utils/cache');
 const { ApiError } = require('../../middleware/errorHandler');
 const { APPLICATION_STATUS, ACTOR_TYPE } = require('../../constants/applicationStatus');
 const { Op } = require('sequelize');
@@ -42,6 +44,16 @@ const { calculateMeritScore } = require('../applicationWorkflowService');
  */
 const getActivePostsWithCounts = async (filters = {}) => {
   try {
+    // Create cache key
+    const cacheKey = `active_posts_counts:${JSON.stringify(filters)}`;
+
+    // Try cache first
+    const cachedResult = await cache.get(cacheKey);
+    if (cachedResult) {
+      logger.info('Active posts with counts retrieved from cache');
+      return cachedResult;
+    }
+
     const whereClause = {
       is_deleted: false
     };
@@ -52,6 +64,10 @@ const getActivePostsWithCounts = async (filters = {}) => {
 
     if (filters.district_id) {
       whereClause.district_id = filters.district_id;
+    }
+
+    if (filters.hub_id) {
+      whereClause.hub_id = filters.hub_id;
     }
 
     // Text search across post/component/district (en + mr)
@@ -71,38 +87,72 @@ const getActivePostsWithCounts = async (filters = {}) => {
 
     const posts = await PostMaster.findAll({
       where: whereClause,
+      attributes: [
+        'post_id',
+        'post_name',
+        'post_name_mr',
+        'component_id',
+        'hub_id',
+        'district_id',
+        'post_code',
+        'description',
+        'description_mr'
+      ],
       include: [
-        { model: Component, as: 'component' },
-        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] }
+        { model: Component, as: 'component', required: false, attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr'] },
+        { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] },
+        { model: Hub, as: 'hub', required: false, attributes: ['hub_id', 'hub_name', 'hub_name_mr'] }
       ],
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']]
     });
 
-    // Get application counts for each post
-    const postsWithCounts = await Promise.all(posts.map(async (post) => {
+    if (!posts.length) return [];
+
+    // Batch fetch application counts for all posts in one query for speed
+    const postIds = posts.map((p) => p.post_id);
+    const [countRows] = await db.sequelize.query(`
+      SELECT 
+        post_id,
+        COUNT(*) FILTER (WHERE status = 'DRAFT') as draft_count,
+        COUNT(*) FILTER (WHERE status = 'SUBMITTED') as submitted_count,
+        COUNT(*) FILTER (WHERE status = 'ELIGIBLE') as eligible_count,
+        COUNT(*) FILTER (WHERE status = 'NOT_ELIGIBLE') as not_eligible_count,
+        COUNT(*) FILTER (WHERE status = 'ON_HOLD') as on_hold_count,
+        COUNT(*) FILTER (WHERE status = 'PROVISIONAL_SELECTED') as provisional_selected_count,
+        COUNT(*) FILTER (WHERE status = 'SELECTED') as selected_count,
+        COUNT(*) FILTER (WHERE status = 'REJECTED') as rejected_count,
+        COUNT(*) as total_count
+      FROM ms_applications
+      WHERE post_id IN (:postIds) AND is_deleted = false
+      GROUP BY post_id
+    `, { replacements: { postIds } });
+
+    const countsMap = countRows.reduce((acc, row) => {
+      acc[row.post_id] = row;
+      return acc;
+    }, {});
+
+    const result = posts.map((post) => {
       const postJson = post.toJSON();
-
-      // Count applications by status
-      const [counts] = await db.sequelize.query(`
-        SELECT 
-          COUNT(*) FILTER (WHERE status = 'DRAFT') as draft_count,
-          COUNT(*) FILTER (WHERE status = 'SUBMITTED') as submitted_count,
-          COUNT(*) FILTER (WHERE status = 'ELIGIBLE') as eligible_count,
-          COUNT(*) FILTER (WHERE status = 'NOT_ELIGIBLE') as not_eligible_count,
-          COUNT(*) FILTER (WHERE status = 'ON_HOLD') as on_hold_count,
-          COUNT(*) FILTER (WHERE status = 'PROVISIONAL_SELECTED') as provisional_selected_count,
-          COUNT(*) FILTER (WHERE status = 'SELECTED') as selected_count,
-          COUNT(*) FILTER (WHERE status = 'REJECTED') as rejected_count,
-          COUNT(*) as total_count
-        FROM ms_applications
-        WHERE post_id = :postId AND is_deleted = false
-      `, { replacements: { postId: post.post_id } });
-
-      postJson.application_counts = counts[0] || {};
+      postJson.application_counts = countsMap[post.post_id] || {
+        draft_count: 0,
+        submitted_count: 0,
+        eligible_count: 0,
+        not_eligible_count: 0,
+        on_hold_count: 0,
+        provisional_selected_count: 0,
+        selected_count: 0,
+        rejected_count: 0,
+        total_count: 0
+      };
       return postJson;
-    }));
+    });
 
-    return postsWithCounts;
+    // Cache for 2 minutes
+    await cache.set(cacheKey, result, 120);
+    logger.info(`Active posts with counts cached: ${result.length} posts`);
+
+    return result;
   } catch (error) {
     logger.error('Get active posts with counts error:', error);
     throw error;
@@ -119,6 +169,14 @@ const getActivePostsWithCounts = async (filters = {}) => {
  */
 const getApplicationsForPost = async (postId, filters = {}) => {
   try {
+    const cacheKey = `admin_post_apps:${postId}:${JSON.stringify(filters)}`;
+
+    // Short cache (60s) to shield DB from repeated heavy pulls
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const {
       status = APPLICATION_STATUS.ELIGIBLE,
       district_id,
@@ -285,24 +343,32 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       ]
     });
 
-    // For each application, get the applicant's total application count and other applied posts
-    const applicationsWithDetails = await Promise.all(paginatedApplications.map(async (app, index) => {
-      const appJson = app; // Already JSON from previous step
-      appJson.merit_rank = offset + index + 1;
-      appJson.merit_score = app.calculated_merit_score; // Use calculated score
+    // Batch fetch applicant-level aggregates for the current page to avoid N+1 queries
+    const applicantIds = Array.from(new Set(paginatedApplications
+      .map((a) => a.applicant_id)
+      .filter(Boolean)));
 
-      // Get total application count for this applicant
-      const [countResult] = await db.sequelize.query(`
-        SELECT COUNT(*) as total_applications
+    let applicantCountsMap = {};
+    let applicantOtherPostsMap = {};
+
+    if (applicantIds.length) {
+      // Total applications per applicant
+      const [counts] = await db.sequelize.query(`
+        SELECT applicant_id, COUNT(*)::int AS total_applications
         FROM ms_applications
-        WHERE applicant_id = :applicantId AND is_deleted = false
-      `, { replacements: { applicantId: appJson.applicant_id } });
+        WHERE applicant_id IN (:applicantIds)
+          AND is_deleted = false
+        GROUP BY applicant_id
+      `, { replacements: { applicantIds } });
 
-      appJson.applicant_total_applications = parseInt(countResult[0]?.total_applications || 0);
+      applicantCountsMap = Object.fromEntries(
+        (counts || []).map((row) => [row.applicant_id, row.total_applications])
+      );
 
-      // Get other applied posts details (excluding current post)
+      // Other applied posts (excluding current post)
       const [otherPosts] = await db.sequelize.query(`
         SELECT 
+          a.applicant_id,
           a.application_id,
           a.application_no,
           a.status,
@@ -314,33 +380,124 @@ const getApplicationsForPost = async (postId, filters = {}) => {
         FROM ms_applications a
         LEFT JOIN ms_post_master pm ON a.post_id = pm.post_id
         LEFT JOIN ms_district_master dm ON a.district_id = dm.district_id
-        WHERE a.applicant_id = :applicantId 
+        WHERE a.applicant_id IN (:applicantIds)
           AND a.post_id != :currentPostId
           AND a.is_deleted = false
         ORDER BY a.submitted_at DESC
       `, {
-        replacements: {
-          applicantId: appJson.applicant_id,
-          currentPostId: postId
-        }
+        replacements: { applicantIds, currentPostId: postId }
       });
 
-      appJson.applicant_other_applications = otherPosts || [];
+      applicantOtherPostsMap = (otherPosts || []).reduce((acc, row) => {
+        if (!acc[row.applicant_id]) acc[row.applicant_id] = [];
+        acc[row.applicant_id].push(row);
+        return acc;
+      }, {});
+    }
+
+    // For each application, attach aggregated applicant data
+    const applicationsWithDetails = paginatedApplications.map((app, index) => {
+      const appJson = app; // Already JSON from previous step
+      appJson.merit_rank = offset + index + 1;
+      appJson.merit_score = app.calculated_merit_score; // Use calculated score
+
+      appJson.applicant_total_applications = applicantCountsMap[appJson.applicant_id] || 0;
+      appJson.applicant_other_applications = applicantOtherPostsMap[appJson.applicant_id] || [];
 
       return appJson;
-    }));
+    });
+    // Build lightweight status summary (only non-zero entries)
+    const filteredStatusSummary = Object.fromEntries(
+      Object.entries(normalizedStatusSummary).filter(([, v]) => Number(v) > 0)
+    );
 
-    return {
-      applications: applicationsWithDetails,
+    // Build lightweight post info
+    const lightPost = postDetails
+      ? {
+        post_name: postDetails.post_name,
+        post_code: postDetails.post_code,
+        component: postDetails.component ? { component_name: postDetails.component.component_name } : null,
+        district: postDetails.district ? { district_name: postDetails.district.district_name } : null
+      }
+      : null;
+
+    // Trim application fields for response
+    const trimmedApplications = applicationsWithDetails.map((app, idx) => {
+      const applicant = app.applicant || {};
+      const personal = applicant.personal || {};
+      const address = applicant.address || {};
+      const permanentDistrict = address.permanentDistrict || {};
+      const education = Array.isArray(applicant.education) ? applicant.education[0] || null : null;
+      const experience = Array.isArray(applicant.experience) ? applicant.experience[0] || null : null;
+
+      const otherApps = Array.isArray(app.applicant_other_applications)
+        ? app.applicant_other_applications.map((o) => ({
+          application_no: o.application_no || null,
+          status: o.status || null,
+          post_name: o.post_name || null,
+          post_code: o.post_code || null,
+          district_name: o.district_name || null
+        }))
+        : [];
+
+      return {
+        application_id: app.application_id,
+        application_no: app.application_no || null,
+        status: app.status,
+        applicant_total_applications: app.applicant_total_applications || 0,
+        applicant_other_applications: otherApps,
+        applicant: {
+          personal: {
+            full_name: personal.full_name || null
+          },
+          address: {
+            permanentDistrict: {
+              district_name: permanentDistrict.district_name || null
+            }
+          },
+          education: education
+            ? [{
+              degree_name: education.degree_name || null,
+              stream_subject: education.stream_subject || null,
+              passing_year: education.passing_year || null,
+              percentage: education.percentage || null,
+              educationLevel: education.educationLevel
+                ? {
+                  level_name: education.educationLevel.level_name || null,
+                  display_order: education.educationLevel.display_order || null
+                }
+                : null
+            }]
+            : [],
+          experience: experience
+            ? [{
+              organization_name: experience.organization_name || null,
+              designation: experience.designation || null,
+              total_months: experience.total_months || null,
+              start_date: experience.start_date || null,
+              is_current: experience.is_current || false
+            }]
+            : []
+        }
+      };
+    });
+
+    const responsePayload = {
+      applications: trimmedApplications,
+      statusSummary: filteredStatusSummary,
+      post: lightPost,
       pagination: {
+        page: Number(page),
+        limit: Number(limit),
         total: totalCount,
-        page: parseInt(page),
-        limit: parseInt(limit),
         totalPages: Math.ceil(totalCount / limit)
-      },
-      statusSummary: normalizedStatusSummary,
-      post: postDetails ? postDetails.toJSON() : null
+      }
     };
+
+    // Cache the final response briefly
+    await cache.set(cacheKey, responsePayload, 60);
+
+    return responsePayload;
   } catch (error) {
     logger.error('Get applications for post error:', error);
     throw error;
@@ -385,23 +542,24 @@ const getAllApplications = async (filters = {}) => {
 
     const offset = (page - 1) * limit;
 
-    // Build search condition
+    // Build search condition and lean includes (only required fields)
     let searchInclude = [{
       model: ApplicantMaster,
       as: 'applicant',
       required: false,
-      attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_token_expires_at', 'activation_token', 'activation_token_expires_at'] },
+      attributes: ['applicant_id'],
       include: [
-        { model: ApplicantPersonal, as: 'personal', required: false },
+        { model: ApplicantPersonal, as: 'personal', required: false, attributes: ['full_name'] },
         {
           model: ApplicantAddress,
           as: 'address',
           required: false,
+          attributes: ['address_id', 'permanent_district_id'],
           include: [
             {
               model: DistrictMaster,
               as: 'permanentDistrict',
-              attributes: ['district_id', 'district_name', 'district_name_mr'],
+              attributes: ['district_id', 'district_name'],
               required: false
             }
           ]
@@ -424,15 +582,17 @@ const getAllApplications = async (filters = {}) => {
 
     const { count, rows } = await Application.findAndCountAll({
       where: whereClause,
+      attributes: ['application_id', 'application_no', 'status', 'submitted_at', 'applicant_id', 'post_id', 'district_id'],
       include: [
         ...searchInclude,
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] }
+        { model: PostMaster, as: 'post', attributes: ['post_id', 'post_name'], required: false },
+        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name'], required: false }
       ],
       order: [['created_at', 'DESC']],
       limit,
       offset,
-      distinct: true
+      distinct: true,
+      subQuery: false
     });
 
     // Get overall status summary
@@ -613,47 +773,75 @@ const updateApplicationStatus = async (applicationId, newStatus, options = {}) =
 const getApplicationDetail = async (applicationId) => {
   try {
     const application = await Application.findByPk(applicationId, {
+      attributes: ['application_id', 'application_no', 'status', 'gender', 'date_of_birth', 'aadhaar_number', 'system_eligibility_reason', 'merit_score'],
       include: [
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] },
-        { model: EligibilityResult, as: 'eligibility' },
+        { model: PostMaster, as: 'post', attributes: ['post_name'] },
+        { model: DistrictMaster, as: 'district', attributes: ['district_name'] },
+        { model: EligibilityResult, as: 'eligibility', attributes: ['is_eligible', 'checked_at', 'rejection_reasons'] },
         {
           model: ApplicationStatusHistory,
           as: 'statusHistory',
-          include: [{ model: db.AdminUser, as: 'changedByUser', attributes: ['admin_id', 'username', 'full_name'] }],
+          attributes: ['history_id', 'old_status', 'new_status', 'changed_by_type', 'remarks', 'created_at'],
+          include: [{ model: db.AdminUser, as: 'changedByUser', attributes: ['full_name'] }],
           order: [['created_at', 'DESC']]
         },
         {
           model: db.ApplicantMaster,
           as: 'applicant',
           required: false,
-          attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_token_expires_at', 'activation_token', 'activation_token_expires_at'] },
+          attributes: ['email', 'mobile_no'],
           include: [
-            { model: db.ApplicantPersonal, as: 'personal', required: false },
+            {
+              model: db.ApplicantPersonal,
+              as: 'personal',
+              required: false,
+              attributes: ['full_name', 'dob', 'age', 'gender', 'category', 'aadhar_no', 'photo_path', 'signature_path', 'aadhaar_path', 'resume_path', 'domicile_path'],
+              include: [
+                {
+                  model: db.CategoryMaster,
+                  as: 'categoryMaster',
+                  required: false,
+                  attributes: ['category_name']
+                }
+              ]
+            },
             {
               model: db.ApplicantAddress,
               as: 'address',
               required: false,
+              attributes: ['address_line', 'address_line2', 'pincode', 'permanent_address_same', 'permanent_address_line', 'permanent_address_line2', 'permanent_pincode'],
               include: [
-                { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] },
-                { model: TalukaMaster, as: 'taluka', required: false },
-                { model: DistrictMaster, as: 'permanentDistrict', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] },
-                { model: TalukaMaster, as: 'permanentTaluka', required: false }
+                { model: DistrictMaster, as: 'district', required: false, attributes: ['district_name'] },
+                { model: TalukaMaster, as: 'taluka', required: false, attributes: ['taluka_name'] },
+                { model: DistrictMaster, as: 'permanentDistrict', required: false, attributes: ['district_name'] },
+                { model: TalukaMaster, as: 'permanentTaluka', required: false, attributes: ['taluka_name'] }
               ]
             },
             {
-              model: ApplicantEducation,
+              model: db.ApplicantEducation,
               as: 'education',
               required: false,
-              include: [{ model: EducationLevel, as: 'educationLevel', required: false }]
+              attributes: ['degree_name', 'stream_subject', 'university_board', 'passing_year', 'percentage', 'certificate_path'],
+              include: [{ model: EducationLevel, as: 'educationLevel', required: false, attributes: ['level_name'] }]
             },
-            { model: db.ApplicantExperience, as: 'experience', required: false },
-            { model: db.ApplicantSkill, as: 'skills', required: false, include: [{ model: SkillMaster, as: 'skill', required: false }] },
+            {
+              model: db.ApplicantExperience,
+              as: 'experience',
+              required: false,
+              attributes: ['organization_name', 'designation', 'start_date', 'end_date', 'is_current', 'total_months', 'certificate_path']
+            },
+            {
+              model: db.ApplicantSkill,
+              as: 'skills',
+              required: false,
+              attributes: ['applicant_skill_id', 'skill_id', 'notes', 'certificate_path'],
+              include: [{ model: SkillMaster, as: 'skill', required: false, attributes: ['skill_name'] }]
+            },
             {
               model: db.ApplicantDocument,
               as: 'documents',
               required: false,
-              include: [{ model: DocumentType, as: 'documentType', required: false }]
+              attributes: ['document_id', 'doc_type_id', 'doc_type', 'file_path', 'compressed_path', 'thumbnail_path', 'is_verified']
             }
           ]
         }

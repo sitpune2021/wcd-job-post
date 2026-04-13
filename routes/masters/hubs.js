@@ -4,6 +4,8 @@ const hubService = require('../../services/masters/hubService');
 const { authenticate, requirePermission } = require('../../middleware/auth');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const hubSchemas = require('../../validators/masters/hubSchemas');
 
 // Get all hubs (with optional pagination and filters)
 router.get('/', async (req, res, next) => {
@@ -27,7 +29,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // Create new hub
-router.post('/', authenticate, requirePermission(['masters.hubs.create']), async (req, res, next) => {
+router.post('/', authenticate, requirePermission(['masters.hubs.create']), validateBody(hubSchemas.createHub), async (req, res, next) => {
   try {
     const hub = await hubService.createHub(req.body, req.user.admin_id);
     return ApiResponse.created(res, hub, 'Hub created successfully');
@@ -37,7 +39,7 @@ router.post('/', authenticate, requirePermission(['masters.hubs.create']), async
 });
 
 // Update hub
-router.put('/:id', authenticate, requirePermission(['masters.hubs.edit']), async (req, res, next) => {
+router.put('/:id', authenticate, requirePermission(['masters.hubs.edit']), validateBodyAndParams(hubSchemas.updateHub, hubSchemas.hubIdParam), async (req, res, next) => {
   try {
     const hub = await hubService.updateHub(req.params.id, req.body, req.user.admin_id);
     return ApiResponse.success(res, hub, 'Hub updated successfully');

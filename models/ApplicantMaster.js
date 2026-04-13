@@ -97,6 +97,12 @@ const ApplicantMaster = sequelize.define('ApplicantMaster', {
     type: DataTypes.DATE,
     allowNull: true
   },
+  ocr_disabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+    comment: 'When true, OCR is disabled for this applicant and they must fill forms manually'
+  },
   last_login_ip: {
     type: DataTypes.STRING(45),
     allowNull: true

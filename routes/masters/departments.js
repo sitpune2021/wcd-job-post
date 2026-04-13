@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { departmentService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const departmentSchemas = require('../../validators/masters/departmentSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -31,7 +33,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requirePermission('masters.departments.create'),
+router.post('/', authenticate, requirePermission('masters.departments.create'), validateBody(departmentSchemas.createDepartment),
   async (req, res, next) => {
     try {
       const department = await departmentService.createDepartment(req.body, req.user.admin_id);
@@ -42,7 +44,7 @@ router.post('/', authenticate, requirePermission('masters.departments.create'),
   }
 );
 
-router.put('/:id', authenticate, requirePermission('masters.departments.edit'),
+router.put('/:id', authenticate, requirePermission('masters.departments.edit'), validateBodyAndParams(departmentSchemas.updateDepartment, departmentSchemas.departmentIdParam),
   async (req, res, next) => {
     try {
       const department = await departmentService.updateDepartment(req.params.id, req.body, req.user.admin_id);

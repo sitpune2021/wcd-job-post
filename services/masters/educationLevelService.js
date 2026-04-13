@@ -135,12 +135,16 @@ const getEducationLevelById = async (levelId, language = 'en') => {
  */
 const createEducationLevel = async (data, userId) => {
   try {
+    // Handle both field names from frontend
+    const levelCode = data.level_code || data.education_level;
+    const levelName = data.level_name || data.education_level;
+
     const existing = await EducationLevel.scope('withDeleted').findOne({
       where: {
         [Op.and]: [
           db.sequelize.where(
             db.sequelize.fn('LOWER', db.sequelize.col('level_code')),
-            db.sequelize.fn('LOWER', data.level_code)
+            db.sequelize.fn('LOWER', levelCode)
           )
         ]
       }
@@ -150,9 +154,9 @@ const createEducationLevel = async (data, userId) => {
       if (existing.is_deleted) {
         await existing.update({
           doc_type_id: data.doc_type_id || null,
-          level_code: data.level_code,
-          level_name: data.level_name,
-          level_name_mr: data.level_name_mr || null,
+          level_code: levelCode,
+          level_name: levelName,
+          level_name_mr: data.level_name_mr || data.education_level_mr || null,
           description: data.description || null,
           description_mr: data.description_mr || null,
           level_category: data.level_category || null,
@@ -176,9 +180,9 @@ const createEducationLevel = async (data, userId) => {
 
     const level = await EducationLevel.create({
       doc_type_id: data.doc_type_id || null,
-      level_code: data.level_code,
-      level_name: data.level_name,
-      level_name_mr: data.level_name_mr || null,
+      level_code: levelCode,
+      level_name: levelName,
+      level_name_mr: data.level_name_mr || data.education_level_mr || null,
       description: data.description || null,
       description_mr: data.description_mr || null,
       level_category: data.level_category || null,
@@ -207,13 +211,15 @@ const updateEducationLevel = async (levelId, data, userId) => {
     const level = await EducationLevel.findByPk(levelId);
     if (!level) return null;
 
-    if (data.level_code !== undefined) {
+    const levelCode = data.level_code || data.education_level;
+    
+    if (levelCode !== undefined) {
       const existing = await EducationLevel.scope('withDeleted').findOne({
         where: {
           [Op.and]: [
             db.sequelize.where(
               db.sequelize.fn('LOWER', db.sequelize.col('level_code')),
-              db.sequelize.fn('LOWER', data.level_code)
+              db.sequelize.fn('LOWER', levelCode)
             ),
             { level_id: { [Op.ne]: levelId } }
           ]
@@ -231,11 +237,19 @@ const updateEducationLevel = async (levelId, data, userId) => {
     }
 
     const updateData = { updated_at: new Date(), updated_by: userId };
+    
+    // Handle both field names from frontend
+    if (data.level_code !== undefined) updateData.level_code = data.level_code;
+    else if (data.education_level !== undefined) updateData.level_code = data.education_level;
+    
+    if (data.level_name !== undefined) updateData.level_name = data.level_name;
+    else if (data.education_level !== undefined && !data.level_name) updateData.level_name = data.education_level;
+    
+    if (data.level_name_mr !== undefined) updateData.level_name_mr = data.level_name_mr;
+    else if (data.education_level_mr !== undefined) updateData.level_name_mr = data.education_level_mr;
+    
     const fields = [
       'doc_type_id',
-      'level_code',
-      'level_name',
-      'level_name_mr',
       'description',
       'description_mr',
       'level_category',

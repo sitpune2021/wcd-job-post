@@ -13,6 +13,7 @@ const bannerService = require('../../services/masters/bannerService');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
 const { deleteFile, getRelativePath, getAbsolutePath } = require('../../utils/fileUpload');
+const { uploadRateLimiter } = require('../../config/rateLimiters');
 const multer = require('multer');
 
 // Configure multer for dual image upload
@@ -78,6 +79,7 @@ router.get('/:id',
 router.post('/', 
   authenticate, 
   requirePermission('masters.banners.create'),
+  uploadRateLimiter,
   uploadBannerImages,
   async (req, res, next) => {
     try {
@@ -111,6 +113,7 @@ router.post('/',
 router.put('/:id', 
   authenticate, 
   requirePermission('masters.banners.edit'),
+  uploadRateLimiter,
   uploadBannerImages,
   async (req, res, next) => {
     try {

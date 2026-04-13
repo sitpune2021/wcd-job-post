@@ -10,6 +10,7 @@ const eligibilityService = require('../services/eligibilityService');
 const acknowledgementService = require('../services/applicant/acknowledgementService');
 const applicationRestrictionService = require('../services/applicationRestrictionService');
 const { upload } = require('../utils/fileUpload');
+const { uploadRateLimiter } = require('../config/rateLimiters');
 const logger = require('../config/logger');
 const {
   toBool,
@@ -17,6 +18,9 @@ const {
   sendPdfFromHtml,
   buildApplicationPdfHtml
 } = require('../utils/applicationPdf');
+
+// OCR Verification Service (can be safely removed if OCR module is disabled)
+const ocrVerificationService = require('../services/ocr/ocrVerificationService');
 
 // All routes require authentication
 router.use(authenticate);
@@ -40,6 +44,7 @@ router.get('/dashboard', auditLog('VIEW_DASHBOARD'), async (req, res, next) => {
 
 router.post(
   '/profile/personal/photo',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'PHOTO';
     next();
@@ -83,6 +88,7 @@ router.patch(
 
 router.post(
   '/profile/personal/signature',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'SIGNATURE';
     next();
@@ -110,6 +116,7 @@ router.post(
 
 router.post(
   '/profile/personal/aadhaar',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'AADHAAR';
     next();
@@ -165,6 +172,7 @@ router.post(
 
 router.post(
   '/profile/personal/resume',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'RESUME';
     next();
@@ -233,6 +241,7 @@ router.post(
  */
 router.post(
   '/profile/personal/domicile',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'DOMICILE';
     next();
@@ -283,6 +292,7 @@ router.post(
  */
 router.post(
   '/profile/education',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'EDUCATION_CERT';
     next();
@@ -334,6 +344,7 @@ router.delete('/profile/education/:id', auditLog('DELETE_EDUCATION'), async (req
  */
 router.post(
   '/profile/experience',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'EXPERIENCE_CERT';
     next();
@@ -366,6 +377,7 @@ router.post(
  */
 router.put(
   '/profile/experience/:id',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'EXPERIENCE_CERT';
     next();
@@ -428,6 +440,7 @@ router.get('/profile/skills', auditLog('VIEW_SKILLS'), async (req, res, next) =>
  */
 router.post(
   '/profile/skills',
+  uploadRateLimiter,
   (req, res, next) => {
     req.uploadDocType = 'SKILL_CERT';
     next();
@@ -605,6 +618,30 @@ router.get('/posts/eligible', auditLog('VIEW_ELIGIBLE_POSTS'), async (req, res, 
     res.set('Expires', '0');
     res.set('Surrogate-Control', 'no-store');
     res.set('ETag', `W/"${Date.now()}"`);
+    
+    // Check if applicant is also an employee
+    const db = require('../models');
+    const { EmployeeMaster } = require('../modules/hrm/models');
+    
+    const employee = await EmployeeMaster.findOne({
+      where: { 
+        applicant_id: req.user.applicant_id,
+        is_deleted: false 
+      },
+      attributes: ['employee_id', 'employee_code', 'onboarding_status']
+    });
+    
+    if (employee) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are an employee and cannot view posts. Employees cannot apply for posts.',
+        data: {
+          employee_code: employee.employee_code,
+          onboarding_status: employee.onboarding_status
+        }
+      });
+    }
+    
     const onlyEligible = req.query.only_eligible !== 'false';
     const includeLocked = req.query.include_locked === 'true';
     const page = req.query.page;
@@ -782,7 +819,55 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
       });
     }
 
-    // STEP 3: Check eligibility for this specific post
+    // === STEP 3: Check Gender Restriction (before payment) ===
+    const db = require('../models');
+    const { ApplicantPersonal } = db;
+    const post = await db.PostMaster.findOne({
+      where: {
+        post_id,
+        is_deleted: false
+      },
+      attributes: ['post_id', 'post_name', 'district_id', 'female_only', 'male_only', 'component_id', 'hub_id', 'is_active'],
+      include: [
+        { model: db.Component, as: 'component', required: false, attributes: ['component_id'] },
+        { model: db.Hub, as: 'hub', required: false, attributes: ['hub_id'] }
+      ]
+    });
+    
+    if (!post || post.is_deleted) {
+      throw new ApiError(404, 'Post not found');
+    }
+
+    // Validate post is active BEFORE taking payment
+    if (!post.is_active) {
+      return res.status(400).json({
+        success: false,
+        message: 'This post is no longer accepting applications',
+        code: 'POST_CLOSED'
+      });
+    }
+    
+    const personalData = await ApplicantPersonal.findOne({ 
+      where: { applicant_id: req.user.applicant_id } 
+    });
+    const applicantGender = personalData?.gender ? personalData.gender.toString().toLowerCase() : null;
+    
+    if (post.female_only && applicantGender !== 'female') {
+      return res.status(400).json({
+        success: false,
+        message: 'This post is for female candidates only',
+        code: 'GENDER_MISMATCH'
+      });
+    }
+    if (post.male_only && applicantGender !== 'male') {
+      return res.status(400).json({
+        success: false,
+        message: 'This post is for male candidates only',
+        code: 'GENDER_MISMATCH'
+      });
+    }
+
+    // STEP 4: Check eligibility for this specific post
     const eligibility = await eligibilityService.checkEligibility(req.user.applicant_id, post_id);
     if (!eligibility.isEligible) {
       return res.status(400).json({
@@ -793,7 +878,7 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
       });
     }
 
-    // === STEP 4: Check Required Documents ===
+    // === STEP 5: Check Required Documents ===
     // All mandatory documents must be uploaded
     const docCheck = await eligibilityService.checkRequiredDocuments(req.user.applicant_id, post_id);
     if (!docCheck.complete) {
@@ -806,21 +891,12 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
       });
     }
 
-    // === STEP 5: Get Post Details ===
-    const db = require('../models');
+    // === STEP 6: Get Post Details ===
     const paymentService = require('../services/paymentService');
     
-    const post = await db.PostMaster.findByPk(post_id, {
-      attributes: ['post_id', 'post_name', 'district_id']
-    });
-
-    if (!post) {
-      throw new ApiError(404, 'Post not found');
-    }
-
     const finalDistrictId = district_id || post.district_id;
 
-    // === STEP 6: Check Payment Requirement ===
+    // === STEP 7: Check Payment Requirement ===
     // Payment required only for distinct post names (max 2)
     // Same post name in same district = FREE (no additional payment)
     const paymentCheck = await paymentService.checkPaymentRequired(
@@ -1044,14 +1120,45 @@ router.post('/applications/verify-payment', auditLog('VERIFY_PAYMENT_AND_SUBMIT'
     const finalDistrictId = payment.district_id;
 
     // === STEP 6: Get Post Details ===
-    const post = await db.PostMaster.findByPk(finalPostId, {
-      attributes: ['post_id', 'post_name', 'district_id'],
+    const post = await db.PostMaster.unscoped().findByPk(finalPostId, {
+      attributes: ['post_id', 'post_name', 'district_id', 'is_active'],
       transaction
     });
 
     if (!post) {
       await transaction.rollback();
       throw new ApiError(404, 'Post not found');
+    }
+
+    // === STEP 6a: Validate Post is Active ===
+    if (!post.is_active) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'This post is no longer accepting applications',
+        code: 'POST_CLOSED',
+        details: {
+          is_active: post.is_active
+        }
+      });
+    }
+
+    // === STEP 6b: Re-check Application Restrictions ===
+    // Prevent bypass: ensure applicant still meets post name/OSC/district limits
+    const restrictionCheck = await applicationRestrictionService.canApplyToPost(
+      req.user.applicant_id,
+      finalPostId,
+      finalDistrictId
+    );
+
+    if (!restrictionCheck.allowed) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: restrictionCheck.reason,
+        code: 'RESTRICTION_VIOLATION',
+        details: restrictionCheck.details
+      });
     }
 
     const finalDistrictIdResolved = finalDistrictId || post.district_id;
@@ -1119,8 +1226,12 @@ router.post('/applications/verify-payment', auditLog('VERIFY_PAYMENT_AND_SUBMIT'
       transaction
     );
 
+    // === STEP 12: Capture Payment after successful application ===
+    const amountInPaise = Math.round((payment.amount || 0) * 100);
+    await paymentService.capturePayment(payment.razorpay_payment_id, amountInPaise);
+
     // === COMMIT TRANSACTION ===
-    // All operations successful - payment verified, application created, acknowledgement saved
+    // All operations successful - payment verified, captured, application created, acknowledgement saved
     await transaction.commit();
 
     return res.status(200).json({
@@ -1546,5 +1657,108 @@ router.post('/declaration', auditLog('SAVE_DECLARATION'), async (req, res, next)
     next(error);
   }
 });
+
+// ==================== OCR DOCUMENT VERIFICATION ====================
+// This section can be safely removed if OCR functionality is no longer needed
+
+/**
+ * @route POST /api/v1/applicant/profile/education/verify
+ * @desc Verify education document using OCR (OpenAI Vision API)
+ * @access Private (Applicant)
+ * @body {
+ *   applicantId: number,
+ *   qualification: string,
+ *   degreeName: string,
+ *   board: string,
+ *   seatNumber: string,
+ *   yearOfPassing: number,
+ *   percentage: number,
+ *   document: file (multipart/form-data)
+ * }
+ * @returns {Object} Verification result with extracted data and comparison
+ * 
+ * Toggle Control: Set OCR_VERIFICATION_ENABLED=false in .env to bypass OCR
+ * and return auto-pass responses without calling OpenAI API.
+ */
+router.post(
+  '/profile/education/verify',
+  uploadRateLimiter,
+  (req, res, next) => {
+    req.uploadDocType = 'EDUCATION_CERT_VERIFY';
+    next();
+  },
+  upload.single('document'),
+  auditLog('VERIFY_EDUCATION_DOCUMENT_OCR'),
+  async (req, res, next) => {
+    try {
+      // Validate required fields
+      const {
+        yearOfPassing,
+        percentage
+      } = req.body;
+
+      // Check if file was uploaded
+      if (!req.file) {
+        throw new ApiError(400, 'Document file is required');
+      }
+
+      // Parse and validate year / percentage
+      let parsedYear = null;
+      if (yearOfPassing !== undefined && yearOfPassing !== null && yearOfPassing !== '') {
+        const yearStr = String(yearOfPassing).trim();
+        const isValidYearFormat = /^(\d{2}|\d{4})$/.test(yearStr);
+        if (!isValidYearFormat) {
+          throw new ApiError(400, 'Year of passing must be 2 or 4 digits');
+        }
+        const yearNum = parseInt(yearStr, 10);
+        parsedYear = yearStr.length === 2 ? 2000 + yearNum : yearNum;
+        if (parsedYear < 1900 || parsedYear > 2099) {
+          throw new ApiError(400, 'Year of passing must be between 1900 and 2099');
+        }
+      }
+      const parsedPercentage = percentage !== undefined && percentage !== null && percentage !== ''
+        ? parseFloat(percentage)
+        : null;
+
+      if (Number.isNaN(parsedPercentage)) {
+        throw new ApiError(400, 'Percentage must be a number');
+      }
+
+      if (parsedPercentage !== null && parsedPercentage < 0) {
+        throw new ApiError(400, 'Percentage cannot be negative');
+      }
+
+      const userProvidedData = {
+        qualification: req.body.qualification || null,
+        degreeName: req.body.degreeName || null,
+        board: req.body.board || null,
+        seatNumber: req.body.seatNumber || null,
+        yearOfPassing: parsedYear,
+        percentage: parsedPercentage !== null ? Number(parsedPercentage.toFixed(2)) : null
+      };
+
+      logger.info('OCR verification request received', {
+        applicantId: req.user.applicant_id,
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        ocrEnabled: ocrVerificationService.isOcrEnabled()
+      });
+
+      // Call OCR verification service
+      const ocrResult = await ocrVerificationService.verifyEducationDocument(
+        userProvidedData,
+        req.file.path,
+        req.user.applicant_id
+      );
+
+      // Return verification result
+      res.status(200).json(ocrResult);
+
+    } catch (error) {
+      logger.error('OCR verification endpoint error:', error);
+      next(error);
+    }
+  }
+);
 
 module.exports = router;

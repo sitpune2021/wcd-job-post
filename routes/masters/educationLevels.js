@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { educationLevelService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const educationLevelSchemas = require('../../validators/masters/educationLevelSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -31,7 +33,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requirePermission('masters.education_levels.create'),
+router.post('/', authenticate, requirePermission('masters.education_levels.create'), validateBody(educationLevelSchemas.createEducationLevel),
   async (req, res, next) => {
     try {
       const level = await educationLevelService.createEducationLevel(req.body, req.user.admin_id);
@@ -42,7 +44,7 @@ router.post('/', authenticate, requirePermission('masters.education_levels.creat
   }
 );
 
-router.put('/:id', authenticate, requirePermission('masters.education_levels.edit'),
+router.put('/:id', authenticate, requirePermission('masters.education_levels.edit'), validateBodyAndParams(educationLevelSchemas.updateEducationLevel, educationLevelSchemas.educationLevelIdParam),
   async (req, res, next) => {
     try {
       const level = await educationLevelService.updateEducationLevel(req.params.id, req.body, req.user.admin_id);

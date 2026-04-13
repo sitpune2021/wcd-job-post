@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { documentTypeService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const documentTypeSchemas = require('../../validators/masters/documentTypeSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -31,7 +33,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requirePermission('masters.document_types.create'),
+router.post('/', authenticate, requirePermission('masters.document_types.create'), validateBody(documentTypeSchemas.createDocumentType),
   async (req, res, next) => {
     try {
       const docType = await documentTypeService.createDocumentType(req.body, req.user.admin_id);
@@ -42,7 +44,7 @@ router.post('/', authenticate, requirePermission('masters.document_types.create'
   }
 );
 
-router.put('/:id', authenticate, requirePermission('masters.document_types.edit'),
+router.put('/:id', authenticate, requirePermission('masters.document_types.edit'), validateBodyAndParams(documentTypeSchemas.updateDocumentType, documentTypeSchemas.documentTypeIdParam),
   async (req, res, next) => {
     try {
       const docType = await documentTypeService.updateDocumentType(req.params.id, req.body, req.user.admin_id);

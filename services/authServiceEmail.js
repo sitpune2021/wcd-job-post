@@ -27,7 +27,10 @@ const sendRegistrationOTP = async (email) => {
     );
 
     if (existing.length > 0) {
-      throw new Error('Email already registered');
+      const error = new Error('This email address is already registered. Please use a different email or try logging in.');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Generate and send OTP
@@ -52,25 +55,40 @@ const registerApplicant = async (data) => {
     const fullName = data?.full_name || data?.fullName;
 
     if (!email) {
-      throw new Error('Email is required');
+      const error = new Error('Email is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     if (!password) {
-      throw new Error('Password is required');
+      const error = new Error('Password is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     if (!fullName) {
-      throw new Error('Full name is required');
+      const error = new Error('Full name is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     if (!otp) {
-      throw new Error('OTP is required');
+      const error = new Error('OTP is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Verify OTP
     const otpVerification = await otpService.verifyOtp(email, otp, 'REGISTRATION');
     if (!otpVerification.verified) {
-      throw new Error(otpVerification.message || 'Invalid or expired OTP');
+      const error = new Error(otpVerification.message || 'Invalid or expired OTP');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Generate applicant number
@@ -159,7 +177,10 @@ const registerApplicant = async (data) => {
     // If this came from the DB unique constraint on email
     if (error.name === 'SequelizeUniqueConstraintError' || error.original?.code === '23505') {
       logger.warn('Duplicate email during registration attempt:', { email: data?.email });
-      throw new Error('Email already registered');
+      const duplicateError = new Error('This email address is already registered. Please use a different email or try logging in.');
+      duplicateError.statusCode = 400;
+      duplicateError.isClientError = true;
+      throw duplicateError;
     }
 
     logger.error('Error registering applicant:', error);
@@ -174,11 +195,17 @@ const loginApplicant = async (email, password) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
 
     if (!normalizedEmail) {
-      throw new Error('Email is required');
+      const error = new Error('Email is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     if (password === undefined || password === null) {
-      throw new Error('Password is required');
+      const error = new Error('Password is required');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Find applicant with personal details for full_name
@@ -194,18 +221,106 @@ const loginApplicant = async (email, password) => {
     );
 
     if (applicants.length === 0) {
-      throw new Error('Invalid email or password');
+      const error = new Error('Invalid email or password');
+      error.statusCode = 401;
+      error.isClientError = true;
+      throw error;
     }
 
     const applicant = applicants[0];
 
     // Check if account is locked
     if (applicant.locked_until && new Date(applicant.locked_until) > new Date()) {
-      throw new Error(buildLockoutMessage(applicant.locked_until));
+      const error = new Error(buildLockoutMessage(applicant.locked_until));
+      error.statusCode = 423;
+      error.isClientError = true;
+      throw error;
+    }
+
+    // Check if applicant is an employee and get employee details
+    let isEmployee = false;
+    let employee = null;
+    let profileComplete = false;
+    
+    // Use the applicant_id directly from the SQL result
+    const applicantId = applicant.applicant_id;
+    
+    try {
+      
+      // First check if the table exists
+      const [tableCheck] = await sequelize.query(
+        `SELECT table_name FROM information_schema.tables 
+         WHERE table_schema = 'public' AND table_name = 'ms_employee_master'`
+      );
+      
+      if (tableCheck.length === 0) {
+        // Continue without employee status if table doesn't exist
+      } else {
+        // Use the same query that works in our test
+        const [employees] = await sequelize.query(
+          `SELECT 
+            e.employee_id, 
+            e.employee_code, 
+            e.applicant_id,
+            e.onboarding_status, 
+            e.is_active,
+            e.password_change_required,
+            e.allotment_letter_uploaded_at,
+            e.allotment_letter_path,
+            e.temp_password_hash,
+            e.onboarding_completed_at
+          FROM ms_employee_master e
+          WHERE e.applicant_id = :applicantId 
+          AND e.is_deleted = false`,
+          { 
+            replacements: { applicantId: applicantId }
+          }
+        );
+        
+        isEmployee = employees.length > 0;
+        employee = isEmployee ? employees[0] : null;
+      }
+      
+      // Check profile completion if user is an employee
+      if (isEmployee) {
+        try {
+          const eligibilityService = require('../services/eligibilityService');
+          const completion = await eligibilityService.getProfileCompletion(applicantId);
+          profileComplete = completion.canApply; // Only true if profile is 100% complete
+        } catch (error) {
+          logger.error('Error checking profile completion:', error);
+          profileComplete = false;
+        }
+      }
+    } catch (error) {
+      // Continue without employee status if query fails
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(password, applicant.password_hash);
+    let isPasswordValid = false;
+    let passwordType = '';
+    
+    // Check if applicant is an employee and needs to use temp password
+    if (isEmployee && employee.password_change_required && employee.temp_password_hash) {
+      // Use employee's temporary password
+      isPasswordValid = await bcrypt.compare(password, employee.temp_password_hash);
+      passwordType = 'temp_password';
+      logger.info('Login: Verifying against temp password', { 
+        applicantId, 
+        employeeId: employee.employee_id,
+        isValid: isPasswordValid 
+      });
+    } else {
+      // Use applicant's regular password
+      isPasswordValid = await bcrypt.compare(password, applicant.password_hash);
+      passwordType = 'applicant_password';
+      logger.info('Login: Verifying against applicant password', { 
+        applicantId, 
+        isEmployee,
+        password_change_required: isEmployee ? employee.password_change_required : 'N/A',
+        isValid: isPasswordValid 
+      });
+    }
 
     if (!isPasswordValid) {
       // Increment login attempts
@@ -278,7 +393,13 @@ const loginApplicant = async (email, password) => {
         applicant_no: applicant.applicant_no,
         full_name: applicant.full_name,
         is_verified: applicant.is_verified,
-        role: 'APPLICANT'
+        role: 'APPLICANT',
+        // Employee status flags
+        is_employee: isEmployee,
+        employee_code: employee?.employee_code || null,
+        password_changed: employee?.password_change_required === false, // Inverted logic
+        allotment_uploaded: !!(employee?.allotment_letter_uploaded_at || employee?.allotment_letter_path), // Check if timestamp or path exists
+        can_view_crm: isEmployee && profileComplete ? true : false
       },
       token,
       declarations: {
@@ -302,7 +423,10 @@ const sendPasswordResetOTP = async (email) => {
     );
 
     if (applicants.length === 0) {
-      throw new Error('Email not found');
+      const error = new Error('Email not found');
+      error.statusCode = 404;
+      error.isClientError = true;
+      throw error;
     }
 
     // Generate and send OTP (purpose must match OtpLog isIn constraint)
@@ -326,7 +450,10 @@ const resetPassword = async (email, otp, newPassword) => {
     // Verify OTP (purpose must match what was used for generation)
     const otpVerification = await otpService.verifyOtp(email, otp, 'RESET');
     if (!otpVerification.verified) {
-      throw new Error('Invalid or expired OTP');
+      const error = new Error('Invalid or expired OTP');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Hash new password
@@ -350,7 +477,10 @@ const resetPassword = async (email, otp, newPassword) => {
     );
 
     if (result.length === 0) {
-      throw new Error('Email not found');
+      const error = new Error('Email not found');
+      error.statusCode = 404;
+      error.isClientError = true;
+      throw error;
     }
 
     logger.info(`Password reset for applicant: ${result[0].applicant_id}`);
@@ -364,26 +494,69 @@ const resetPassword = async (email, otp, newPassword) => {
 // Change password (when logged in)
 const changePassword = async (applicantId, currentPassword, newPassword) => {
   try {
-    // Get current password hash
-    const [applicants] = await sequelize.query(
-      `SELECT password_hash FROM ms_applicant_master WHERE applicant_id = :applicantId AND is_deleted = false`,
+    // Check if applicant is an employee and needs temp password verification
+    let isPasswordValid = false;
+    let passwordType = '';
+    
+    // First check if employee exists
+    const [employees] = await sequelize.query(
+      `SELECT employee_id, password_change_required, temp_password_hash
+       FROM ms_employee_master 
+       WHERE applicant_id = :applicantId AND is_deleted = false`,
       { replacements: { applicantId } }
     );
+    
+    const isEmployee = employees.length > 0;
+    const employee = isEmployee ? employees[0] : null;
+    
+    if (isEmployee && employee.password_change_required && employee.temp_password_hash) {
+      // Verify against temp password
+      isPasswordValid = await bcrypt.compare(currentPassword, employee.temp_password_hash);
+      passwordType = 'temp_password';
+      logger.info('Password change: Verifying against temp password', { 
+        applicantId, 
+        employeeId: employee.employee_id,
+        isValid: isPasswordValid 
+      });
+    } else {
+      // Get applicant's regular password hash
+      const [applicants] = await sequelize.query(
+        `SELECT password_hash FROM ms_applicant_master WHERE applicant_id = :applicantId AND is_deleted = false`,
+        { replacements: { applicantId } }
+      );
 
-    if (applicants.length === 0) {
-      throw new Error('Applicant not found');
+      if (applicants.length === 0) {
+        const error = new Error('Applicant not found');
+        error.statusCode = 404;
+        error.isClientError = true;
+        throw error;
+      }
+
+      // Verify against regular password
+      isPasswordValid = await bcrypt.compare(currentPassword, applicants[0].password_hash);
+      passwordType = 'applicant_password';
+      logger.info('Password change: Verifying against applicant password', { 
+        applicantId, 
+        isValid: isPasswordValid 
+      });
     }
-
-    // Verify current password
-    const isPasswordValid = await bcrypt.compare(currentPassword, applicants[0].password_hash);
+    
     if (!isPasswordValid) {
-      throw new Error('Current password is incorrect');
+      logger.error('Password change verification failed', { 
+        applicantId, 
+        passwordType,
+        isEmployee 
+      });
+      const error = new Error('Current password is incorrect');
+      error.statusCode = 400;
+      error.isClientError = true;
+      throw error;
     }
 
     // Hash new password
     const passwordHash = await bcrypt.hash(newPassword, getBcryptRounds());
 
-    // Update password
+    // Update applicant password
     await sequelize.query(
       `UPDATE ms_applicant_master 
        SET password_hash = :passwordHash, updated_at = NOW()
@@ -396,7 +569,22 @@ const changePassword = async (applicantId, currentPassword, newPassword) => {
       }
     );
 
-    logger.info(`Password changed for applicant: ${applicantId}`);
+    // If employee exists, update employee record too
+    if (isEmployee) {
+      await sequelize.query(
+        `UPDATE ms_employee_master 
+         SET password_change_required = false, 
+             temp_password_hash = NULL, 
+             updated_at = NOW()
+         WHERE applicant_id = :applicantId`,
+        { replacements: { applicantId } }
+      );
+      
+      logger.info(`Password changed for employee: ${employee.employee_id}, temp password cleared`);
+    } else {
+      logger.info(`Password changed for applicant: ${applicantId}`);
+    }
+    
     return { success: true, message: 'Password changed successfully' };
   } catch (error) {
     logger.error('Error changing password:', error);

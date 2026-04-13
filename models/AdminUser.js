@@ -50,6 +50,24 @@ const AdminUser = sequelize.define('AdminUser', {
     },
     comment: 'District assignment for district-level admins'
   },
+  component_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'component',
+      key: 'component_id'
+    },
+    comment: 'OSC/Component assignment for OSC-level admins (manages posts under this OSC)'
+  },
+  hub_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'hub_master',
+      key: 'hub_id'
+    },
+    comment: 'Hub assignment for Hub-level admins (manages posts under this Hub, similar to OSC)'
+  },
   created_by: {
     type: DataTypes.INTEGER,
     allowNull: true,
@@ -103,7 +121,13 @@ const AdminUser = sequelize.define('AdminUser', {
   timestamps: false,
   hooks: {
     beforeCreate: async (admin) => {
+      console.log('beforeCreate hook - password_hash:', {
+        hasPassword: !!admin.password_hash,
+        startsWithBcrypt: admin.password_hash?.startsWith('$2'),
+        length: admin.password_hash?.length
+      });
       if (admin.password_hash && !admin.password_hash.startsWith('$2')) {
+        console.log('Hashing password in beforeCreate hook');
         admin.password_hash = await bcrypt.hash(admin.password_hash, getBcryptRounds());
       }
     },

@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { applicationStatusService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const applicationStatusSchemas = require('../../validators/masters/applicationStatusSchemas');
 
 // GET /api/masters/application-statuses - Get all statuses
 router.get('/', async (req, res, next) => {
@@ -39,6 +41,7 @@ router.get('/:id', async (req, res, next) => {
 router.post('/',
   authenticate,
   requirePermission('masters.application_statuses.create'),
+  validateBody(applicationStatusSchemas.createApplicationStatus),
   async (req, res, next) => {
     try {
       const status = await applicationStatusService.createApplicationStatus(req.body, req.user.admin_id);
@@ -53,6 +56,7 @@ router.post('/',
 router.put('/:id',
   authenticate,
   requirePermission('masters.application_statuses.edit'),
+  validateBodyAndParams(applicationStatusSchemas.updateApplicationStatus, applicationStatusSchemas.applicationStatusIdParam),
   async (req, res, next) => {
     try {
       const status = await applicationStatusService.updateApplicationStatus(req.params.id, req.body, req.user.admin_id);

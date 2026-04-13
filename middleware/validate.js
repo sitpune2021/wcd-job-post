@@ -55,6 +55,28 @@ const validate = (schema) => {
   };
 };
 
+// Convenience helpers to avoid repeating Joi object wrappers
+const validateBody = (bodySchema) =>
+  validate(Joi.object({
+    body: bodySchema.required(),
+    query: Joi.object().unknown(true),
+    params: Joi.object().unknown(true)
+  }));
+
+const validateParams = (paramsSchema) =>
+  validate(Joi.object({
+    body: Joi.object().unknown(true),
+    query: Joi.object().unknown(true),
+    params: paramsSchema.required()
+  }));
+
+const validateBodyAndParams = (bodySchema, paramsSchema) =>
+  validate(Joi.object({
+    body: bodySchema.required(),
+    query: Joi.object().unknown(true),
+    params: paramsSchema.required()
+  }));
+
 // Common validation schemas
 const schemas = {
   // Auth schemas
@@ -159,6 +181,9 @@ const schemas = {
 
 module.exports = {
   validate,
+  validateBody,
+  validateParams,
+  validateBodyAndParams,
   schemas,
   customJoi
 };

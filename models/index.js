@@ -70,6 +70,24 @@ db.AllotmentEmailSchedule = require('./AllotmentEmailSchedule');
 db.AllotmentEmailTracking = require('./AllotmentEmailTracking');
 // Payment Gateway Integration
 db.Payment = require('./Payment');
+
+// HRM Module Models
+const hrmModels = require('../modules/hrm/models');
+db.EmployeeMaster = hrmModels.EmployeeMaster;
+db.EmployeeOnboardingLog = hrmModels.EmployeeOnboardingLog;
+// Phase 2 HRM Models
+db.HrmAttendance = hrmModels.Attendance;
+db.HrmLeaveType = hrmModels.LeaveType;
+db.HrmLeaveBalance = hrmModels.LeaveBalance;
+db.HrmLeaveApplication = hrmModels.LeaveApplication;
+db.HrmMonthlyReport = hrmModels.MonthlyReport;
+db.HrmFieldVisit = hrmModels.FieldVisit;
+db.HrmPerformanceReview = hrmModels.PerformanceReview;
+db.HrmHoliday = hrmModels.Holiday;
+// Payroll Models (Simplified)
+db.HrmPayrollCycle = hrmModels.PayrollCycle;
+db.HrmPayslip = hrmModels.Payslip;
+
 // Set up associations
 // Role <-> Permission (Many-to-Many)
 db.Role.belongsToMany(db.Permission, { 
@@ -146,6 +164,7 @@ db.DistrictMaster.hasMany(db.Hub, { foreignKey: 'district_id', as: 'hubs' });
 
 // PostMaster -> Component
 db.PostMaster.belongsTo(db.Component, { foreignKey: 'component_id', as: 'component' });
+db.PostMaster.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
 db.Component.hasMany(db.PostMaster, { foreignKey: 'component_id', as: 'posts' });
 
 // PostMaster -> Hub
@@ -163,10 +182,6 @@ db.DocumentType.hasMany(db.EducationLevel, { foreignKey: 'doc_type_id', as: 'edu
 // PostMaster -> ExperienceDomain
 db.PostMaster.belongsTo(db.ExperienceDomain, { foreignKey: 'experience_domain_id', as: 'experienceDomain' });
 db.ExperienceDomain.hasMany(db.PostMaster, { foreignKey: 'experience_domain_id', as: 'posts' });
-
-// PostMaster -> DistrictMaster (for district-specific posts)
-db.PostMaster.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
-db.DistrictMaster.hasMany(db.PostMaster, { foreignKey: 'district_id', as: 'posts' });
 
 // ExperienceDomain -> DocumentType (optional)
 db.ExperienceDomain.belongsTo(db.DocumentType, { foreignKey: 'doc_type_id', as: 'documentType' });
@@ -198,6 +213,16 @@ db.AllotmentEmailTracking.belongsTo(db.Application, { foreignKey: 'application_i
 db.AllotmentEmailSchedule.hasMany(db.AllotmentEmailTracking, { foreignKey: 'schedule_id', as: 'trackings' });
 db.PostMaster.hasMany(db.AllotmentEmailTracking, { foreignKey: 'post_id', as: 'emailTrackings' });
 db.ApplicantMaster.hasMany(db.AllotmentEmailTracking, { foreignKey: 'applicant_id', as: 'emailTrackings' });
+
+// Payment associations
+db.Payment.belongsTo(db.ApplicantMaster, { foreignKey: 'applicant_id', as: 'applicant' });
+db.ApplicantMaster.hasMany(db.Payment, { foreignKey: 'applicant_id', as: 'payments' });
+db.Payment.belongsTo(db.PostMaster, { foreignKey: 'post_id', as: 'post' });
+db.PostMaster.hasMany(db.Payment, { foreignKey: 'post_id', as: 'payments' });
+db.Payment.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
+db.DistrictMaster.hasMany(db.Payment, { foreignKey: 'district_id', as: 'payments' });
+db.Payment.belongsTo(db.Application, { foreignKey: 'application_id', as: 'application' });
+db.Application.hasMany(db.Payment, { foreignKey: 'application_id', as: 'payments' });
 
 // ApplicantExperience -> ExperienceDomain
 db.ApplicantExperience.belongsTo(db.ExperienceDomain, { foreignKey: 'domain_id', as: 'domain' });
@@ -264,6 +289,18 @@ db.Application.hasMany(db.ApplicationStageHistory, { foreignKey: 'application_id
 db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'entered_by', as: 'enteredByUser' });
 db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'exited_by', as: 'exitedByUser' });
 
+// ==================== HRM MODULE ASSOCIATIONS ====================
+// Set up associations for HRM models
+hrmModels.setupAssociations(db);
+
+// AdminUser -> Component (for OSC-level admins)
+db.AdminUser.belongsTo(db.Component, { foreignKey: 'component_id', as: 'component' });
+db.Component.hasMany(db.AdminUser, { foreignKey: 'component_id', as: 'admins' });
+
+// AdminUser -> Hub (for Hub-level admins)
+db.AdminUser.belongsTo(db.Hub, { foreignKey: 'hub_id', as: 'hub' });
+db.Hub.hasMany(db.AdminUser, { foreignKey: 'hub_id', as: 'admins' });
+
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
@@ -281,7 +318,13 @@ const modelsWithAudit = [
   'DocumentType', 'EducationLevel', 'CategoryMaster', 'PostCategory',
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
-  'AllotmentEmailSchedule'
+  'AllotmentEmailSchedule',
+  'EmployeeMaster', 'EmployeeOnboardingLog',
+  // Phase 2 HRM Models
+  'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',
+  'HrmMonthlyReport', 'HrmFieldVisit', 'HrmPerformanceReview', 'HrmHoliday',
+  // Payroll Models (Simplified)
+  'HrmPayrollCycle', 'HrmPayslip'
 ];
 
 modelsWithAudit.forEach(modelName => {

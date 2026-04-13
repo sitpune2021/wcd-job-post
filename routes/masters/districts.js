@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { districtService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const districtSchemas = require('../../validators/masters/districtSchemas');
 
 // ==================== PUBLIC ROUTES ====================
 // These routes are accessible without authentication (for dropdowns)
@@ -45,6 +47,7 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', 
   authenticate, 
   requirePermission('masters.districts.create'),
+  validateBody(districtSchemas.createDistrict),
   async (req, res, next) => {
     try {
       const district = await districtService.createDistrict(req.body, req.user.admin_id);
@@ -59,6 +62,7 @@ router.post('/',
 router.put('/:id', 
   authenticate, 
   requirePermission('masters.districts.edit'),
+  validateBodyAndParams(districtSchemas.updateDistrict, districtSchemas.districtIdParam),
   async (req, res, next) => {
     try {
       const district = await districtService.updateDistrict(req.params.id, req.body, req.user.admin_id);

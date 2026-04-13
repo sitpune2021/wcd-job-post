@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const authService = require('../services/authServiceEmail');
 const { authenticate } = require('../middleware/auth');
+const { loginRateLimiter, otpRateLimiter, passwordResetRateLimiter } = require('../config/rateLimiters');
+const logger = require('../config/logger');
 
 /**
  * Applicant Authentication Routes
@@ -9,12 +11,24 @@ const { authenticate } = require('../middleware/auth');
  */
 
 // Send registration OTP
-router.post('/send-otp', async (req, res) => {
+router.post('/send-otp', otpRateLimiter, async (req, res) => {
   try {
     const result = await authService.sendRegistrationOTP(req.body.email);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Failed to send OTP';
+    
+    logger.error(`Registration OTP error for ${req.body.email}: ${message}`, {
+      email: req.body.email,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
@@ -28,20 +42,24 @@ router.post('/register', async (req, res) => {
       message: 'Registration successful' 
     });
   } catch (error) {
-    const msg = (error && error.message) ? error.message : 'Registration failed';
-    const isClientError =
-      msg.toLowerCase().includes('required') ||
-      msg.toLowerCase().includes('invalid') ||
-      msg.toLowerCase().includes('expired') ||
-      msg.toLowerCase().includes('not found') ||
-      msg.toLowerCase().includes('already');
-
-    res.status(isClientError ? 400 : 500).json({ success: false, message: msg });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Registration failed';
+    
+    logger.error(`Registration error for ${req.body.email}: ${message}`, {
+      email: req.body.email,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
 // Login applicant
-router.post('/login', async (req, res) => {
+router.post('/login', loginRateLimiter, async (req, res) => {
   try {
     const result = await authService.loginApplicant(req.body.email, req.body.password);
     res.json({ 
@@ -50,34 +68,46 @@ router.post('/login', async (req, res) => {
       message: 'Login successful' 
     });
   } catch (error) {
-    const msg = (error && error.message) ? error.message : 'Login failed';
-    const lower = String(msg).toLowerCase();
-
-    let status = 500;
-    if (lower.includes('email is required') || lower.includes('password is required')) {
-      status = 400;
-    } else if (lower.includes('invalid email or password')) {
-      status = 401;
-    } else if (lower.includes('account is locked')) {
-      status = 423;
-    }
-
-    res.status(status).json({ success: false, message: msg });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Login failed';
+    
+    logger.error(`Login error for ${req.body.email}: ${message}`, {
+      email: req.body.email,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
 // Send password reset OTP
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', passwordResetRateLimiter, async (req, res) => {
   try {
     const result = await authService.sendPasswordResetOTP(req.body.email);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Failed to send password reset OTP';
+    
+    logger.error(`Password reset OTP error for ${req.body.email}: ${message}`, {
+      email: req.body.email,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
 // Reset password with OTP
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', passwordResetRateLimiter, async (req, res) => {
   try {
     const result = await authService.resetPassword(
       req.body.email,
@@ -86,7 +116,19 @@ router.post('/reset-password', async (req, res) => {
     );
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Failed to reset password';
+    
+    logger.error(`Password reset error for ${req.body.email}: ${message}`, {
+      email: req.body.email,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
@@ -103,7 +145,19 @@ router.post('/change-password', authenticate, async (req, res) => {
     );
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Failed to change password';
+    
+    logger.error(`Password change error for user ${req.user.applicant_id || req.user.id}: ${message}`, {
+      userId: req.user.applicant_id || req.user.id,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 
@@ -116,7 +170,19 @@ router.get('/profile', authenticate, async (req, res) => {
     const profile = await authService.getApplicantProfile(req.user.applicant_id || req.user.id);
     res.json({ success: true, data: profile });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || (error.isClientError ? 400 : 500);
+    const message = error.message || 'Failed to get profile';
+    
+    logger.error(`Profile error for user ${req.user.applicant_id || req.user.id}: ${message}`, {
+      userId: req.user.applicant_id || req.user.id,
+      isClientError: error.isClientError,
+      statusCode
+    });
+    
+    res.status(statusCode).json({
+      success: false,
+      message: message
+    });
   }
 });
 

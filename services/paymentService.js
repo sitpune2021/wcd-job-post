@@ -73,6 +73,33 @@ class PaymentService {
         order: [['created_at', 'ASC']]
       });
 
+      // Get any active pending payment for this post/district to prevent duplicate orders
+      const pendingPayment = await db.Payment.findOne({
+        where: {
+          applicant_id: applicantId,
+          post_id: postId,
+          district_id: districtId,
+          is_deleted: false,
+          payment_status: 'PENDING'
+        },
+        order: [['created_at', 'DESC']]
+      });
+
+      // If there is an existing pending payment for this exact post, reuse it instead of new order
+      if (pendingPayment) {
+        return {
+          required: false,
+          reason: 'PENDING_PAYMENT_EXISTS',
+          message: 'A pending payment already exists for this post. Reuse the existing order.',
+          reusePayment: {
+            razorpay_order_id: pendingPayment.razorpay_order_id,
+            amount: pendingPayment.amount,
+            payment_id: pendingPayment.payment_id,
+            razorpay_key_id: process.env.RAZORPAY_KEY_ID
+          }
+        };
+      }
+
       // If no payments yet, payment is required
       if (successfulPayments.length === 0) {
         const breakdown = this.calculatePaymentAmount();
@@ -158,7 +185,23 @@ class PaymentService {
       // Check if payment is required
       const paymentCheck = await this.checkPaymentRequired(applicantId, postId, postName, districtId);
 
+      // If an existing pending payment exists, just return its details instead of creating a new one
       if (!paymentCheck.required) {
+        if (paymentCheck.reason === 'PENDING_PAYMENT_EXISTS' && paymentCheck.reusePayment) {
+          logger.info('Reusing existing pending payment order', {
+            applicantId,
+            postId,
+            payment_id: paymentCheck.reusePayment.payment_id,
+            razorpay_order_id: paymentCheck.reusePayment.razorpay_order_id
+          });
+          return {
+            payment_id: paymentCheck.reusePayment.payment_id,
+            razorpay_order_id: paymentCheck.reusePayment.razorpay_order_id,
+            amount: paymentCheck.reusePayment.amount,
+            breakdown: this.calculatePaymentAmount(),
+            razorpay_key_id: paymentCheck.reusePayment.razorpay_key_id
+          };
+        }
         throw new ApiError(400, paymentCheck.message);
       }
 
@@ -169,6 +212,7 @@ class PaymentService {
       const razorpayOrder = await this.razorpay.orders.create({
         amount: amountInPaise,
         currency: 'INR',
+        payment_capture: 0, // authorize only; capture after application succeeds
         receipt: `APPL_${applicantId}_${postId}_${Date.now()}`,
         notes: {
           applicant_id: applicantId,
@@ -241,6 +285,26 @@ class PaymentService {
     } catch (error) {
       logger.error('Error verifying payment signature:', error);
       return false;
+    }
+  }
+
+  /**
+   * Capture an authorized payment
+   * @param {string} razorpayPaymentId - Razorpay payment ID
+   * @param {number} amountInPaise - Amount to capture (paise)
+   */
+  async capturePayment(razorpayPaymentId, amountInPaise) {
+    if (!this.razorpay) {
+      throw new ApiError(400, 'Payment gateway not initialized');
+    }
+
+    try {
+      const captured = await this.razorpay.payments.capture(razorpayPaymentId, amountInPaise, 'INR');
+      logger.info('Payment captured', { razorpay_payment_id: razorpayPaymentId, amountInPaise });
+      return captured;
+    } catch (error) {
+      logger.error('Error capturing payment:', error);
+      throw error;
     }
   }
 

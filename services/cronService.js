@@ -15,19 +15,16 @@ class CronService {
    * @returns {Promise<Object>} - Result with count of closed posts
    */
   async closeExpiredPosts() {
-    // Get current date in IST timezone at midnight
+    // Compute IST midnight safely (avoid double offset)
     const now = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
-    const istTime = new Date(now.getTime() + istOffset + (now.getTimezoneOffset() * 60 * 1000));
-    
-    // Set to start of day (midnight IST)
-    istTime.setHours(0, 0, 0, 0);
-    
-    // Convert back to UTC for database comparison
-    const todayUTC = new Date(istTime.getTime() - istOffset - (now.getTimezoneOffset() * 60 * 1000));
-    
-    // Format as YYYY-MM-DD for DATEONLY comparison
-    const todayDateString = istTime.toISOString().split('T')[0];
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // +05:30
+    // Shift to IST then zero time in UTC getters
+    const istMidnight = new Date(now.getTime() + IST_OFFSET_MS);
+    istMidnight.setUTCHours(0, 0, 0, 0);
+    // Back to UTC reference for comparisons if needed
+    const todayUTC = new Date(istMidnight.getTime() - IST_OFFSET_MS);
+    // Format as YYYY-MM-DD for DATEONLY comparison (in IST)
+    const todayDateString = istMidnight.toISOString().split('T')[0];
     
     try {
       // Find posts that need to be closed
@@ -60,7 +57,7 @@ class CronService {
         {
           is_active: false,
           is_closed: true,
-          closed_at: new Date(), // Current timestamp
+          closed_at: new Date(), // Current UTC timestamp
           closed_by: 'CRON_JOB'
         },
         {

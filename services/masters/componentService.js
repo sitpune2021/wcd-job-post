@@ -33,6 +33,10 @@ const transformComponent = (language = 'en') => (c) => ({
     district_name: localizeField(c.district, 'district_name', language),
     district_name_mr: c.district.district_name_mr
   } : null,
+  // Geofencing fields
+  latitude: c.latitude,
+  longitude: c.longitude,
+  geofence_radius_meters: c.geofence_radius_meters,
   is_active: c.is_active,
   created_at: c.created_at,
   updated_at: c.updated_at
@@ -95,6 +99,12 @@ const getAllComponents = async (language = 'en', includeInactive = false) => {
 const getComponentById = async (componentId, language = 'en') => {
   try {
     const component = await Component.findByPk(componentId, {
+      attributes: [
+        'component_id', 'component_code', 'component_name', 'component_name_mr',
+        'description', 'description_mr', 'district_id', 'is_active',
+        'created_at', 'updated_at', 'created_by', 'updated_by',
+        'latitude', 'longitude', 'geofence_radius_meters'
+      ],
       include: [{
         model: DistrictMaster,
         as: 'district',
@@ -135,6 +145,12 @@ const createComponent = async (data, userId) => {
           component_name: data.component_name,
           component_name_mr: data.component_name_mr || null,
           description: data.description || null,
+          description_mr: data.description_mr || null,
+          district_id: data.district_id || null,
+          // Geofencing fields
+          latitude: data.latitude || null,
+          longitude: data.longitude || null,
+          geofence_radius_meters: data.geofence_radius_meters || null,
           is_active: data.is_active !== undefined ? data.is_active : true,
           is_deleted: false,
           deleted_by: null,
@@ -159,6 +175,10 @@ const createComponent = async (data, userId) => {
       description: data.description || null,
       description_mr: data.description_mr || null,
       district_id: data.district_id || null,
+      // Geofencing fields
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      geofence_radius_meters: data.geofence_radius_meters || null,
       is_active: data.is_active !== undefined ? data.is_active : true,
       created_by: userId
     });
@@ -216,6 +236,10 @@ const updateComponent = async (componentId, data, userId) => {
     if (data.description !== undefined) updateData.description = data.description;
     if (data.description_mr !== undefined) updateData.description_mr = data.description_mr;
     if (data.district_id !== undefined) updateData.district_id = data.district_id || null;
+    // Geofencing fields
+    if (data.latitude !== undefined) updateData.latitude = data.latitude;
+    if (data.longitude !== undefined) updateData.longitude = data.longitude;
+    if (data.geofence_radius_meters !== undefined) updateData.geofence_radius_meters = data.geofence_radius_meters;
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
 
     await component.update(updateData);

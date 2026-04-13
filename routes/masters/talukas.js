@@ -11,6 +11,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { talukaService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const talukaSchemas = require('../../validators/masters/talukaSchemas');
 
 // GET /api/masters/talukas - Get all talukas (optionally filtered by district)
 router.get('/', async (req, res, next) => {
@@ -35,6 +37,7 @@ router.get('/:id', async (req, res, next) => {
 
 // POST /api/masters/talukas - Create new taluka
 router.post('/', authenticate, requirePermission('masters.talukas.create'),
+  validateBody(talukaSchemas.createTaluka),
   async (req, res, next) => {
     try {
       const taluka = await talukaService.createTaluka(req.body, req.user.admin_id);
@@ -47,6 +50,7 @@ router.post('/', authenticate, requirePermission('masters.talukas.create'),
 
 // PUT /api/masters/talukas/:id - Update taluka
 router.put('/:id', authenticate, requirePermission('masters.talukas.edit'),
+  validateBodyAndParams(talukaSchemas.updateTaluka, talukaSchemas.talukaIdParam),
   async (req, res, next) => {
     try {
       const taluka = await talukaService.updateTaluka(req.params.id, req.body, req.user.admin_id);

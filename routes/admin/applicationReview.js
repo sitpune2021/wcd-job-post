@@ -82,18 +82,51 @@ router.use(authenticate);
 // ==================== POSTS FOR MERIT REVIEW ====================
 
 /**
- * @route GET /api/v1/admin/review/posts
+ * @route GET /api/admin/review/posts
  * @desc Get all active posts with application counts (for merit page)
  * @access Private (Admin)
  */
 router.get('/posts', requirePermission('applications.view'), auditLog('VIEW_POSTS_FOR_REVIEW'), async (req, res, next) => {
   try {
-    const posts = await applicationReviewService.getActivePostsWithCounts({
-      component_id: req.query.component_id,
-      district_id: req.query.district_id,
-      search: req.query.search
+    const {
+      component_id,
+      district_id,
+      hub_id,
+      search,
+      page = 1,
+      limit = 20
+    } = req.query;
+
+    // Convert to integers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+
+    // Get all posts with counts (this function doesn't support pagination natively)
+    const allPosts = await applicationReviewService.getActivePostsWithCounts({
+      component_id,
+      district_id,
+      hub_id,
+      search
     });
-    return ApiResponse.success(res, posts, 'Posts retrieved successfully');
+
+    // Apply pagination manually
+    const total = allPosts.length;
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = startIndex + limitNum;
+    const posts = allPosts.slice(startIndex, endIndex);
+
+    // Return paginated response
+    return ApiResponse.success(res, {
+      data: posts,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+        hasNext: pageNum < Math.ceil(total / limitNum),
+        hasPrev: pageNum > 1
+      }
+    }, 'Posts retrieved successfully');
   } catch (error) {
     next(error);
   }
@@ -115,7 +148,16 @@ router.get('/posts/:postId/applications', requirePermission('applications.view')
       page: req.query.page,
       limit: req.query.limit
     });
-    return ApiResponse.success(res, result, 'Applications retrieved successfully');
+    return ApiResponse.paginated(
+      res,
+      {
+        applications: result.applications,
+        statusSummary: result.statusSummary,
+        post: result.post
+      },
+      result.pagination,
+      'Applications retrieved successfully'
+    );
   } catch (error) {
     next(error);
   }
@@ -197,10 +239,7 @@ router.get('/applications/:id/required-documents', requirePermission('applicatio
 router.post('/applications/:id/pdf', requirePermission('applications.view'), auditLog('EXPORT_APPLICATION_PDF'), async (req, res, next) => {
   try {
     const includeImages = toBool(req?.query?.include_images ?? req?.body?.include_images, true);
-    logger.info(`PDF export started for application ${req.params.id}`, { includeImages });
-    
     const application = await applicationReviewService.getApplicationDetail(req.params.id);
-    logger.info(`Application data retrieved`, { appNo: application?.application_no });
 
     const db = require('../../models');
     const acknowledgement = await db.ApplicantAcknowledgement.findOne({
@@ -213,7 +252,6 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
       },
       order: [['accepted_at', 'DESC'], ['acknowledgement_id', 'DESC']]
     });
-    logger.info(`Acknowledgement retrieved`, { hasAck: !!acknowledgement });
 
     // Fetch payment data for this application OR the original payment for same post_name + district_id
     let payment = await db.Payment.findOne({
@@ -233,10 +271,9 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
           district_id: application.district_id,
           payment_status: 'SUCCESS'
         },
-        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']]
+        order: [['paid_at', 'ASC'], ['payment_id', 'ASC']] // Get the FIRST payment (original)
       });
     }
-    logger.info(`Payment retrieved`, { hasPayment: !!payment });
 
     const applicant = application?.applicant || {};
     const personal = applicant?.personal || {};
@@ -247,11 +284,10 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
 
     const photoUrl = includeImages ? buildFileUrl(req, photoPath) : null;
     const signatureUrl = includeImages ? buildFileUrl(req, signaturePath) : null;
-    logger.info(`Image URLs built`, { hasPhoto: !!photoUrl, hasSignature: !!signatureUrl });
 
+    // Check if payment is from a different application (free application scenario)
     const isFreeApplication = payment && payment.application_id !== parseInt(req.params.id);
 
-    logger.info(`Building PDF HTML...`);
     const html = buildApplicationPdfHtml(req, application, {
       includeImages,
       photoUrl,
@@ -260,17 +296,10 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
       payment: payment ? payment.toJSON() : null,
       isFreeApplication
     });
-    logger.info(`PDF HTML built successfully`);
 
     const safeNo = application?.application_no || application?.application_id || req.params.id;
-    logger.info(`Sending PDF response...`);
     return await sendApplicationPdfFromHtml(res, `application_${safeNo}`, html);
   } catch (error) {
-    logger.error(`PDF export failed for application ${req.params.id}:`, {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
     next(error);
   }
 });

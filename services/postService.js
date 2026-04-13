@@ -122,6 +122,7 @@ const getAllPosts = async (filters = {}, language = 'en') => {
 // Get post by ID
 const getPostById = async (postId, language = 'en') => {
   try {
+    // Simplified query without GROUP BY - avoids issues with NULL education level IDs
     const [posts] = await sequelize.query(
       `SELECT 
         p.*,
@@ -130,19 +131,22 @@ const getPostById = async (postId, language = 'en') => {
           WHEN p.closing_date >= CURRENT_DATE THEN true
           ELSE false
         END as is_open,
-        COUNT(DISTINCT a.application_id) as application_count,
-        min_edu.level_name as min_education_name,
-        min_edu.level_name_mr as min_education_name_mr,
-        min_edu.level_code as min_education_code,
-        max_edu.level_name as max_education_name,
-        max_edu.level_name_mr as max_education_name_mr,
-        max_edu.level_code as max_education_code
+        (SELECT COUNT(*) FROM ms_applications a 
+         WHERE a.post_id = p.post_id AND a.is_deleted = false) as application_count,
+        (SELECT level_name FROM ms_education_levels 
+         WHERE level_id = p.min_education_level_id) as min_education_name,
+        (SELECT level_name_mr FROM ms_education_levels 
+         WHERE level_id = p.min_education_level_id) as min_education_name_mr,
+        (SELECT level_code FROM ms_education_levels 
+         WHERE level_id = p.min_education_level_id) as min_education_code,
+        (SELECT level_name FROM ms_education_levels 
+         WHERE level_id = p.max_education_level_id) as max_education_name,
+        (SELECT level_name_mr FROM ms_education_levels 
+         WHERE level_id = p.max_education_level_id) as max_education_name_mr,
+        (SELECT level_code FROM ms_education_levels 
+         WHERE level_id = p.max_education_level_id) as max_education_code
       FROM ms_post_master p
-      LEFT JOIN ms_applications a ON p.post_id = a.post_id AND a.is_deleted = false
-      LEFT JOIN ms_education_levels min_edu ON p.min_education_level_id = min_edu.level_id
-      LEFT JOIN ms_education_levels max_edu ON p.max_education_level_id = max_edu.level_id
-      WHERE p.post_id = :postId AND p.is_deleted = false
-      GROUP BY p.post_id, min_edu.level_id, max_edu.level_id`,
+      WHERE p.post_id = :postId AND p.is_deleted = false`,
       { replacements: { postId } }
     );
 

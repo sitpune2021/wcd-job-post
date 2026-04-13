@@ -2,9 +2,7 @@ const express = require('express');
 const router = express.Router();
 const dashboardService = require('../../services/dashboardService');
 const ApiResponse = require('../../utils/ApiResponse');
-// const { requirePermission } = require('../../middlewares/permission.middleware');
-const { authenticate, requirePermission } = require('../../middleware/auth');
-const { auditLog } = require('../../middlewares/audit.middleware');
+const { authenticate, requirePermission, auditLog } = require('../../middleware/auth');
 
 /**
  * @route   GET /api/admin/dashboard/summary-by-district

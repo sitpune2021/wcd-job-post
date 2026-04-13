@@ -23,6 +23,7 @@ const {
   DistrictMaster,
   TalukaMaster,
   Component,
+  Hub,
   EducationLevel,
   ExperienceDomain,
   SkillMaster,
@@ -51,7 +52,7 @@ const getEligiblePosts = async (applicantId) => {
         is_active: true,
         is_deleted: false
       },
-      include: [{ model: Component, as: 'component' }],
+      include: [{ model: Component, as: 'component', required: false }],
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']]
     });
 
@@ -123,6 +124,12 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
             as: 'component',
             required: false,
             attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
+          },
+          {
+            model: Hub,
+            as: 'hub',
+            required: false,
+            attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
           }
         ]
       },
@@ -286,11 +293,27 @@ const createApplication = async (applicantId, data, transaction = null) => {
 
 
     // Check if post exists and is active
-    const post = await PostMaster.findByPk(post_id, {
-      include: [{ model: Component, as: 'component' }]
+    // const post = await PostMaster.findByPk(post_id, {
+    //   include: [{ model: Component, as: 'component', required: false }]
+    // });
+    // unscope just like canappltopost function
+    const post = await PostMaster.unscoped().findOne({
+      where: { post_id: post_id , is_deleted: false },
+      include: [{ model: Component, as: 'component', required: false }]
     });
+
     if (!post || !post.is_active) {
       throw new ApiError(400, 'Invalid or inactive post');
+    }
+
+    // Check gender restriction
+    const personalData = await ApplicantPersonal.findOne({ where: { applicant_id: applicantId } });
+    const applicantGender = personalData?.gender ? personalData.gender.toString().toLowerCase() : null;
+    if (post.female_only && applicantGender !== 'female') {
+      throw new ApiError(400, 'This post is for female candidates only');
+    }
+    if (post.male_only && applicantGender !== 'male') {
+      throw new ApiError(400, 'This post is for male candidates only');
     }
 
     // Check if post is closed
@@ -357,7 +380,12 @@ const createApplication = async (applicantId, data, transaction = null) => {
     // Fetch with relations
     const createdApp = await Application.findByPk(application.application_id, {
       include: [
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
+        {
+          model: PostMaster, as: 'post', include: [
+            { model: Component, as: 'component', required: false },
+            { model: Hub, as: 'hub', required: false }
+          ]
+        },
         { model: DistrictMaster, as: 'district' }
       ],
       transaction
@@ -512,7 +540,12 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
     // Fetch with full relations
     const submittedApp = await Application.findByPk(application.application_id, {
       include: [
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
+        {
+          model: PostMaster, as: 'post', include: [
+            { model: Component, as: 'component', required: false },
+            { model: Hub, as: 'hub', required: false }
+          ]
+        },
         { model: DistrictMaster, as: 'district' },
         { model: EligibilityResult, as: 'eligibility' }
       ],
@@ -549,7 +582,12 @@ const getApplications = async (applicantId) => {
     const applications = await Application.findAll({
       where: { applicant_id: applicantId },
       include: [
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
+        {
+          model: PostMaster, as: 'post', include: [
+            { model: Component, as: 'component', required: false },
+            { model: Hub, as: 'hub', required: false }
+          ]
+        },
         { model: DistrictMaster, as: 'district' },
         { model: EligibilityResult, as: 'eligibility' }
       ],
@@ -626,7 +664,12 @@ const getApplicationById = async (applicantId, applicationId) => {
     const application = await Application.findOne({
       where: { application_id: applicationId, applicant_id: applicantId },
       include: [
-        { model: PostMaster, as: 'post', include: [{ model: Component, as: 'component' }] },
+        {
+          model: PostMaster, as: 'post', include: [
+            { model: Component, as: 'component', required: false },
+            { model: Hub, as: 'hub', required: false }
+          ]
+        },
         { model: DistrictMaster, as: 'district' },
         { model: EligibilityResult, as: 'eligibility' },
         {

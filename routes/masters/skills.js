@@ -4,6 +4,8 @@ const { authenticate, requirePermission } = require('../../middleware/auth');
 const { skillService } = require('../../services/masters');
 const ApiResponse = require('../../utils/ApiResponse');
 const { ApiError } = require('../../middleware/errorHandler');
+const { validateBody, validateBodyAndParams } = require('../../middleware/validate');
+const skillSchemas = require('../../validators/masters/skillSchemas');
 
 router.get('/', async (req, res, next) => {
   try {
@@ -24,7 +26,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requirePermission('masters.skills.create'), async (req, res, next) => {
+router.post('/', authenticate, requirePermission('masters.skills.create'), validateBody(skillSchemas.createSkill), async (req, res, next) => {
   try {
     const skill = await skillService.createSkill(req.body, req.user.admin_id);
     return ApiResponse.created(res, skill, 'Skill created successfully');
@@ -33,7 +35,7 @@ router.post('/', authenticate, requirePermission('masters.skills.create'), async
   }
 });
 
-router.put('/:id', authenticate, requirePermission('masters.skills.edit'), async (req, res, next) => {
+router.put('/:id', authenticate, requirePermission('masters.skills.edit'), validateBodyAndParams(skillSchemas.updateSkill, skillSchemas.skillIdParam), async (req, res, next) => {
   try {
     const skill = await skillService.updateSkill(req.params.id, req.body, req.user.admin_id);
     if (!skill) throw ApiError.notFound('Skill not found');

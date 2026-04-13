@@ -187,9 +187,10 @@ class AllotmentEmailService {
    * Uses IST timezone (Asia/Kolkata) for comparison
    */
   async processScheduledEmails() {
-    // Get current server time
+    // Get current server time and shift to IST (naive timestamps are stored as IST)
     const now = new Date();
-    const nowIst = new Date(now.getTime() + (330 * 60 * 1000)); // shift to IST for comparison since DB stores naive timestamps
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // +05:30
+    const nowIst = new Date(now.getTime() + IST_OFFSET_MS);
     
     // Log current time in IST for debugging
     const istTimeStr = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
@@ -207,7 +208,8 @@ class AllotmentEmailService {
       include: [
         { model: db.PostMaster, as: 'post', attributes: ['post_id', 'post_name', 'post_code'] },
         { model: db.PostAllotmentUpload, as: 'upload', attributes: ['upload_id', 'file_path', 'original_name'] }
-      ]
+      ],
+      timeout: 30000 // 30 seconds timeout to avoid TimeoutError
     });
 
     // Log all SCHEDULED emails for debugging
@@ -217,7 +219,8 @@ class AllotmentEmailService {
         is_deleted: false
       },
       attributes: ['schedule_id', 'scheduled_date'],
-      order: [['scheduled_date', 'ASC']]
+      order: [['scheduled_date', 'ASC']],
+      timeout: 30000 // 30 seconds timeout
     });
     
     if (allScheduled.length > 0) {
@@ -225,7 +228,7 @@ class AllotmentEmailService {
         id: s.schedule_id,
         scheduled: s.scheduled_date,
         isDue: new Date(s.scheduled_date) <= nowIst
-      })));
+      }))); 
     }
 
     if (schedules.length === 0) {
@@ -277,7 +280,8 @@ class AllotmentEmailService {
             { model: db.ApplicantPersonal, as: 'personal', attributes: ['full_name'] }
           ]
         }
-      ]
+      ],
+      timeout: 30000 // 30 seconds timeout
     });
 
     let sent = 0;
@@ -305,6 +309,38 @@ class AllotmentEmailService {
           pdfPath: fullPath,
           pdfFileName: schedule.upload?.original_name || 'allotment_letter.pdf'
         });
+
+        // Save allotment letter path to employee table if employee exists
+        if (tracking.applicant?.is_employee && tracking.applicant_id) {
+          try {
+            const { EmployeeMaster } = require('../../modules/hrm/models');
+            // Normalize path to consistent HRM format
+            const normalizedPath = filePath.startsWith('uploads/') ? filePath : `uploads/${filePath}`;
+            
+            await EmployeeMaster.update(
+              {
+                allotment_letter_path: normalizedPath,
+                allotment_letter_uploaded_at: new Date()
+              },
+              {
+                where: {
+                  applicant_id: tracking.applicant_id,
+                  is_deleted: false
+                }
+              }
+            );
+            logger.info(`Allotment letter path saved for employee: ${tracking.email}`, {
+              applicant_id: tracking.applicant_id,
+              file_path: normalizedPath
+            });
+          } catch (empError) {
+            logger.warn(`Failed to save allotment path to employee table: ${empError.message}`, {
+              applicant_id: tracking.applicant_id,
+              email: tracking.email
+            });
+            // Don't fail the email sending if employee update fails
+          }
+        }
 
         const sentTime = new Date();
         await tracking.update({

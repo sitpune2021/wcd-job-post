@@ -125,6 +125,14 @@ const errorHandler = (err, req, res, next) => {
         : 'File upload error';
       break;
 
+    // CSRF errors from csurf
+    case 'ForbiddenError':
+      if (err.code === 'EBADCSRFTOKEN') {
+        statusCode = HTTP_STATUS.FORBIDDEN;
+        message = 'Invalid CSRF token';
+      }
+      break;
+
     default:
       // For unknown errors in production, hide details
       if (statusCode === 500 && process.env.NODE_ENV === 'production') {

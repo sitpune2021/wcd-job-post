@@ -95,7 +95,8 @@ const transformPost = (language = 'en') => (p) => ({
   created_at: p.created_at,
   updated_at: p.updated_at,
   min_education_level_id: p.min_education_level_id,
-  max_education_level_id: p.max_education_level_id
+  max_education_level_id: p.max_education_level_id,
+  amount: p.amount
 });
 
 // ==================== POST CATEGORY OPERATIONS ====================
@@ -222,7 +223,7 @@ const getPosts = async (query = {}) => {
   try {
     const language = query.lang || 'en';
     const includeInactive = query.include_inactive === 'true';
-
+    
     const baseWhere = {};
     baseWhere.is_deleted = false;
     if (!includeInactive) {
@@ -238,9 +239,11 @@ const getPosts = async (query = {}) => {
         district_specific: { field: 'district_specific', type: 'boolean' },
         district_id: { field: 'district_id', type: 'number' }
       },
+      attributes: { exclude: ['amount'] },
       include: [{
         model: Component,
         as: 'component',
+        required: false,
         attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
       }, {
         model: Hub,
@@ -260,26 +263,54 @@ const getPosts = async (query = {}) => {
     });
 
     const enrichWithCategories = async (postsArray) => {
-      return Promise.all(postsArray.map(async (p) => {
-        const categories = await getPostCategories(p.post_id, language);
-        return {
-          ...p,
-          allowed_categories: categories,
-          allowed_category_ids: categories.map(c => c.category_id)
-        };
+      // Get all post IDs at once
+      const postIds = postsArray.map(p => p.post_id);
+      
+      // Fetch all categories in one query
+      const postCategories = await PostCategory.findAll({
+        where: { post_id: postIds },
+        include: [{
+          model: CategoryMaster,
+          as: 'category',
+          attributes: ['category_id', 'category_name', 'category_name_mr']
+        }]
+      });
+      
+      // Group by post_id
+      const categoriesMap = {};
+      postCategories.forEach(pc => {
+        if (!categoriesMap[pc.post_id]) {
+          categoriesMap[pc.post_id] = [];
+        }
+        categoriesMap[pc.post_id].push({
+          category_id: pc.category_id,
+          category_name: language === 'mr' && pc.category.category_name_mr ? 
+            pc.category.category_name_mr : pc.category.category_name
+        });
+      });
+      
+      // Map back to posts
+      return postsArray.map(p => ({
+        ...p,
+        allowed_categories: categoriesMap[p.post_id] || [],
+        allowed_category_ids: (categoriesMap[p.post_id] || []).map(c => c.category_id)
       }));
     };
 
     if (isPaginatedResponse(result)) {
       const enrichedPosts = await enrichWithCategories(result.posts || []);
-      return {
+      const finalResult = {
         ...result,
         posts: enrichedPosts
       };
+      
+      return finalResult;
     }
 
     const postsArray = Array.isArray(result) ? result : [];
-    return enrichWithCategories(postsArray);
+    const finalResult = await enrichWithCategories(postsArray);
+    
+    return finalResult;
   } catch (error) {
     logger.error('Error fetching posts:', error);
     throw error;
@@ -298,6 +329,7 @@ const getPostById = async (postId, language = 'en') => {
       include: [{
         model: Component,
         as: 'component',
+        required: false,
         attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
       }, {
         model: Hub,
@@ -373,6 +405,7 @@ const getPostById = async (postId, language = 'en') => {
       updated_at: post.updated_at,
       min_education_level_id: post.min_education_level_id,
       max_education_level_id: post.max_education_level_id,
+      amount: post.amount,
       allowed_categories: categories,
       allowed_category_ids: categories.map(c => c.category_id)
     };
@@ -438,6 +471,7 @@ const createPost = async (data, userId) => {
       female_only: parseOptionalBool(data.female_only) || false,
       male_only: parseOptionalBool(data.male_only) || false,
       display_order: parseOptionalInt(data.display_order) || 0,
+      amount: parseFloat(data.amount) || null,
       is_active: data.is_active !== undefined ? data.is_active : true,
       is_deleted: parseOptionalBool(data.is_deleted) || false,
       created_by: userId
@@ -479,7 +513,7 @@ const updatePost = async (postId, data, userId) => {
       'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
       'component_id', 'hub_id', 'min_qualification', 'min_experience_months', 'min_age', 'max_age',
       'district_specific', 'required_domains', 'eligibility_criteria',
-      'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only', 'is_active'
+      'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only', 'is_active', 'amount'
     ];
     
     fields.forEach(field => {
@@ -492,6 +526,12 @@ const updatePost = async (postId, data, userId) => {
 
       if (['district_specific', 'female_only', 'male_only'].includes(field)) {
         updateData[field] = parseOptionalBool(data[field]) || false;
+        return;
+      }
+
+      // Handle amount field specifically
+      if (field === 'amount') {
+        updateData[field] = data.amount === '' || data.amount === null ? null : parseFloat(data.amount);
         return;
       }
 
