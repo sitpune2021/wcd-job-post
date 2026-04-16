@@ -100,6 +100,20 @@ registerPermission({
   module: 'applications'
 });
 
+registerPermission({
+  code: 'applications.approve',
+  name: 'Approve Applications',
+  description: 'Approve applications',
+  module: 'applications'
+});
+
+registerPermission({
+  code: 'applications.reject',
+  name: 'Reject Applications',
+  description: 'Reject applications',
+  module: 'applications'
+});
+
 // Dashboard Module (1)
 registerPermission({
   code: 'dashboard.view',

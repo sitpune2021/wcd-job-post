@@ -16,7 +16,7 @@ const logger = require('./config/logger');
 const slowQueryLogger = require('./config/slowQueryLogger');
 const systemHealthLogger = require('./config/systemHealthLogger');
 const cache = require('./utils/cache');
-const { syncAllPermissions } = require('./scripts/syncPermissions');
+const { syncAllPermissions } = require('./utils/syncPermissions');
 
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
