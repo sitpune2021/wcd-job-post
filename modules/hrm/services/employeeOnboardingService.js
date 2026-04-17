@@ -274,10 +274,10 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       contract_end_date: parseDate(contract_end_date) || null,
       employee_pay: employee_pay || null,
       onboarding_type: 'EXISTING_IMPORT',
-      onboarding_status: 'PENDING',
+      onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
       temp_password_hash: passwordHash,
       password_change_required: true,
-      is_active: false,
+      is_active: true,                     // EXISTING_IMPORT employees should be active immediately
       created_by: adminId
     }, { transaction });
 
