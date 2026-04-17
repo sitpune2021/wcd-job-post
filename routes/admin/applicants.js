@@ -8,15 +8,6 @@ const applicantService = require('../../services/admin/applicantService');
 // All routes require authentication
 router.use(authenticate);
 
-// All routes require admin role (state-level system)
-router.use((req, res, next) => {
-  const adminRoles = ['SUPER_ADMIN', 'STATE_ADMIN', 'POST_MANAGER', 'APP_REVIEWER', 'REPORT_VIEWER'];
-  if (!req.user || !adminRoles.includes(req.user.role.role_code)) {
-    return next(ApiError.forbidden('Admin access required'));
-  }
-  next();
-});
-
 /**
  * @route GET /api/v1/admin/applicants
  * @desc Get all registered applicants (for admin viewing)

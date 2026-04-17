@@ -122,7 +122,7 @@ registerPermission({
   module: 'dashboard'
 });
 
-// Masters Module (37)
+// Masters Module (47)
 
 // Application Statuses
 registerPermission({
@@ -197,6 +197,13 @@ registerPermission({
   module: 'masters'
 });
 
+registerPermission({
+  code: 'masters.categories.view',
+  name: 'View Categories',
+  description: 'View categories',
+  module: 'masters'
+});
+
 // Components
 registerPermission({
   code: 'masters.components.create',
@@ -216,6 +223,13 @@ registerPermission({
   code: 'masters.components.edit',
   name: 'Edit Component',
   description: 'Edit component/OSC',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.components.view',
+  name: 'View Components',
+  description: 'View components/OSCs',
   module: 'masters'
 });
 
@@ -241,6 +255,13 @@ registerPermission({
   module: 'masters'
 });
 
+registerPermission({
+  code: 'masters.departments.view',
+  name: 'View Departments',
+  description: 'View departments',
+  module: 'masters'
+});
+
 // Districts
 registerPermission({
   code: 'masters.districts.create',
@@ -260,6 +281,13 @@ registerPermission({
   code: 'masters.districts.edit',
   name: 'Edit District',
   description: 'Edit district',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.districts.view',
+  name: 'View Districts',
+  description: 'View districts',
   module: 'masters'
 });
 
@@ -285,6 +313,13 @@ registerPermission({
   module: 'masters'
 });
 
+registerPermission({
+  code: 'masters.document_types.view',
+  name: 'View Document Types',
+  description: 'View document types',
+  module: 'masters'
+});
+
 // Education Levels
 registerPermission({
   code: 'masters.education_levels.create',
@@ -304,6 +339,13 @@ registerPermission({
   code: 'masters.education_levels.edit',
   name: 'Edit Education Level',
   description: 'Edit education level',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.education_levels.view',
+  name: 'View Education Levels',
+  description: 'View education levels',
   module: 'masters'
 });
 
@@ -329,6 +371,13 @@ registerPermission({
   module: 'masters'
 });
 
+registerPermission({
+  code: 'masters.hubs.view',
+  name: 'View Hubs',
+  description: 'View hubs',
+  module: 'masters'
+});
+
 // Posts
 registerPermission({
   code: 'masters.posts.create',
@@ -348,6 +397,13 @@ registerPermission({
   code: 'masters.posts.edit',
   name: 'Edit Post',
   description: 'Edit post',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.posts.view',
+  name: 'View Posts',
+  description: 'View posts',
   module: 'masters'
 });
 
@@ -373,6 +429,13 @@ registerPermission({
   module: 'masters'
 });
 
+registerPermission({
+  code: 'masters.skills.view',
+  name: 'View Skills',
+  description: 'View skills',
+  module: 'masters'
+});
+
 // Talukas
 registerPermission({
   code: 'masters.talukas.create',
@@ -392,6 +455,13 @@ registerPermission({
   code: 'masters.talukas.edit',
   name: 'Edit Taluka',
   description: 'Edit taluka',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.talukas.view',
+  name: 'View Talukas',
+  description: 'View talukas',
   module: 'masters'
 });
 
