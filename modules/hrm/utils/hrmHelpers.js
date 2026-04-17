@@ -16,7 +16,7 @@ const getEmployeeFromUser = async (user, EmployeeMaster) => {
   
   const employee = await EmployeeMaster.findOne({
     where: {
-      applicant_id: user.applicant_id || user.id,
+      applicant_id: user.applicant_id,
       is_deleted: false,
       is_active: true
     },
