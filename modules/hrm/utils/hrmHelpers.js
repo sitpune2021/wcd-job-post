@@ -10,13 +10,20 @@ const logger = require('../../../config/logger');
  * Looks up employee record by applicant_id from JWT token
  */
 const getEmployeeFromUser = async (user, EmployeeMaster) => {
-  if (!user || !user.applicant_id) {
+  if (!user) {
+    return null;
+  }
+  
+  // Handle Sequelize instance wrapping
+  const applicantId = user.applicant_id || user.dataValues?.applicant_id;
+  
+  if (!applicantId) {
     return null;
   }
   
   const employee = await EmployeeMaster.findOne({
     where: {
-      applicant_id: user.applicant_id,
+      applicant_id: applicantId,
       is_deleted: false,
       is_active: true
     },
