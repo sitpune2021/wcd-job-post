@@ -182,7 +182,8 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       district_id,
       search,
       page = 1,
-      limit = 50
+      limit = 50,
+      adminUser
     } = filters;
 
     // Build where clause - ONLY truly submitted applications
@@ -265,7 +266,15 @@ const getApplicationsForPost = async (postId, filters = {}) => {
               model: ApplicantEducation,
               as: 'education',
               required: false,
-              include: [{ model: EducationLevel, as: 'educationLevel', required: false }]
+              include: [{ 
+                model: EducationLevel, 
+                as: 'educationLevel', 
+                required: false 
+              }],
+              order: [
+                [{ model: EducationLevel, as: 'educationLevel' }, 'display_order', 'ASC'],
+                ['passing_year', 'DESC']
+              ]
             },
             { model: ApplicantExperience, as: 'experience', required: false }
           ]
@@ -303,8 +312,39 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       return (a.application_no || '').localeCompare(b.application_no || '');
     });
 
-    // Apply pagination after sorting
-    const paginatedApplications = applicationsWithScores.slice(offset, offset + parseInt(limit));
+    // Apply batch filtering if user has assigned batch range
+    let batchInfo = null;
+    let filteredApplications = applicationsWithScores;
+    
+    if (adminUser && adminUser.review_batch_start && adminUser.review_batch_end) {
+      const startRank = adminUser.review_batch_start;
+      const endRank = adminUser.review_batch_end;
+      
+      // Filter by rank range (1-indexed)
+      filteredApplications = applicationsWithScores.filter((app, index) => {
+        const rank = index + 1; // Convert 0-indexed to 1-indexed rank
+        return rank >= startRank && rank <= endRank;
+      });
+      
+      batchInfo = {
+        batch_start: startRank,
+        batch_end: endRank,
+        batch_size: endRank - startRank + 1,
+        is_filtered: true,
+        note: 'Global rank range - applies to all posts'
+      };
+    } else {
+      batchInfo = {
+        batch_start: null,
+        batch_end: null,
+        batch_size: null,
+        is_filtered: false,
+        note: 'No rank range assigned - sees all applications'
+      };
+    }
+
+    // Apply pagination after filtering
+    const paginatedApplications = filteredApplications.slice(offset, offset + parseInt(limit));
 
     // Get status summary for this post (only submitted applications)
     const [statusSummary] = await db.sequelize.query(`
@@ -486,11 +526,12 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       applications: trimmedApplications,
       statusSummary: filteredStatusSummary,
       post: lightPost,
+      batchInfo: batchInfo,
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total: totalCount,
-        totalPages: Math.ceil(totalCount / limit)
+        total: filteredApplications.length, // Use filtered count for pagination
+        totalPages: Math.ceil(filteredApplications.length / limit)
       }
     };
 

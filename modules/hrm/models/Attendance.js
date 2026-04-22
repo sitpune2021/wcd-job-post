@@ -78,6 +78,35 @@ const Attendance = sequelize.define('HrmAttendance', {
     type: DataTypes.TEXT,
     allowNull: true
   },
+  bulk_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_hrm_bulk_attendance',
+      key: 'bulk_id'
+    },
+    comment: 'Reference to bulk attendance upload'
+  },
+  approval_status: {
+    type: DataTypes.ENUM('PENDING', 'APPROVED', 'REJECTED'),
+    allowNull: true,
+    defaultValue: null,
+    comment: 'Approval status for bulk uploaded attendance'
+  },
+  approved_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_admin_users',
+      key: 'admin_id'
+    },
+    comment: 'Admin who approved this attendance'
+  },
+  approved_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: 'When this attendance was approved'
+  },
   is_deleted: {
     type: DataTypes.BOOLEAN,
     defaultValue: false

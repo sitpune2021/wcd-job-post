@@ -68,6 +68,16 @@ const AdminUser = sequelize.define('AdminUser', {
     },
     comment: 'Hub assignment for Hub-level admins (manages posts under this Hub, similar to OSC)'
   },
+  review_batch_start: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Global starting rank number for reviewer (inclusive) - applies to ALL posts'
+  },
+  review_batch_end: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Global ending rank number for reviewer (inclusive) - applies to ALL posts'
+  },
   created_by: {
     type: DataTypes.INTEGER,
     allowNull: true,

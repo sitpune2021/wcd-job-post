@@ -7,6 +7,7 @@
 const cron = require('node-cron');
 const cronService = require('../services/cronService');
 const allotmentEmailService = require('../services/admin/allotmentEmailService');
+const { runAttendanceCronTasks } = require('../modules/hrm/cron/attendanceCronService');
 const logger = require('../config/logger');
 
 const DEFAULT_EMAIL_CRON = '*/5 * * * *';
@@ -90,9 +91,24 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
   
+  // Run daily at 11:59 PM IST to process attendance tasks
+  // This marks absent employees and generates summaries
+  cron.schedule('59 23 * * *', async () => {
+    logger.info('CRON: Running attendance cron tasks...');
+    try {
+      await runAttendanceCronTasks();
+    } catch (error) {
+      logger.error('CRON: Attendance cron tasks failed:', error);
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  });
+  
   logger.info('CRON: Scheduled jobs initialized');
   logger.info(`CRON: - Post auto-close: ${postCloseCron} (IST)`);
   logger.info(`CRON: - Email processing: ${resolvedAllotmentCron} (IST)`);
+  logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
 }
 
 /**

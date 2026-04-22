@@ -32,6 +32,8 @@ const getAllUsers = async (filters = {}) => {
         r.role_code,
         u.is_active,
         u.last_login,
+        u.review_batch_start,
+        u.review_batch_end,
         u.created_at,
         u.updated_at
       FROM ms_admin_users u
@@ -86,6 +88,8 @@ const getUserById = async (userId) => {
         r.description as role_description,
         u.is_active,
         u.last_login,
+        u.review_batch_start,
+        u.review_batch_end,
         u.created_at,
         u.updated_at
       FROM ms_admin_users u
@@ -186,17 +190,21 @@ const updateUser = async (userId, data, updatedBy) => {
            mobile_no = COALESCE(:mobile_no, mobile_no),
            role_id = COALESCE(:role_id, role_id),
            is_active = COALESCE(:is_active, is_active),
+           review_batch_start = :review_batch_start,
+           review_batch_end = :review_batch_end,
            updated_by = :updated_by,
            updated_at = NOW()
        WHERE admin_id = :userId AND is_deleted = false
-       RETURNING admin_id, username, email, full_name, mobile_no, role_id, is_active`,
+       RETURNING admin_id, username, email, full_name, mobile_no, role_id, is_active, review_batch_start, review_batch_end`,
       {
         replacements: {
           userId,
-          email: data.email || null,
-          full_name: data.full_name || null,
-          mobile_no: data.mobile_no || null,
+          email: data.email !== undefined ? data.email : null,
+          full_name: data.full_name !== undefined ? data.full_name : null,
+          mobile_no: data.mobile_no !== undefined ? data.mobile_no : null,
           role_id: data.role_id !== undefined ? data.role_id : null,
+          review_batch_start: data.review_batch_start !== undefined ? data.review_batch_start : null,
+          review_batch_end: data.review_batch_end !== undefined ? data.review_batch_end : null,
           is_active: data.is_active !== undefined ? data.is_active : null,
           updated_by: updatedBy
         }

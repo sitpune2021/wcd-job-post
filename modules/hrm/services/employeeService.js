@@ -8,6 +8,14 @@ const logger = require('../../../config/logger');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
+const { getRelativePath } = require('../../../utils/fileUpload');
+
+// Helper function to normalize upload paths (consistent with other services)
+const toPublicUploadPath = (filePath) => {
+  if (!filePath) return null;
+  const rel = getRelativePath(filePath).replace(/\\/g, '/');
+  return '/' + rel.replace(/^\/+/, '');
+};
 
 /**
  * Employee Service
@@ -33,10 +41,10 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       is_deleted: false
     };
 
-    // Temporarily disable HRM hierarchy scope for debugging
-    // if (hrmScope) {
-    //   where = buildEmployeeWhereClause(where, hrmScope);
-    // }
+    // Apply HRM hierarchy scope (district/component/hub filtering)
+    if (hrmScope) {
+      where = buildEmployeeWhereClause(where, hrmScope);
+    }
 
     // Apply additional filters
     if (filters.district_id) {
@@ -786,14 +794,14 @@ async function uploadAllotmentLetter(applicantId, file) {
     
     fs.renameSync(tempPath, finalPath);
 
-    // Get relative path for database storage
-    const relativePath = path.relative('uploads', finalPath);
+    // Get full path for database storage (include uploads prefix)
+    const fullPath = getRelativePath(finalPath);
     
     // Update employee record
     await EmployeeMaster.update(
       { 
         allotment_letter_uploaded: true,
-        allotment_letter_path: relativePath,
+        allotment_letter_path: fullPath,
         updated_at: new Date()
       },
       { where: { employee_id: employee.employee_id } }
@@ -804,7 +812,7 @@ async function uploadAllotmentLetter(applicantId, file) {
     return {
       success: true,
       message: 'Allotment letter uploaded successfully',
-      file_path: relativePath
+      file_path: fullPath
     };
   } catch (error) {
     logger.error('Error uploading allotment letter:', error);
@@ -1115,7 +1123,7 @@ async function getCompleteEmployeeProfile(applicantId) {
       reporting_officer_username: employee.reportingOfficer?.username || null,
       // Allotment letter (fix path format - ensure consistent HRM format)
       allotment_letter_uploaded: !!employee.allotment_letter_path,
-      allotment_letter_path: employee.allotment_letter_path || null
+      allotment_letter_path: employee.allotment_letter_path ? toPublicUploadPath(employee.allotment_letter_path) : null
     };
   } catch (error) {
     logger.error('Error getting complete employee profile:', error);

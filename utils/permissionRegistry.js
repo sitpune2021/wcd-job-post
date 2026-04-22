@@ -581,6 +581,158 @@ registerPermission({
   module: 'roles'
 });
 
+// HRM Module (15)
+
+// HRM Dashboard
+registerPermission({
+  code: 'hrm.dashboard.view',
+  name: 'View HRM Dashboard',
+  description: 'View HRM admin dashboard with statistics',
+  module: 'hrm'
+});
+
+// HRM Employees
+registerPermission({
+  code: 'hrm.employees.view',
+  name: 'View HRM Employees',
+  description: 'View employee list and details',
+  module: 'hrm'
+});
+
+// HRM Onboarding
+registerPermission({
+  code: 'hrm.onboarding.view',
+  name: 'View HRM Onboarding',
+  description: 'View onboarding applicants and pending applications',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.onboarding.import',
+  name: 'Import HRM Employees',
+  description: 'Import employees via Excel or manual form',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.onboarding.confirm',
+  name: 'Confirm HRM Onboarding',
+  description: 'Confirm and onboard selected applicants from CRM',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.onboarding.email',
+  name: 'Send HRM Onboarding Email',
+  description: 'Send onboarding emails to employees',
+  module: 'hrm'
+});
+
+// HRM Attendance
+registerPermission({
+  code: 'hrm.attendance.view',
+  name: 'View HRM Attendance',
+  description: 'View attendance records and summaries',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.attendance.manage',
+  name: 'Manage HRM Attendance',
+  description: 'Mark and update attendance records',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.attendance.bulk_upload',
+  name: 'Bulk Upload Attendance',
+  description: 'Upload bulk attendance via Excel template',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.attendance.bulk_approve',
+  name: 'Approve Bulk Attendance',
+  description: 'Approve or reject bulk attendance uploads',
+  module: 'hrm'
+});
+
+// HRM Leave
+registerPermission({
+  code: 'hrm.leave.view',
+  name: 'View HRM Leave',
+  description: 'View leave applications and summaries',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.leave.manage',
+  name: 'Manage HRM Leave',
+  description: 'Approve or reject leave applications',
+  module: 'hrm'
+});
+
+// HRM Calendar/Holidays
+registerPermission({
+  code: 'hrm.calendar.manage',
+  name: 'Manage HRM Calendar',
+  description: 'Manage holidays and calendar settings',
+  module: 'hrm'
+});
+
+// HRM Performance
+registerPermission({
+  code: 'hrm.performance.view',
+  name: 'View HRM Performance',
+  description: 'View staff performance reviews and summaries',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.performance.manage',
+  name: 'Manage HRM Performance',
+  description: 'Submit appraiser reviews for employees',
+  module: 'hrm'
+});
+
+// HRM Reports
+registerPermission({
+  code: 'hrm.reports.view',
+  name: 'View HRM Reports',
+  description: 'View monthly reports and summaries',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.reports.manage',
+  name: 'Manage HRM Reports',
+  description: 'Review and approve/reject monthly reports',
+  module: 'hrm'
+});
+
+// HRM Payroll
+registerPermission({
+  code: 'hrm.payroll.view',
+  name: 'View HRM Payroll',
+  description: 'View payroll calculations and payslips',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.payroll.manage',
+  name: 'Manage HRM Payroll',
+  description: 'Generate payroll and mark payroll cycles as paid',
+  module: 'hrm'
+});
+
+// HRM Wildcard (for full HRM access)
+registerPermission({
+  code: 'hrm.*',
+  name: 'Full HRM Access',
+  description: 'Full access to all HRM features',
+  module: 'hrm'
+});
+
 // Users Module (6)
 registerPermission({
   code: 'users.assign_roles',

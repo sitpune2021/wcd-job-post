@@ -236,8 +236,13 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     const password = employeeData.password || 'User@123';
     const passwordHash = await bcrypt.hash(password, getBcryptRounds());
 
+    // Generate applicant number
+    const { generateApplicantNo } = require('../../../utils/idGenerator');
+    const applicant_no = await generateApplicantNo();
+
     // Create new applicant record since none exists
     const applicant = await db.ApplicantMaster.create({
+      applicant_no: applicant_no,
       email,
       password_hash: passwordHash,
       is_verified: true,
@@ -264,7 +269,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     // Create employee record (only for new applicants)
     const employee = await EmployeeMaster.create({
       applicant_id: applicantId,
-      application_id: null,
+      application_id: null,                // No Application record for imported employees
       employee_code, // Use generated employee code
       post_id,
       district_id,
@@ -312,6 +317,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     logger.info('Successfully created existing employee record', {
       employee_id: employee.employee_id,
       employee_code: employee.employee_code,
+      applicant_no: applicant_no,
       email,
       applicant_id: applicantId
     });
@@ -336,8 +342,9 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     return {
       success: true,
       employee: completeEmployee,
+      applicant_no: applicant_no,
       tempPassword: password,
-      message: 'Employee record created. Email can now be sent with credentials.'
+      message: 'Employee record created with applicant number. Email can now be sent with credentials.'
     };
   } catch (error) {
     // Only rollback if transaction is still active
@@ -472,6 +479,7 @@ async function bulkImportExistingEmployees(employeesData, adminId, ipAddress) {
           email: employeeData.email,
           employee_code: result.employee.employee_code,
           employee_id: result.employee.employee_id,
+          applicant_no: result.applicant_no,
           action: 'updated'
         });
       } else {
@@ -479,6 +487,7 @@ async function bulkImportExistingEmployees(employeesData, adminId, ipAddress) {
           email: employeeData.email,
           employee_code: result.employee.employee_code,
           employee_id: result.employee.employee_id,
+          applicant_no: result.applicant_no,
           action: 'created'
         });
       }

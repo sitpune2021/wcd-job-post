@@ -12,6 +12,7 @@ const onboardingRoutes = require('./onboardingRoutes');
 
 // Phase 2 routes
 const attendanceRoutes = require('./attendanceRoutes');
+const bulkAttendanceRoutes = require('./bulkAttendanceRoutes');
 const leaveRoutes = require('./leaveRoutes');
 const reportRoutes = require('./reportRoutes');
 const performanceRoutes = require('./performanceRoutes');
@@ -25,6 +26,7 @@ const payrollViewRoutes = require('./payrollViewRoutes');
 router.use('/employees', employeeRoutes);
 router.use('/onboarding', onboardingRoutes);
 router.use('/attendance', attendanceRoutes);
+router.use('/attendance', bulkAttendanceRoutes);
 router.use('/leave', leaveRoutes);
 router.use('/reports', reportRoutes);
 router.use('/performance', performanceRoutes);

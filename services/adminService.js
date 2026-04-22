@@ -40,15 +40,15 @@ class AdminService {
     const transaction = await db.sequelize.transaction();
 
     try {
-      // Check if username already exists
-      const existingUser = await AdminUser.findOne({ where: { username } });
+      // Check if username already exists (exclude soft-deleted users)
+      const existingUser = await AdminUser.findOne({ where: { username, is_deleted: false } });
       if (existingUser) {
         throw new ApiError(400, 'Username already exists');
       }
 
-      // Check if email already exists
+      // Check if email already exists (exclude soft-deleted users)
       if (email) {
-        const existingEmail = await AdminUser.findOne({ where: { email } });
+        const existingEmail = await AdminUser.findOne({ where: { email, is_deleted: false } });
         if (existingEmail) {
           throw new ApiError(400, 'Email already exists');
         }
@@ -196,7 +196,7 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, is_active, password } = data;
+    const { full_name, email, mobile_no, role_id, district_id, component_id, hub_id, is_active, password, review_batch_start, review_batch_end } = data;
 
     try {
       const user = await AdminUser.findOne({
@@ -214,10 +214,14 @@ class AdminService {
         }
       }
 
-      // Check email uniqueness if changed
+      // Check email uniqueness if changed (exclude soft-deleted users)
       if (email && email !== user.email) {
         const existingEmail = await AdminUser.findOne({
-          where: { email, admin_id: { [Op.ne]: userId } }
+          where: { 
+            email, 
+            admin_id: { [Op.ne]: userId },
+            is_deleted: false
+          }
         });
         if (existingEmail) {
           throw new ApiError(400, 'Email already exists');
@@ -231,8 +235,18 @@ class AdminService {
         mobile_no: mobile_no !== undefined ? mobile_no : user.mobile_no,
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
+        component_id: component_id !== undefined ? component_id : user.component_id,
+        hub_id: hub_id !== undefined ? hub_id : user.hub_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };
+
+      // Add batch fields if provided
+      if (review_batch_start !== undefined) {
+        updateData.review_batch_start = review_batch_start;
+      }
+      if (review_batch_end !== undefined) {
+        updateData.review_batch_end = review_batch_end;
+      }
 
       // Handle password update if provided and not empty (model will hash it in beforeUpdate hook)
       if (password && password.trim() !== '') {

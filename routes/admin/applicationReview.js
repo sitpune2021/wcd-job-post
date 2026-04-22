@@ -146,14 +146,16 @@ router.get('/posts/:postId/applications', requirePermission('applications.view')
       district_id: req.query.district_id,
       search: req.query.search,
       page: req.query.page,
-      limit: req.query.limit
+      limit: req.query.limit,
+      adminUser: req.user // Pass admin user for batch filtering
     });
     return ApiResponse.paginated(
       res,
       {
         applications: result.applications,
         statusSummary: result.statusSummary,
-        post: result.post
+        post: result.post,
+        batchInfo: result.batchInfo // Include batch info in response
       },
       result.pagination,
       'Applications retrieved successfully'
@@ -402,7 +404,11 @@ router.get('/posts/:postId/merit-list', requirePermission('applications.view'), 
     const result = await meritListService.getMeritList(
       parseInt(req.params.postId),
       parseInt(district_id),
-      { page: parseInt(page) || 1, limit: parseInt(limit) || 50 }
+      { 
+        page: parseInt(page) || 1, 
+        limit: parseInt(limit) || 50,
+        adminUser: req.user // Pass admin user for batch filtering
+      }
     );
     
     return ApiResponse.success(res, result, 'Merit list retrieved successfully');

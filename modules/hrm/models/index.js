@@ -1,6 +1,7 @@
 const EmployeeMaster = require('./EmployeeMaster');
 const EmployeeOnboardingLog = require('./EmployeeOnboardingLog');
 const Attendance = require('./Attendance');
+const BulkAttendance = require('./BulkAttendance');
 const LeaveType = require('./LeaveType');
 const LeaveBalance = require('./LeaveBalance');
 const LeaveApplication = require('./LeaveApplication');
@@ -10,6 +11,10 @@ const PerformanceReview = require('./PerformanceReview');
 const Holiday = require('./Holiday');
 const PayrollCycle = require('./PayrollCycle');
 const Payslip = require('./Payslip');
+
+// Import database models for associations
+const db = require('../../../config/db');
+const { AdminUser } = db.models;
 
 // Define associations
 const setupAssociations = (db) => {
@@ -200,12 +205,40 @@ const setupAssociations = (db) => {
     foreignKey: 'employee_id',
     as: 'payslips'
   });
+
+  // BulkAttendance associations
+  BulkAttendance.belongsTo(AdminUser, {
+    foreignKey: 'uploaded_by',
+    as: 'uploader'
+  });
+
+  BulkAttendance.belongsTo(AdminUser, {
+    foreignKey: 'approved_by',
+    as: 'approver'
+  });
+
+  BulkAttendance.hasMany(Attendance, {
+    foreignKey: 'bulk_id',
+    as: 'records'
+  });
+
+  // Attendance associations for bulk
+  Attendance.belongsTo(BulkAttendance, {
+    foreignKey: 'bulk_id',
+    as: 'bulk'
+  });
+
+  Attendance.belongsTo(AdminUser, {
+    foreignKey: 'approved_by',
+    as: 'approver'
+  });
 };
 
 module.exports = {
   EmployeeMaster,
   EmployeeOnboardingLog,
   Attendance,
+  BulkAttendance,
   LeaveType,
   LeaveBalance,
   LeaveApplication,

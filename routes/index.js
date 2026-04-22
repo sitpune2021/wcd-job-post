@@ -3,6 +3,7 @@ const router = express.Router();
 
 // Import route modules
 const healthRoutes = require('./health');
+const logsRoutes = require('./logs');
 const authRoutes = require('./auth');
 const authApplicantRoutes = require('./authApplicant');
 const applicantRoutes = require('./applicant');
@@ -20,6 +21,7 @@ const hrmRoutes = require('../modules/hrm/routes');
 
 // Mount routes
 router.use('/health', healthRoutes); // Health check and metrics (no auth)
+router.use('/logs', logsRoutes); // Log files viewing (no auth for debugging)
 router.use('/auth', authRoutes); // Admin auth
 router.use('/auth/applicant', authApplicantRoutes); // Applicant auth (email-based)
 router.use('/applicant', applicantRoutes); // Applicant profile & applications

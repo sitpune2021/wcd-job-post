@@ -306,19 +306,47 @@ class MeritListService {
   }
 
   /**
-   * Get merit list for a post/district
+   * Get merit list for a post/district with global rank filtering
    * @param {number} postId - Post ID
    * @param {number} districtId - District ID
-   * @param {Object} options - Pagination options
-   * @returns {Promise<Object>} - Merit list with pagination
+   * @param {Object} options - Pagination options and user info
+   * @returns {Promise<Object>} - Merit list with pagination and batch info
    */
   async getMeritList(postId, districtId, options = {}) {
-    const { page = 1, limit = 50 } = options;
+    const { page = 1, limit = 50, adminUser } = options;
     const offset = (page - 1) * limit;
 
     try {
+      const whereClause = { post_id: postId, district_id: districtId };
+      
+      // Apply global rank filtering if user has assigned rank range
+      let batchInfo = null;
+      if (adminUser && adminUser.review_batch_start && adminUser.review_batch_end) {
+        // Filter by user's global rank range (works across ALL posts)
+        whereClause.rank = {
+          [db.Sequelize.Op.gte]: adminUser.review_batch_start,
+          [db.Sequelize.Op.lte]: adminUser.review_batch_end
+        };
+        
+        batchInfo = {
+          batch_start: adminUser.review_batch_start,
+          batch_end: adminUser.review_batch_end,
+          batch_size: adminUser.review_batch_end - adminUser.review_batch_start + 1,
+          is_filtered: true,
+          note: 'Global rank range - applies to all posts'
+        };
+      } else {
+        batchInfo = {
+          batch_start: null,
+          batch_end: null,
+          batch_size: null,
+          is_filtered: false,
+          note: 'No rank range assigned - sees all applications'
+        };
+      }
+
       const { count, rows } = await db.MeritList.findAndCountAll({
-        where: { post_id: postId, district_id: districtId },
+        where: whereClause,
         include: [
           {
             model: db.Application,
@@ -339,6 +367,7 @@ class MeritListService {
 
       return {
         meritList: rows,
+        batchInfo,
         pagination: {
           total: count,
           page,
