@@ -129,6 +129,48 @@ router.post('/bulk-upload', upload.single('file'), async (req, res, next) => {
       });
     }
 
+    // Validate query params for month/year (optional for upload)
+    let month, year;
+    
+    if (req.query.month && req.query.year) {
+      const { error: queryError, value: queryValue } = templateQuerySchema.validate(req.query);
+      if (queryError) {
+        return res.status(400).json({ 
+          success: false, 
+          message: queryError.details[0].message 
+        });
+      }
+      month = queryValue.month;
+      year = queryValue.year;
+    } else {
+      // Try to extract month/year from filename
+      const filename = req.file.originalname;
+      // Match patterns like "attendance_template_1_2026-04-23.xlsx" or template with month-year
+      const match = filename.match(/attendance_template.*_(\d{4})[-_](\d{1,2})[-_](\d{1,2})/) || 
+                   filename.match(/template.*?(\d{1,2})[-_](\d{4})/);
+      
+      if (match) {
+        if (match[0].includes('attendance_template')) {
+          // Pattern: attendance_template_1_2026-04-23.xlsx - extract from date
+          year = parseInt(match[1]);
+          month = parseInt(match[2]);
+        } else {
+          // Pattern: template_2_2026.xlsx
+          month = parseInt(match[1]);
+          year = parseInt(match[2]);
+        }
+      } else {
+        // Default to current month/year if not found
+        const now = new Date();
+        month = now.getMonth() + 1;
+        year = now.getFullYear();
+        logger.warn(`Could not extract month/year from filename, using current: ${month}/${year}`, { filename });
+      }
+      
+      logger.info(`Using month/year for upload: ${month}/${year}`, { filename });
+    }
+
+    // Validate body data
     const { error, value } = bulkUploadSchema.validate(req.body);
     if (error) {
       return res.status(400).json({ 
@@ -140,7 +182,11 @@ router.post('/bulk-upload', upload.single('file'), async (req, res, next) => {
     const result = await bulkAttendanceService.uploadBulkAttendance(
       req.user, 
       req.file, 
-      value
+      {
+        ...value,
+        month,
+        year
+      }
     );
 
     logger.info(`Bulk attendance uploaded`, {

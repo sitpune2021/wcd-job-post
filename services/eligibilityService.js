@@ -1126,6 +1126,13 @@ class EligibilityService {
   async getProfileCompletion(applicantId) {
     try {
       logger.info('getProfileCompletion applicantId =', applicantId);
+      
+      // Check if this is an HRM onboarded employee
+      const employeeRecord = await db.EmployeeMaster.findOne({
+        where: { applicant_id: applicantId, is_deleted: false }
+      });
+      const isHrmEmployee = !!employeeRecord;
+      
       const applicant = await db.ApplicantMaster.findByPk(applicantId, {
         include: [
           { model: db.ApplicantPersonal, as: 'personal' },
@@ -1170,13 +1177,16 @@ class EligibilityService {
         }
       };
 
-      // Check personal details
+      // Check personal details - simplified validation
       if (applicant.personal) {
         const p = applicant.personal;
-        const requiredFields = ['full_name', 'dob', 'gender'];
+        
+        // Personal section is only complete if marital_status is filled
+        // HRM onboarding doesn't fill marital_status, so this ensures employees complete their profile
+        const requiredFields = ['full_name', 'dob', 'gender', 'marital_status'];
         const missingFields = requiredFields.filter(f => !p[f]);
 
-        // Category is no longer required for profile completion
+        
         sections.personal.completed = missingFields.length === 0;
         sections.personal.fields = missingFields;
       }
@@ -1249,6 +1259,7 @@ class EligibilityService {
         }
       }
 
+      
       return {
         percentage: totalPercentage,
         isComplete: totalPercentage === 100,

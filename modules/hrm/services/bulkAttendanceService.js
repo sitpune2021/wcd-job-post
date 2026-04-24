@@ -51,18 +51,35 @@ class BulkAttendanceService {
       if (hub_id) additionalFilters.hub_id = parseInt(hub_id);
 
       // Get employee details with filters
+      const employeeWhere = {
+        employee_id: { [Op.in]: employeeIds },
+        ...additionalFilters,
+        is_deleted: false,
+        is_active: true
+      };
       const employees = await EmployeeMaster.findAll({
-        where: {
-          employee_id: { [Op.in]: employeeIds },
-          ...additionalFilters,
-          is_deleted: false,
-          is_active: true
-        },
+        where: employeeWhere,
         include: [
           { model: db.PostMaster, as: 'post', attributes: ['post_name'], where: { is_deleted: false }, required: false },
           { model: db.DistrictMaster, as: 'district', attributes: ['district_name'], where: { is_deleted: false }, required: false },
           { model: db.Component, as: 'component', attributes: ['component_name'], where: { is_deleted: false }, required: false },
-          { model: db.Hub, as: 'hub', attributes: ['hub_name'], where: { is_deleted: false }, required: false }
+          { model: db.Hub, as: 'hub', attributes: ['hub_name'], where: { is_deleted: false }, required: false },
+          {
+            model: db.ApplicantMaster,
+            as: 'applicant',
+            attributes: ['email'],
+            where: { is_deleted: false },
+            required: false,
+            include: [
+              {
+                model: db.ApplicantPersonal,
+                as: 'personal',
+                attributes: ['full_name'],
+                where: { is_deleted: false },
+                required: false
+              }
+            ]
+          }
         ],
         order: [['employee_code', 'ASC']]
       });
@@ -84,8 +101,18 @@ class BulkAttendanceService {
       ];
       
       // Add date columns for each day of the month
+      const sundayDates = [];
       for (let day = 1; day <= daysInMonth; day++) {
-        headers.push(`${day}`);
+        const date = new Date(yearNum, monthNum - 1, day);
+        const dayOfWeek = date.getDay();
+        const isSunday = dayOfWeek === 0;
+        
+        if (isSunday) {
+          headers.push(`${day} (SUN)`);
+          sundayDates.push(day);
+        } else {
+          headers.push(`${day}`);
+        }
       }
       
       // Add summary columns
@@ -115,7 +142,7 @@ class BulkAttendanceService {
         
         // Employee info
         row.push(employee.employee_code);
-        row.push(''); // Employee name (to be filled manually)
+        row.push(employee.applicant?.personal?.full_name || '');
         row.push(employee.post?.post_name || '');
         row.push(employee.district?.district_name || '');
         row.push(employee.component?.component_name || '');
@@ -123,7 +150,11 @@ class BulkAttendanceService {
         
         // Attendance columns for each day
         for (let day = 1; day <= daysInMonth; day++) {
-          row.push(''); // Empty for manual entry
+          if (sundayDates.includes(day)) {
+            row.push('SUN'); // Mark Sundays
+          } else {
+            row.push(''); // Empty for manual entry
+          }
         }
         
         // Summary columns (formulas will be added)
@@ -135,13 +166,26 @@ class BulkAttendanceService {
         
         worksheet.addRow(row);
         
-        // Add dropdown validation to attendance cells
-        const startCell = worksheet.getCell(index + 2, 7); // Column 7 is first date column
-        const endCell = worksheet.getCell(index + 2, 6 + daysInMonth); // Last date column
-        
-        for (let col = 7; col <= 6 + daysInMonth; col++) {
-          const cell = worksheet.getCell(index + 2, col);
-          cell.dataValidation = statusValidation;
+        // Add dropdown validation to attendance cells (except Sundays)
+        let currentCol = 7; // Column 7 is first date column
+        for (let day = 1; day <= daysInMonth; day++) {
+          const cell = worksheet.getCell(index + 2, currentCol);
+          
+          if (sundayDates.includes(day)) {
+            // Style Sunday cells
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFF0F0F0' } // Light gray
+            };
+            cell.font = { color: { argb: 'FF999999' } }; // Gray text
+            cell.value = 'SUN';
+          } else {
+            // Add dropdown validation for non-Sunday cells
+            cell.dataValidation = statusValidation;
+          }
+          
+          currentCol++;
         }
       });
 
@@ -206,6 +250,21 @@ class BulkAttendanceService {
         pattern: 'solid',
         fgColor: { argb: 'FFE6E6FA' }
       };
+      
+      // Style Sunday header columns
+      let currentCol = 7;
+      for (let day = 1; day <= daysInMonth; day++) {
+        if (sundayDates.includes(day)) {
+          const headerCell = worksheet.getCell(1, currentCol);
+          headerCell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF0F0F0' } // Light gray
+          };
+          headerCell.font = { bold: true, color: { argb: 'FF999999' } }; // Gray text
+        }
+        currentCol++;
+      }
 
       // Generate filename
       const fileName = `attendance_template_${adminUser.admin_id}_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -243,14 +302,18 @@ class BulkAttendanceService {
    * @returns {Promise<Object>} - Created bulk details
    */
   async uploadBulkAttendance(adminUser, fileData, uploadData) {
+    const transaction = await db.sequelize.transaction();
+    
     try {
-      const { remarks } = uploadData;
+      const { remarks, month, year } = uploadData;
       const filePath = fileData.path;
       
       logger.info('Processing bulk attendance upload:', {
         filePath,
         originalName: fileData.originalname,
-        size: fileData.size
+        size: fileData.size,
+        month,
+        year
       });
       
       // Read Excel file
@@ -271,8 +334,6 @@ class BulkAttendanceService {
       const attendanceRecords = [];
       const errors = [];
       const uploadDate = new Date();
-      const month = uploadDate.getMonth() + 1;
-      const year = uploadDate.getFullYear();
 
       for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
         const row = worksheet.getRow(rowNumber);
@@ -345,6 +406,20 @@ class BulkAttendanceService {
           throw new Error(`Employee ${recordData.employee_code} is not under your jurisdiction`);
         }
 
+        // Check for existing attendance record
+        const existingRecord = await Attendance.findOne({
+          where: {
+            employee_id: employee.employee_id,
+            attendance_date: recordData.attendance_date,
+            is_deleted: false
+          },
+          transaction
+        });
+
+        if (existingRecord) {
+          throw new Error(`Attendance already exists for employee ${recordData.employee_code} on ${recordData.attendance_date.toISOString().split('T')[0]}`);
+        }
+
         const record = await Attendance.create({
           employee_id: employee.employee_id,
           attendance_date: recordData.attendance_date,
@@ -354,7 +429,7 @@ class BulkAttendanceService {
           bulk_id: bulk.bulk_id,
           approval_status: 'PENDING',
           created_by: adminUser.admin_id
-        });
+        }, { transaction });
         
         records.push(record);
       }
@@ -366,12 +441,17 @@ class BulkAttendanceService {
         totalRecords: attendanceRecords.length
       });
 
+      // Commit transaction
+      await transaction.commit();
+
       return {
         bulk,
         records,
         totalRecords: attendanceRecords.length
       };
     } catch (error) {
+      // Rollback transaction on error
+      await transaction.rollback();
       logger.error('Error uploading bulk attendance:', error);
       throw error;
     }
@@ -414,6 +494,14 @@ class BulkAttendanceService {
     
     // Date columns start from column 7 (index 7)
     for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month - 1, day);
+      const isSunday = date.getDay() === 0;
+      
+      // Skip Sundays
+      if (isSunday) {
+        continue;
+      }
+      
       const statusCell = values[6 + day]?.toString().trim().toUpperCase();
       
       if (statusCell && validStatuses.includes(statusCell)) {

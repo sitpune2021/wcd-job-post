@@ -245,7 +245,15 @@ const getDashboard = async (applicantId) => {
     const personalMissing = [];
     if (!personal || !personal.dob) personalMissing.push('dob');
     if (!personal || !personal.gender) personalMissing.push('gender');
+    if (!personal || !personal.marital_status) personalMissing.push('marital_status');
     const personalCompleted = personalMissing.length === 0;
+    
+    // Debug log
+    console.log('DASHBOARD PERSONAL DEBUG:', {
+      marital_status: personal?.marital_status,
+      personalMissing,
+      personalCompleted
+    });
 
     // Address section
     const addressMissing = [];
