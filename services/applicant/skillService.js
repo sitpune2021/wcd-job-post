@@ -114,13 +114,13 @@ const getSkills = async (applicantId) => {
   }
 };
 
-const deleteSkill = async (applicantId, applicantSkillId) => {
+const deleteSkill = async (applicantId, skillId) => {
   try {
     await assertProfileEditable(applicantId);
 
     const row = await ApplicantSkill.findOne({
       where: {
-        applicant_skill_id: applicantSkillId,
+        skill_id: skillId,
         applicant_id: applicantId,
         is_deleted: false
       }
@@ -136,7 +136,7 @@ const deleteSkill = async (applicantId, applicantSkillId) => {
       updated_at: new Date()
     });
 
-    logger.info(`Skill deleted for applicant: ${applicantId} (applicant_skill_id=${applicantSkillId})`);
+    logger.info(`Skill deleted for applicant: ${applicantId} (skill_id=${skillId}, applicant_skill_id=${row.applicant_skill_id})`);
     return { message: 'Skill deleted successfully' };
   } catch (error) {
     logger.error('Delete skill error:', error);
