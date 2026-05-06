@@ -128,30 +128,40 @@ const getFileHash = async (filePath) => {
 };
 
 const getCandidateNameFromCertificate = async (filePath) => {
-  if (!isOcrEnabled()) return null;
-
-  const fileHash = await getFileHash(filePath);
-  if (fileHash && candidateNameCache.has(fileHash)) {
-    return candidateNameCache.get(fileHash);
+  // Check if OCR is enabled at the global level
+  if (!isOcrEnabled()) {
+    logger.info('OCR is disabled, skipping candidate name extraction from certificate');
+    return null;
   }
 
-  const { analyzeEducationDocument } = require('../../utils/ocr/openaiClient');
-  const ocrResult = await analyzeEducationDocument(filePath);
-
-  if (ocrResult?.success && ocrResult.data?.candidate_name?.value) {
-    const name = ocrResult.data.candidate_name.value;
-    if (fileHash) {
-      if (candidateNameCache.size >= MAX_CACHE_SIZE) {
-        // Simple eviction: remove first inserted
-        const firstKey = candidateNameCache.keys().next().value;
-        candidateNameCache.delete(firstKey);
-      }
-      candidateNameCache.set(fileHash, name);
+  try {
+    const fileHash = await getFileHash(filePath);
+    if (fileHash && candidateNameCache.has(fileHash)) {
+      return candidateNameCache.get(fileHash);
     }
-    return name;
-  }
 
-  return null;
+    const { analyzeEducationDocument } = require('../../utils/ocr/openaiClient');
+    const ocrResult = await analyzeEducationDocument(filePath);
+
+    if (ocrResult?.success && ocrResult.data?.candidate_name?.value) {
+      const name = ocrResult.data.candidate_name.value;
+      if (fileHash) {
+        if (candidateNameCache.size >= MAX_CACHE_SIZE) {
+          // Simple eviction: remove first inserted
+          const firstKey = candidateNameCache.keys().next().value;
+          candidateNameCache.delete(firstKey);
+        }
+        candidateNameCache.set(fileHash, name);
+      }
+      return name;
+    }
+
+    return null;
+  } catch (error) {
+    logger.error('Error extracting candidate name from certificate:', error);
+    // Don't throw error - just return null so education can still be saved
+    return null;
+  }
 };
 
 
