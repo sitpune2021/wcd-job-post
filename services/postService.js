@@ -409,6 +409,98 @@ const closePost = async (postId, userId) => {
   }
 };
 
+// Reopen post (reactivate for new recruitment cycle)
+const reopenPost = async (postId, userId, options = {}) => {
+  try {
+    const { resetFilledPositions = true, newClosingDate = null, clearApplications = false } = options;
+    
+    // Get current post details
+    const [postDetails] = await sequelize.query(
+      `SELECT post_id, post_name, total_positions, filled_positions, closing_date, is_active, is_closed
+       FROM ms_post_master 
+       WHERE post_id = :postId AND is_deleted = false`,
+      { replacements: { postId } }
+    );
+
+    if (postDetails.length === 0) {
+      throw new Error('Post not found');
+    }
+
+    const post = postDetails[0];
+    
+    // Build dynamic update query
+    let updateFields = [
+      'is_active = true',
+      'is_closed = false',
+      'closed_at = NULL',
+      'closed_by = NULL',
+      'updated_by = :updated_by',
+      'updated_at = NOW()'
+    ];
+    
+    let replacements = { postId, updated_by: userId };
+
+    // Reset filled positions if requested
+    if (resetFilledPositions) {
+      updateFields.push('filled_positions = 0');
+      logger.info(`Resetting filled positions for post ${postId} from ${post.filled_positions} to 0`);
+    }
+
+    // Set new closing date if provided
+    if (newClosingDate) {
+      updateFields.push('closing_date = :newClosingDate');
+      replacements.newClosingDate = newClosingDate;
+      logger.info(`Setting new closing date for post ${postId}: ${newClosingDate}`);
+    }
+
+    // Clear/reject pending applications if requested
+    if (clearApplications) {
+      await sequelize.query(
+        `UPDATE ms_applications 
+         SET status = 'REJECTED', 
+             rejection_reason = 'Post reopened - previous cycle closed',
+             updated_at = NOW()
+         WHERE post_id = :postId 
+         AND status NOT IN ('SELECTED', 'REJECTED')
+         AND is_deleted = false`,
+        { replacements: { postId } }
+      );
+      logger.info(`Cleared pending applications for reopened post ${postId}`);
+    }
+
+    // Update the post
+    const [result] = await sequelize.query(
+      `UPDATE ms_post_master 
+       SET ${updateFields.join(', ')}
+       WHERE post_id = :postId AND is_deleted = false
+       RETURNING post_id, post_name, is_active, filled_positions, closing_date`,
+      { replacements }
+    );
+
+    if (result.length === 0) {
+      throw new Error('Failed to reopen post');
+    }
+
+    const reopenedPost = result[0];
+    
+    logger.info(`Post reopened: ${postId} (${reopenedPost.post_name}) by user ${userId}`, {
+      resetFilledPositions,
+      newClosingDate,
+      clearApplications,
+      newStatus: {
+        is_active: reopenedPost.is_active,
+        filled_positions: reopenedPost.filled_positions,
+        closing_date: reopenedPost.closing_date
+      }
+    });
+
+    return reopenedPost;
+  } catch (error) {
+    logger.error('Error reopening post:', error);
+    throw error;
+  }
+};
+
 // Check if post is open for applications
 const isPostOpen = async (postId) => {
   try {
@@ -607,6 +699,7 @@ module.exports = {
   deletePost,
   publishPost,
   closePost,
+  reopenPost,
   isPostOpen,
   getDocumentRequirements,
   setDocumentRequirements,
