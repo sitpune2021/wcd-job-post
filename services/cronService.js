@@ -231,10 +231,12 @@ class CronService {
         throw new Error('Post not found');
       }
 
-      if (post.is_closed || !post.is_active) {
-        throw new Error('Post is closed for applications');
+      // Check if post is active and not closed
+      if (!post.is_active) {
+        throw new Error('Post is not active for applications');
       }
 
+      // Simple logic: use filled_positions from post master
       const totalPositions = post.total_positions || 0;
       const filledPositions = post.filled_positions || 0;
       const available = totalPositions - filledPositions;
@@ -253,8 +255,8 @@ class CronService {
         verified_by: adminId
       }, { transaction });
 
-      const newFilled = (post.filled_positions || 0) + 1;
-      const shouldClose = newFilled >= (post.total_positions || 0);
+      const newFilled = filledPositions + 1;
+      const shouldClose = newFilled >= totalPositions;
 
       await post.update({
         filled_positions: newFilled,

@@ -240,34 +240,23 @@ class ProvisionalSelectionService {
           throw new ApiError(404, 'Post not found');
         }
 
-        if (post.is_closed || !post.is_active) {
-          throw new ApiError(400, 'Post is closed for applications');
+        // Check if post is active and not closed
+        if (!post.is_active) {
+          throw new ApiError(400, 'Post is not active for applications');
         }
 
-        const selectedApplications = await db.Application.findAll({
-          where: {
-            post_id: application.post_id,
-            selection_status: APPLICATION_STATUS.SELECTED,
-            is_deleted: false
-          },
-          attributes: ['application_id'],
-          transaction,
-          lock: transaction.LOCK.UPDATE,
-          skipLocked: true
-        });
-
-        const selectedCount = selectedApplications.length;
-
+        // Simple logic: use filled_positions from post master
         const totalPositions = post.total_positions || 0;
-        const available = totalPositions - selectedCount;
+        const filledPositions = post.filled_positions || 0;
+        const available = totalPositions - filledPositions;
         
         if (available <= 0) {
-          throw new ApiError(400, `Cannot select candidate. All ${totalPositions} positions for this post are already filled. Please check the merit list.`);
+          throw new ApiError(400, `Cannot select candidate. All ${totalPositions} positions for this post are already filled (${filledPositions}/${totalPositions}). Please check the merit list.`);
         }
 
-        // Update post filled positions
-        const newFilled = selectedCount + 1;
-        const shouldClose = newFilled >= (post.total_positions || 0);
+        // Update post filled positions - increment by 1 for this new selection
+        const newFilled = filledPositions + 1;
+        const shouldClose = newFilled >= totalPositions;
 
         await post.update({
           filled_positions: newFilled,
