@@ -1,0 +1,1 @@
+import{c as n,r as t}from"./index-BtEVWjxz.js";const u=[["path",{d:"m21 21-4.34-4.34",key:"14j7rj"}],["circle",{cx:"11",cy:"11",r:"8",key:"4ej97u"}]],i=n("search",u);function d(e,c){const[r,o]=t.useState(e);return t.useEffect(()=>{const s=setTimeout(()=>{o(e)},c);return()=>{clearTimeout(s)}},[e,c]),r}export{i as S,d as u};
