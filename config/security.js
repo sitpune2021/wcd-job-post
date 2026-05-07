@@ -157,19 +157,17 @@ const buildHelmetConfig = (nonce) => helmet({
       ].filter(Boolean),
       styleSrc: [
         "'self'",
-        // 'unsafe-inline',
-        nonce ? `'nonce-${nonce}'` : null,
+        "'unsafe-inline'",
         "https://fonts.googleapis.com",
         "https://cdn.jsdelivr.net"
-      ].filter(Boolean),
+      ],
       styleSrcElem: [
         "'self'",
         "'unsafe-inline'",
-        nonce ? `'nonce-${nonce}'` : null,
         "https://fonts.googleapis.com",
         "https://cdn.jsdelivr.net",
         "https://*.razorpay.com",
-      ].filter(Boolean),
+      ],
       imgSrc: [
         "'self'",
         "data:",
