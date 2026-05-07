@@ -226,13 +226,18 @@ async function parseExcelFile(buffer) {
       const extractEmail = (cell) => {
         if (!cell || !cell.value) return null;
         
+        let email = null;
+        
         // If it's a hyperlink object, extract the text
         if (cell.value && typeof cell.value === 'object' && cell.value.text) {
-          return cell.value.text;
+          email = cell.value.text;
+        } else {
+          // Otherwise return the string value
+          email = cell.value.toString();
         }
         
-        // Otherwise return the string value
-        return cell.value.toString();
+        // Trim whitespace and newlines
+        return email ? email.trim() : null;
       };
 
       // Helper to parse Yes/No to boolean
