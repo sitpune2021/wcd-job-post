@@ -27,8 +27,22 @@ async function fetchLookups() {
       order: [['component_name', 'ASC']] 
     }),
     db.PostMaster.findAll({ 
-      attributes: ['post_id', 'post_name', 'post_code'], 
+      attributes: ['post_id', 'post_name', 'post_code', 'component_id', 'hub_id'], 
       where: { is_deleted: false }, 
+      include: [
+        {
+          model: db.Component,
+          as: 'component',
+          attributes: ['component_id', 'component_name'],
+          required: false
+        },
+        {
+          model: db.Hub,
+          as: 'hub',
+          attributes: ['hub_id', 'hub_name'],
+          required: false
+        }
+      ],
       order: [['post_name', 'ASC']] 
     })
   ]);
@@ -56,9 +70,23 @@ async function generateTemplate(res) {
     dataSheet.getColumn(2).values = ['Hubs', ...lookups.hubs.map(h => h.hub_name)];
     // Column 3: OSC names only (for dropdown display)
     dataSheet.getColumn(3).values = ['OSCs', ...lookups.components.map(c => c.component_name)];
-    // Column 4: Post names only (for dropdown display)
+    // Column 4: Post names with OSC/Hub info (for dropdown display)
     dataSheet.getColumn(4).values = ['Posts', ...lookups.posts.map(p => {
-      return p.post_code ? `${p.post_name} (${p.post_code})` : p.post_name;
+      let displayName = p.post_name;
+      
+      // Add post code if available
+      if (p.post_code) {
+        displayName += ` (${p.post_code})`;
+      }
+      
+      // Add OSC/Hub information for better identification
+      if (p.component && p.component.component_name) {
+        displayName += ` | ${p.component.component_name}`;
+      } else if (p.hub && p.hub.hub_name) {
+        displayName += ` | ${p.hub.hub_name}`;
+      }
+      
+      return displayName;
     })];
     
     // Columns 5-8: Hidden ID mappings (for lookup during import)
