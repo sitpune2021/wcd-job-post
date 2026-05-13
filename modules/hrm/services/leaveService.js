@@ -508,7 +508,9 @@ const actionLeave = async (adminUser, leaveId, data) => {
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         if (d.getDay() === 0) continue; // Skip Sundays
         const dateStr = d.toISOString().split('T')[0];
-        await Attendance.findOrCreate({
+        
+        // Update existing attendance record or create new one
+        const [attendance, created] = await Attendance.findOrCreate({
           where: { employee_id: leave.employee_id, attendance_date: dateStr },
           defaults: {
             employee_id: leave.employee_id,
@@ -520,6 +522,17 @@ const actionLeave = async (adminUser, leaveId, data) => {
           },
           transaction: t
         });
+        
+        // If record already existed, update it to reflect leave status
+        if (!created) {
+          await attendance.update({
+            status: leave.is_half_day ? 'HALF_DAY' : 'ON_LEAVE',
+            half_day_type: leave.is_half_day ? leave.half_day_type : null,
+            remarks: `Leave: ${leave.reason} (Updated from ${attendance.status})`,
+            updated_by: adminUser.admin_id,
+            updated_at: new Date()
+          }, { transaction: t });
+        }
       }
     }
 

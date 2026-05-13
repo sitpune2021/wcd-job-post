@@ -41,6 +41,13 @@ const markAttendance = async (user, data, ip) => {
   // Use standardized date/time (IST timezone)
   const today = getCurrentDate();
 
+  // Check if attendance date is within contract period
+  if (employee.contract_start_date && employee.contract_end_date) {
+    if (today < employee.contract_start_date || today > employee.contract_end_date) {
+      throw new ApiError(403, `Cannot mark attendance outside contract period. Contract: ${employee.contract_start_date} to ${employee.contract_end_date}`);
+    }
+  }
+
   // Check if Sunday using standardized date check
   if (isWeekend(today)) {
     throw new ApiError(400, 'Cannot mark attendance on Sunday.');
@@ -698,7 +705,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
       // Validate employee
       const employee = await EmployeeMaster.findOne({
         where: { employee_id, is_deleted: false, is_active: true },
-        attributes: ['employee_id', 'employee_code'],
+        attributes: ['employee_id', 'employee_code', 'contract_start_date', 'contract_end_date'],
         include: [
           {
             model: db.ApplicantMaster,
@@ -720,6 +727,13 @@ const markAttendanceByAdmin = async (adminUser, data) => {
       
       if (!employee) {
         throw new ApiError(404, `Employee ${employee_id} not found or inactive.`);
+      }
+
+      // Check if attendance date is within contract period
+      if (employee.contract_start_date && employee.contract_end_date) {
+        if (dateStr < employee.contract_start_date || dateStr > employee.contract_end_date) {
+          throw new ApiError(403, `Cannot mark attendance outside contract period for employee ${employee.employee_code}. Contract: ${employee.contract_start_date} to ${employee.contract_end_date}`);
+        }
       }
       
       // Check for holidays

@@ -39,21 +39,50 @@ const getWorkingDaysInMonth = (month, year) => {
  * Calculate attendance summary for an employee
  */
 const calculateAttendanceSummary = async (employeeId, month, year) => {
-  // Get attendance records
+  // Get employee contract info
+  const employee = await EmployeeMaster.findOne({
+    where: { employee_id: employeeId },
+    attributes: ['contract_start_date', 'contract_end_date']
+  });
+
+  // Get attendance records for the specific month
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0);
+  
   const attendanceRecords = await Attendance.findAll({
     where: {
       employee_id: employeeId,
+      attendance_date: {
+        [db.Sequelize.Op.between]: [
+          monthStart.toISOString().split('T')[0],
+          monthEnd.toISOString().split('T')[0]
+        ]
+      },
       status: ['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY']
     }
   });
 
-  // Get approved leaves
+  // Get approved leaves for the specific month
   const approvedLeaves = await LeaveApplication.findAll({
     where: {
       employee_id: employeeId,
       status: 'APPROVED',
-      from_date: { [db.Sequelize.Op.lte]: new Date(year, month, 0) },
-      to_date: { [db.Sequelize.Op.gte]: new Date(year, month - 1, 1) }
+      [db.Sequelize.Op.or]: [
+        {
+          from_date: { [db.Sequelize.Op.between]: [
+            monthStart.toISOString().split('T')[0],
+            monthEnd.toISOString().split('T')[0]
+          ]},
+          to_date: { [db.Sequelize.Op.between]: [
+            monthStart.toISOString().split('T')[0],
+            monthEnd.toISOString().split('T')[0]
+          ]}
+        },
+        {
+          from_date: { [db.Sequelize.Op.lte]: monthStart.toISOString().split('T')[0] },
+          to_date: { [db.Sequelize.Op.gte]: monthEnd.toISOString().split('T')[0] }
+        }
+      ]
     }
   });
 
@@ -93,7 +122,26 @@ const calculateAttendanceSummary = async (employeeId, month, year) => {
     }
   });
 
-  const workingDays = getWorkingDaysInMonth(month, year);
+  // Calculate working days considering contract start date
+  let workingDays = getWorkingDaysInMonth(month, year);
+  
+  // If employee joined mid-month, adjust working days
+  if (employee?.contract_start_date) {
+    const contractStart = new Date(employee.contract_start_date);
+    if (contractStart.getFullYear() === year && contractStart.getMonth() === month - 1) {
+      // Employee joined this month - count days from contract start
+      workingDays = 0;
+      const daysInMonth = new Date(year, month, 0).getDate();
+      for (let day = contractStart.getDate(); day <= daysInMonth; day++) {
+        const date = new Date(year, month - 1, day);
+        const dayOfWeek = date.getDay();
+        if (dayOfWeek !== 0) { // Exclude Sundays
+          workingDays++;
+        }
+      }
+    }
+  }
+  
   const paidDays = presentDays + leaveDays + halfDays;
   
   // Calculate absent days as working days minus paid days
@@ -337,20 +385,26 @@ const getMyPayslip = async (employeeId, month, year) => {
     let contractPeriod = 0;
     
     if (contractStart && contractEnd) {
-      // Total contract period in months
-      const diffTime = Math.abs(contractEnd - contractStart);
-      contractPeriod = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30));
+      // Calculate exact months difference
+      const startYear = contractStart.getFullYear();
+      const startMonth = contractStart.getMonth();
+      const endYear = contractEnd.getFullYear();
+      const endMonth = contractEnd.getMonth();
       
-      // Months worked (approximate)
+      contractPeriod = (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
+      
+      // Months worked
       if (today >= contractStart) {
-        const workedTime = Math.abs(today - contractStart);
-        monthsWorked = Math.ceil(workedTime / (1000 * 60 * 60 * 24 * 30));
+        const todayYear = today.getFullYear();
+        const todayMonth = today.getMonth();
+        monthsWorked = (todayYear - startYear) * 12 + (todayMonth - startMonth) + 1;
       }
       
       // Months left
       if (today < contractEnd) {
-        const leftTime = Math.abs(contractEnd - today);
-        monthsLeft = Math.ceil(leftTime / (1000 * 60 * 60 * 24 * 30));
+        const todayYear = today.getFullYear();
+        const todayMonth = today.getMonth();
+        monthsLeft = (endYear - todayYear) * 12 + (endMonth - todayMonth);
       }
     }
 

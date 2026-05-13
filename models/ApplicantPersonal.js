@@ -85,7 +85,16 @@ const ApplicantPersonal = sequelize.define('ApplicantPersonal', {
       type: DataTypes.STRING,
       allowNull: true,
       validate: {
-        is: /^\d{12}$/
+        isValidAadhar(value) {
+          if (value === null || value === undefined || value === '') {
+            return; // Allow empty/null values
+          }
+          // Remove spaces and check if exactly 12 digits
+          const cleanAadhar = value.replace(/\s/g, '');
+          if (!/^\d{12}$/.test(cleanAadhar)) {
+            throw new Error('Must be exactly 12 digits (spaces allowed)');
+          }
+        }
       }
     },
     pan_no: {

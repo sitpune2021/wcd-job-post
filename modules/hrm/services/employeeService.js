@@ -217,6 +217,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         ap.dob,
         ap.gender,
         ap.aadhar_no,
+        ap.photo_path,
         pm.post_name,
         dm.district_name,
         cm.component_name,
@@ -278,8 +279,8 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         COUNT(CASE WHEN status = 'ABSENT' THEN 1 END) as absent_days,
         COUNT(CASE WHEN status = 'HALF_DAY' THEN 1 END) as half_days,
         COUNT(CASE WHEN status = 'ON_LEAVE' THEN 1 END) as leave_days,
-        COUNT(CASE WHEN status = 'HOLIDAY' OR status = 'SUNDAY' THEN 1 END) as holidays,
-        COUNT(*) as total_days
+        0 as holidays,
+        COUNT(CASE WHEN status IN ('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE') THEN 1 END) as total_days
       FROM ms_hrm_attendance
       WHERE employee_id = :employeeId
         AND attendance_date >= DATE_TRUNC('month', CURRENT_DATE)
@@ -344,6 +345,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         dob: employee.dob,
         gender: employee.gender,
         aadhar_no: employee.aadhar_no,
+        photo_path: employee.photo_path ? toPublicUploadPath(employee.photo_path) : null,
         address: employee.address,
         pincode: employee.pincode,
         state: employee.state,
@@ -925,8 +927,8 @@ async function getEmployeeProfile(employeeId) {
         COUNT(CASE WHEN status = 'ABSENT' THEN 1 END) as absent_days,
         COUNT(CASE WHEN status = 'HALF_DAY' THEN 1 END) as half_days,
         COUNT(CASE WHEN status = 'ON_LEAVE' THEN 1 END) as leave_days,
-        COUNT(CASE WHEN status = 'HOLIDAY' OR status = 'SUNDAY' THEN 1 END) as holidays,
-        COUNT(*) as total_days
+        0 as holidays,
+        COUNT(CASE WHEN status IN ('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE') THEN 1 END) as total_days
       FROM ms_hrm_attendance
       WHERE employee_id = :employeeId
         AND attendance_date >= DATE_TRUNC('month', CURRENT_DATE)

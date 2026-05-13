@@ -219,15 +219,31 @@ const getEmployeeCalendar = async (user, query) => {
         remarks: attendance.remarks
       };
     }
-    // No record for a working day in the past (excludes today)
+    // No record for a working day in the past (excludes today) - only within contract period
     else if (currentDate < today && isWorkingDay) {
-      dayStatus = 'ABSENT';
-      absentDays++;
+      // Check if date is within contract period
+      const isWithinContract = (!employee.contract_start_date || dateStr >= employee.contract_start_date) &&
+                               (!employee.contract_end_date || dateStr <= employee.contract_end_date);
+      
+      if (isWithinContract) {
+        dayStatus = 'ABSENT';
+        absentDays++;
+      } else {
+        // Outside contract period - don't count as absent
+        dayStatus = 'NOT_MARKED';
+        isWorkingDay = false; // Don't count as working day for attendance calculation
+      }
     }
 
-    // Count working days (exclude Sundays and holidays)
+    // Count working days (exclude Sundays, holidays, and days outside contract period)
     if (isWorkingDay) {
-      workingDays++;
+      // Check if date is within contract period
+      const isWithinContract = (!employee.contract_start_date || dateStr >= employee.contract_start_date) &&
+                               (!employee.contract_end_date || dateStr <= employee.contract_end_date);
+      
+      if (isWithinContract) {
+        workingDays++;
+      }
     }
 
     days.push({

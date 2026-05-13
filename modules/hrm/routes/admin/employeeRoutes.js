@@ -15,6 +15,20 @@ const { authenticate } = require('../../../../middleware/auth');
 const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
 
+// Validation functions
+const validateAadhar = (aadhar) => {
+  if (!aadhar) return true; // Optional field
+  // Remove spaces and check if exactly 12 digits
+  const cleanAadhar = aadhar.replace(/\s/g, '');
+  return /^[0-9]{12}$/.test(cleanAadhar);
+};
+
+const validateMobile = (mobile) => {
+  if (!mobile) return true; // Optional field
+  // Check if exactly 10 digits and starts with 6-9
+  return /^[6-9][0-9]{9}$/.test(mobile);
+};
+
 // Apply authentication and hierarchy filter
 router.use(authenticate);
 router.use(applyHRMHierarchyFilter);
@@ -106,6 +120,37 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
     // Use the employeeService which returns complete data with joined names
     const employee = await employeeService.getEmployeeById(parseInt(employeeId), req.hrmScope);
     
+    // Update attendance summary with correct values
+    try {
+      const attendanceSummaryService = require('../../services/attendanceSummaryService');
+      const updatedAttendanceSummary = await attendanceSummaryService.getAttendanceSummary(parseInt(employeeId));
+      
+      // Replace attendance summary in response
+      if (employee.attendance_summary) {
+        employee.attendance_summary = updatedAttendanceSummary;
+      }
+    } catch (attendanceError) {
+      console.error('Attendance summary error:', attendanceError);
+      // Keep original attendance summary if service fails
+    }
+    
+    // Add IDs to employment info for dropdown mapping
+    if (employee && employee.employment_info) {
+      // Get the original employee data to extract all IDs
+      const EmployeeMaster = require('../../../../models').EmployeeMaster;
+      const originalEmployee = await EmployeeMaster.findOne({
+        where: { employee_id: parseInt(employeeId) },
+        attributes: ['post_id', 'district_id', 'component_id', 'hub_id']
+      });
+      
+      if (originalEmployee) {
+        employee.employment_info.post_id = originalEmployee.post_id;
+        employee.employment_info.district_id = originalEmployee.district_id;
+        employee.employment_info.component_id = originalEmployee.component_id;
+        employee.employment_info.hub_id = originalEmployee.hub_id;
+      }
+    }
+    
     return ApiResponse.success(res, employee, 'Employee details retrieved successfully');
   } catch (error) {
     next(error);
@@ -143,7 +188,7 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
     const allowedFields = [
       'post_id', 'district_id', 'component_id', 'hub_id',
       'contract_start_date', 'contract_end_date', 'employee_pay',
-      'employment_status', 'is_active', 'reporting_officer_id'
+      'is_active', 'reporting_officer_id'
     ];
 
     const updateData = {};
@@ -152,6 +197,11 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
         updateData[field] = req.body[field];
       }
     }
+    
+    // Auto-sync employment_status with is_active
+    if (updateData.is_active !== undefined) {
+      updateData.employment_status = updateData.is_active ? 'ACTIVE' : 'INACTIVE';
+    }
 
     // Handle personal_info updates
     if (req.body.personal_info) {
@@ -159,6 +209,16 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
       const { ApplicantMaster, ApplicantPersonal } = db;
       const { Op } = db.Sequelize;
       const personalInfo = req.body.personal_info;
+      
+      // Validate Aadhar number format (only if provided)
+      if (personalInfo.aadhar_no && personalInfo.aadhar_no.trim() !== '' && !validateAadhar(personalInfo.aadhar_no)) {
+        throw new ApiError(400, 'Invalid Aadhar number format. Must be 12 digits (spaces allowed)');
+      }
+      
+      // Validate mobile number format (only if provided)
+      if (personalInfo.mobile_no && personalInfo.mobile_no.trim() !== '' && !validateMobile(personalInfo.mobile_no)) {
+        throw new ApiError(400, 'Invalid mobile number format. Must be 10 digits starting with 6-9');
+      }
       
       // Update applicant info
       if (employee.applicant_id) {
