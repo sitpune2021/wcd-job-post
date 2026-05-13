@@ -11,7 +11,7 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
     type: DataTypes.STRING(20),
     unique: true,
     allowNull: false,
-    comment: 'Auto-generated unique employee code (EMP0001, EMP0002, etc.)'
+    comment: 'Auto-generated unique employee code. New format: MSCE-27MH-0001. Legacy format: EMP0001, EMP0002, etc.'
   },
   applicant_id: {
     type: DataTypes.INTEGER,

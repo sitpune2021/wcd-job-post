@@ -3,19 +3,19 @@ const logger = require('../../../config/logger');
 
 /**
  * Generate next employee code using existing EmployeeMaster records
- * Format: EMP0001, EMP0002, etc.
- * Simple approach: Find the highest existing code and increment
+ * New Format: MSCE-27MH-0001, MSCE-27MH-0002, etc.
+ * Backward Compatible: Still supports existing EMPxxxx codes
  */
 async function generateEmployeeCode() {
   const transaction = await db.sequelize.transaction();
   
   try {
-    // Use FOR UPDATE to lock the row and prevent concurrent access
-    const lastEmployee = await db.EmployeeMaster.findOne({
+    // Find the highest existing MSCE code
+    const lastMSCEEmployee = await db.EmployeeMaster.findOne({
       attributes: ['employee_code'],
       where: {
         employee_code: {
-          [db.Sequelize.Op.like]: 'EMP%'
+          [db.Sequelize.Op.like]: 'MSCE-27MH-%'
         }
       },
       order: [['employee_code', 'DESC']],
@@ -26,22 +26,26 @@ async function generateEmployeeCode() {
 
     let nextSequence = 1;
     
-    if (lastEmployee && lastEmployee.employee_code) {
-      // Extract numeric part from EMP0001 format
-      const numericPart = lastEmployee.employee_code.replace('EMP', '');
-      const lastSequence = parseInt(numericPart, 10);
-      
-      if (!isNaN(lastSequence)) {
-        nextSequence = lastSequence + 1;
+    if (lastMSCEEmployee && lastMSCEEmployee.employee_code) {
+      // Extract numeric part from MSCE-27MH-0001 format
+      const parts = lastMSCEEmployee.employee_code.split('-');
+      if (parts.length === 3) {
+        const numericPart = parts[2];
+        const lastSequence = parseInt(numericPart, 10);
+        
+        if (!isNaN(lastSequence)) {
+          nextSequence = lastSequence + 1;
+        }
       }
     }
     
-    // Format as EMP0001, EMP0002, etc. (4 digits with leading zeros)
-    const employeeCode = `EMP${String(nextSequence).padStart(4, '0')}`;
+    // Format as MSCE-27MH-0001, MSCE-27MH-0002, etc. (4 digits with leading zeros)
+    const employeeCode = `MSCE-27MH-${String(nextSequence).padStart(4, '0')}`;
     
     logger.info('Generated employee code', { 
       employeeCode, 
-      sequence: nextSequence 
+      sequence: nextSequence,
+      format: 'MSCE-27MH-XXXX'
     });
     
     await transaction.commit();
