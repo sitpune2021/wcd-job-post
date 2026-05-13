@@ -266,13 +266,14 @@ const getApplicationsForPost = async (postId, filters = {}) => {
               model: ApplicantEducation,
               as: 'education',
               required: false,
-              include: [{ 
-                model: EducationLevel, 
-                as: 'educationLevel', 
-                required: false 
+              include: [{
+                model: EducationLevel,
+                as: 'educationLevel',
+                required: false
               }],
+              separate: true,
               order: [
-                [{ model: EducationLevel, as: 'educationLevel' }, 'display_order', 'ASC'],
+                [{ model: EducationLevel, as: 'educationLevel' }, 'display_order', 'DESC'],
                 ['passing_year', 'DESC']
               ]
             },
@@ -315,17 +316,17 @@ const getApplicationsForPost = async (postId, filters = {}) => {
     // Apply batch filtering if user has assigned batch range
     let batchInfo = null;
     let filteredApplications = applicationsWithScores;
-    
+
     if (adminUser && adminUser.review_batch_start && adminUser.review_batch_end) {
       const startRank = adminUser.review_batch_start;
       const endRank = adminUser.review_batch_end;
-      
+
       // Filter by rank range (1-indexed)
       filteredApplications = applicationsWithScores.filter((app, index) => {
         const rank = index + 1; // Convert 0-indexed to 1-indexed rank
         return rank >= startRank && rank <= endRank;
       });
-      
+
       batchInfo = {
         batch_start: startRank,
         batch_end: endRank,
@@ -467,7 +468,16 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       const personal = applicant.personal || {};
       const address = applicant.address || {};
       const permanentDistrict = address.permanentDistrict || {};
-      const education = Array.isArray(applicant.education) ? applicant.education[0] || null : null;
+      
+      // Get highest education based on display_order (DESC)
+      const education = Array.isArray(applicant.education) && applicant.education.length > 0
+        ? applicant.education.sort((a, b) => {
+            const orderA = a?.educationLevel?.display_order || 0;
+            const orderB = b?.educationLevel?.display_order || 0;
+            return orderB - orderA; // DESC order
+          })[0]
+        : null;
+      
       const experience = Array.isArray(applicant.experience) ? applicant.experience[0] || null : null;
 
       const otherApps = Array.isArray(app.applicant_other_applications)

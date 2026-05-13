@@ -7,8 +7,10 @@ const logger = require('../../../config/logger');
  * Simple approach: Find the highest existing code and increment
  */
 async function generateEmployeeCode() {
+  const transaction = await db.sequelize.transaction();
+  
   try {
-    // Find the highest existing employee code
+    // Use FOR UPDATE to lock the row and prevent concurrent access
     const lastEmployee = await db.EmployeeMaster.findOne({
       attributes: ['employee_code'],
       where: {
@@ -17,7 +19,9 @@ async function generateEmployeeCode() {
         }
       },
       order: [['employee_code', 'DESC']],
-      limit: 1
+      limit: 1,
+      transaction,
+      lock: true
     });
 
     let nextSequence = 1;
@@ -40,9 +44,11 @@ async function generateEmployeeCode() {
       sequence: nextSequence 
     });
     
+    await transaction.commit();
     return employeeCode;
     
   } catch (error) {
+    await transaction.rollback();
     logger.error('Error generating employee code:', error);
     throw error;
   }

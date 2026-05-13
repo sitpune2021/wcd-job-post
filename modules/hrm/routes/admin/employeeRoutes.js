@@ -5,13 +5,15 @@
 
 const express = require('express');
 const router = express.Router();
+const db = require('../../../../models');
+const ApiResponse = require('../../../../utils/ApiResponse');
+const { ApiError } = require('../../../../middleware/errorHandler');
+const employeeService = require('../../services/employeeService');
+const { requireHRMAdminPermission } = require('../../middleware/permissionGuard');
+const logger = require('../../../../config/logger');
 const { authenticate } = require('../../../../middleware/auth');
 const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
-const { requireHRMAdminPermission } = require('../../middleware/permissionGuard');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
-const employeeService = require('../../services/employeeService');
-const ApiResponse = require('../../../../utils/ApiResponse');
-const logger = require('../../../../config/logger');
 
 // Apply authentication and hierarchy filter
 router.use(authenticate);
@@ -98,10 +100,31 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
     const { employeeId } = req.params;
     
     if (!employeeId || isNaN(parseInt(employeeId))) {
-      throw ApiError.badRequest('Valid employee ID is required');
+      throw new ApiError(400, 'Valid employee ID is required');
     }
 
-    // Use a simpler approach to avoid SQL errors
+    // Use the employeeService which returns complete data with joined names
+    const employee = await employeeService.getEmployeeById(parseInt(employeeId), req.hrmScope);
+    
+    return ApiResponse.success(res, employee, 'Employee details retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route PUT /api/hrm/admin/employees/:employeeId
+ * @desc Update employee details
+ * @access Admin only
+ */
+router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm.*']), async (req, res, next) => {
+  try {
+    const { employeeId } = req.params;
+    
+    if (!employeeId || isNaN(parseInt(employeeId))) {
+      throw new ApiError(400, 'Valid employee ID is required');
+    }
+
     const db = require('../../../../models');
     const { EmployeeMaster } = db;
     
@@ -113,43 +136,107 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
     });
     
     if (!employee) {
-      throw ApiError.notFound('Employee not found');
+      throw new ApiError(404, 'Employee not found');
     }
-    
-    
-    // Get applicant profile for additional details
-    if (employee.applicant_id) {
-      try {
-        const profileService = require('../../../services/applicant/profileService');
-        const applicantProfile = await profileService.getProfile(employee.applicant_id);
-        
-        // Combine data
-        const combinedEmployee = {
-          employee_id: employee.employee_id,
-          employee_code: employee.employee_code,
-          applicant_id: employee.applicant_id,
-          employment_status: employee.employment_status,
-          onboarding_status: employee.onboarding_status,
-          contract_start_date: employee.contract_start_date,
-          contract_end_date: employee.contract_end_date,
-          created_at: employee.created_at,
-          full_name: applicantProfile.personal?.full_name || null,
-          email: applicantProfile.email,
-          mobile_no: applicantProfile.mobile_no,
-          dob: applicantProfile.personal?.dob || null,
-          gender: applicantProfile.personal?.gender || null,
-          aadhar_no: applicantProfile.personal?.aadhar_no || null,
-          profile_image: applicantProfile.profile_img
-        };
-        
-        return ApiResponse.success(res, combinedEmployee, 'Employee details retrieved successfully');
-      } catch (profileError) {
-        // If profile fails, return basic employee data
-        return ApiResponse.success(res, employee, 'Employee details retrieved successfully');
+
+    // Allowed fields for update
+    const allowedFields = [
+      'post_id', 'district_id', 'component_id', 'hub_id',
+      'contract_start_date', 'contract_end_date', 'employee_pay',
+      'employment_status', 'is_active', 'reporting_officer_id'
+    ];
+
+    const updateData = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
       }
     }
-    
-    return ApiResponse.success(res, employee, 'Employee details retrieved successfully');
+
+    // Handle personal_info updates
+    if (req.body.personal_info) {
+      const db = require('../../../../models');
+      const { ApplicantMaster, ApplicantPersonal } = db;
+      const { Op } = db.Sequelize;
+      const personalInfo = req.body.personal_info;
+      
+      // Update applicant info
+      if (employee.applicant_id) {
+        const masterUpdateData = {};
+        const personalUpdateData = {};
+        
+        // Fields that go to ms_applicant_master
+        const masterFields = ['email', 'mobile_no'];
+        for (const field of masterFields) {
+          if (personalInfo[field] !== undefined) {
+            masterUpdateData[field] = personalInfo[field];
+          }
+        }
+        
+        // Fields that go to ms_applicant_personal
+        const personalFields = ['full_name', 'dob', 'gender', 'aadhar_no'];
+        for (const field of personalFields) {
+          if (personalInfo[field] !== undefined) {
+            personalUpdateData[field] = personalInfo[field];
+          }
+        }
+        
+        // Update ms_applicant_master table
+        if (Object.keys(masterUpdateData).length > 0) {
+          // Check for mobile number uniqueness if mobile_no is being updated
+          if (masterUpdateData.mobile_no) {
+            const existingMobile = await ApplicantMaster.findOne({
+              where: { 
+                mobile_no: masterUpdateData.mobile_no,
+                applicant_id: { [Op.ne]: employee.applicant_id }
+              }
+            });
+            
+            if (existingMobile) {
+              throw new ApiError(409, 'Mobile number already exists');
+            }
+          }
+          
+          // Check for email uniqueness if email is being updated
+          if (masterUpdateData.email) {
+            const existingEmail = await ApplicantMaster.findOne({
+              where: { 
+                email: masterUpdateData.email,
+                applicant_id: { [Op.ne]: employee.applicant_id }
+              }
+            });
+            
+            if (existingEmail) {
+              throw new ApiError(409, 'Email already exists');
+            }
+          }
+          
+          await ApplicantMaster.update(masterUpdateData, {
+            where: { applicant_id: employee.applicant_id }
+          });
+        }
+        
+        // Update ms_applicant_personal table
+        if (Object.keys(personalUpdateData).length > 0) {
+          await ApplicantPersonal.update(personalUpdateData, {
+            where: { applicant_id: employee.applicant_id }
+          });
+        }
+      }
+    }
+
+    if (Object.keys(updateData).length === 0 && !req.body.personal_info) {
+      throw new ApiError(400, 'No valid fields to update');
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      updateData.updated_at = new Date();
+      await employee.update(updateData);
+    }
+
+    logger.info(`Employee ${employeeId} updated by admin ${req.user.admin_id}`, { updateData });
+
+    return ApiResponse.success(res, employee, 'Employee updated successfully');
   } catch (error) {
     next(error);
   }

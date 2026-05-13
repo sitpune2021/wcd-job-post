@@ -29,6 +29,22 @@ function parseDate(dateStr) {
 }
 
 /**
+ * Calculate end date as start date + 11 months
+ */
+function calculateEndDate(startDateStr) {
+  if (!startDateStr) return null;
+  
+  const startDate = new Date(startDateStr);
+  if (isNaN(startDate)) return null;
+  
+  // Add 11 months to start date
+  const endDate = new Date(startDate);
+  endDate.setMonth(endDate.getMonth() + 11);
+  
+  return endDate.toISOString().split('T')[0];
+}
+
+/**
  * Employee Onboarding Service
  * Handles both Flow A (CRM Selected) and Flow B (Existing Employee Import)
  */
@@ -266,6 +282,10 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     // Generate employee code
     const employee_code = await generateEmployeeCode();
 
+    // Parse and calculate dates
+    const parsedStartDate = parseDate(contract_start_date);
+    const calculatedEndDate = calculateEndDate(parsedStartDate);
+    
     // Create employee record (only for new applicants)
     const employee = await EmployeeMaster.create({
       applicant_id: applicantId,
@@ -275,11 +295,12 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       district_id,
       component_id: component_id || null,
       hub_id: hub_id || null,
-      contract_start_date: parseDate(contract_start_date),
-      contract_end_date: parseDate(contract_end_date) || null,
+      contract_start_date: parsedStartDate,
+      contract_end_date: calculatedEndDate, // Calculate end date from start date + 11 months
       employee_pay: employee_pay || null,
       onboarding_type: 'EXISTING_IMPORT',
       onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
+      employment_status: 'ACTIVE',        // Set employment status to ACTIVE as well
       temp_password_hash: passwordHash,
       password_change_required: true,
       is_active: true,                     // EXISTING_IMPORT employees should be active immediately
@@ -473,6 +494,11 @@ async function bulkImportExistingEmployees(employeesData, adminId, ipAddress) {
   for (const employeeData of employeesData) {
     try {
       const result = await onboardExistingEmployee(employeeData, adminId, ipAddress);
+      
+      // Check if result and employee exist before accessing properties
+      if (!result || !result.employee) {
+        throw new Error('Failed to create employee record - employee data missing');
+      }
       
       if (result.action === 'updated') {
         results.success.push({

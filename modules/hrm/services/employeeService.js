@@ -2,6 +2,7 @@ const db = require('../../../models');
 const { EmployeeOnboardingLog } = require('../models');
 const EmployeeMaster = db.EmployeeMaster;
 const { buildEmployeeWhereClause } = require('../middleware/hrmHierarchy');
+const { ApiError } = require('../../../middleware/errorHandler');
 const bcrypt = require('bcryptjs');
 const { getBcryptRounds } = require('../../../config/security');
 const logger = require('../../../config/logger');
@@ -169,18 +170,29 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
  */
 async function getEmployeeById(employeeId, hrmScope = null) {
   try {
-    let where = {
-      employee_id: employeeId,
-      is_deleted: false
-    };
+    
+    // Build WHERE clause conditions
+    let whereClauses = ['e.employee_id = :employeeId', 'e.is_deleted = false'];
+    let replacements = { employeeId };
 
-    if (hrmScope) {
-      where = buildEmployeeWhereClause(where, hrmScope);
+    // Apply HRM scope filters if provided
+    if (hrmScope && hrmScope.filters) {
+      if (hrmScope.filters.district_id) {
+        whereClauses.push('e.district_id = :districtId');
+        replacements.districtId = hrmScope.filters.district_id;
+      }
+      if (hrmScope.filters.component_id) {
+        whereClauses.push('e.component_id = :componentId');
+        replacements.componentId = hrmScope.filters.component_id;
+      }
+      if (hrmScope.filters.hub_id) {
+        whereClauses.push('e.hub_id = :hubId');
+        replacements.hubId = hrmScope.filters.hub_id;
+      }
     }
 
     // Get complete employee information using raw SQL for better performance
-    const [employees] = await db.sequelize.query(
-      `SELECT 
+    const sql = `SELECT 
         e.employee_id,
         e.employee_code,
         e.applicant_id,
@@ -223,14 +235,13 @@ async function getEmployeeById(employeeId, hrmScope = null) {
       LEFT JOIN ms_employee_master ro ON e.reporting_officer_id = ro.employee_id
       LEFT JOIN ms_applicant_personal rap ON ro.applicant_id = rap.applicant_id
       LEFT JOIN ms_admin_users adu ON e.onboarding_email_sent_by = adu.admin_id
-      WHERE e.employee_id = :employeeId 
-        AND e.is_deleted = false`,
-      { 
-        replacements: { employeeId },
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
-
+      WHERE ${whereClauses.join(' AND ')}`;
+    
+    const employees = await db.sequelize.query(sql, { 
+      replacements,
+      type: db.sequelize.QueryTypes.SELECT
+    });
+    
     if (employees.length === 0) {
       throw new ApiError(404, 'Employee not found');
     }
