@@ -20,6 +20,20 @@ const Attendance = sequelize.define('HrmAttendance', {
     type: DataTypes.TIME,
     allowNull: true
   },
+  check_out_time: {
+    type: DataTypes.TIME,
+    allowNull: true
+  },
+  check_in_photo_path: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    comment: 'Path to check-in attendance image'
+  },
+  check_out_photo_path: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    comment: 'Path to check-out attendance image'
+  },
   status: {
     type: DataTypes.STRING(20),
     allowNull: false,

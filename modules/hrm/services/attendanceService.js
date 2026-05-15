@@ -4,12 +4,15 @@
  * Enhanced with proper date/time handling and safe database queries
  */
 const { Op, fn, col, literal } = require('sequelize');
-const sequelize = require('../../../config/db');
+const { Attendance, AttendanceSession, EmployeeMaster, Holiday, LeaveApplication } = require('../models');
+const Component = require('../../../models/Component');
+const Hub = require('../../../models/Hub');
+const ApplicantMaster = require('../../../models/ApplicantMaster');
+const ApplicantPersonal = require('../../../models/ApplicantPersonal');
+const DistrictMaster = require('../../../models/DistrictMaster');
+const PostMaster = require('../../../models/PostMaster');
 const logger = require('../../../config/logger');
 const { ApiError } = require('../../../middleware/errorHandler');
-const db = require('../../../models');
-const { Attendance, Holiday, LeaveApplication, LeaveType } = require('../models');
-const EmployeeMaster = db.EmployeeMaster;
 const { getEmployeeFromUser, buildHierarchyFilter, getEmployeeIdsUnderAdmin, getWorkingDaysInMonth, getWorkingDaysInRange, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
 const { buildQueryOptions, buildResponse, COMMON_FIELDS } = require('../utils/hrmFilterBuilder');
 const { validateGeofence, detectDevice, getAllowedRadius } = require('../utils/geofencing');
@@ -65,10 +68,14 @@ const markAttendance = async (user, data, ip) => {
     throw new ApiError(400, `Cannot mark attendance - you are on approved leave: ${approvedLeave.leaveType?.leave_name || 'Leave'}`);
   }
 
-  // Check if already marked today using safe query
-  const existing = await safeAttendanceCheck(employee.employee_id, today);
-  if (existing) {
-    throw new ApiError(400, 'Attendance already marked for today.');
+  // Check if there's already an attendance record for today (for session tracking)
+  const existingAttendance = await safeAttendanceCheck(employee.employee_id, today);
+  
+  if (existingAttendance) {
+    logger.info('Using existing attendance record for additional session', {
+      employeeId: employee.employee_id,
+      attendanceId: existingAttendance.attendance_id
+    });
   }
 
   // Geofencing validation - check if employee is within allowed location
@@ -83,17 +90,17 @@ const markAttendance = async (user, data, ip) => {
 
     // Get employee's post details with OSC/Hub location
     const employeeId = employee.employee_id;
-    const employeeWithLocation = await db.EmployeeMaster.findOne({
+    const employeeWithLocation = await EmployeeMaster.findOne({
       where: { employee_id: employeeId },
       include: [
         {
-          model: db.Component,
+          model: Component,
           as: 'component',
           attributes: ['component_id', 'component_name', 'latitude', 'longitude', 'geofence_radius_meters'],
           required: false
         },
         {
-          model: db.Hub,
+          model: Hub,
           as: 'hub',
           attributes: ['hub_id', 'hub_name', 'latitude', 'longitude', 'geofence_radius_meters'],
           required: false
@@ -298,24 +305,67 @@ const markAttendance = async (user, data, ip) => {
   // Use standardized time (IST timezone)
   const timeStr = getCurrentTime();
 
-  const attendance = await Attendance.create({
-    employee_id: employee.employee_id,
-    attendance_date: today,
-    check_in_time: timeStr,
-    status: 'PRESENT',
-    ip_address: ip || null,
-    latitude: data.latitude || null,
-    longitude: data.longitude || null,
-    geo_address: data.geo_address || null,
-    attendance_image_path: data.image?.path || null,
-    attendance_image_name: data.image?.originalName || null,
-    attendance_image_size: data.image?.size || null,
-    device_type: attendanceData.device_type || null,
-    remarks: data.remarks || null,
-    created_by: user.applicant_id || user.id
-  });
+  let attendance;
+  
+  if (existingAttendance) {
+    // Use existing attendance record for additional sessions
+    attendance = existingAttendance;
+    logger.info('Creating additional session for existing attendance', {
+      employeeId: employee.employee_id,
+      attendanceId: attendance.attendance_id,
+      currentTotalHours: attendance.total_work_hours
+    });
+  } else {
+    // Create new attendance record for first session
+    attendance = await Attendance.create({
+      employee_id: employee.employee_id,
+      attendance_date: today,
+      check_in_time: timeStr,
+      status: 'PRESENT', // Show present while actively marking attendance
+      final_status: 'PENDING', // Will be finalized by cron job
+      total_work_hours: 0,
+      ip_address: ip || null,
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      geo_address: data.geo_address || null,
+      attendance_image_path: data.image?.path || null,
+      attendance_image_name: data.image?.originalName || null,
+      attendance_image_size: data.image?.size || null,
+      check_in_photo_path: data.image?.path || null, // Save check-in image here too
+      device_type: attendanceData.device_type || null,
+      remarks: data.remarks || null,
+      created_by: user.applicant_id || user.id
+    });
+    
+    logger.info(`Created new attendance record: employee=${employee.employee_code}, date=${today}, time=${timeStr}`);
+  }
 
-  logger.info(`Attendance marked: employee=${employee.employee_code}, date=${today}, time=${timeStr}`);
+  // Create new session for check-in
+  try {
+    logger.info('Attempting to create attendance session', {
+      attendanceId: attendance.attendance_id,
+      checkInTime: timeStr,
+      photoPath: data.image?.path
+    });
+
+    const session = await AttendanceSession.create({
+      attendance_id: attendance.attendance_id,
+      check_in_time: timeStr,
+      check_in_photo_path: data.image?.path || null
+    });
+
+    logger.info(`Attendance session created successfully: sessionId=${session.session_id}, employee=${employee.employee_code}, date=${today}, time=${timeStr}, attendanceId=${attendance.attendance_id}`);
+  } catch (sessionError) {
+    logger.error('Failed to create attendance session:', {
+      error: sessionError.message,
+      stack: sessionError.stack,
+      attendanceId: attendance.attendance_id,
+      checkInTime: timeStr
+    });
+    // Still return attendance record even if session creation fails
+    logger.warn('Attendance record created but session creation failed - continuing without session tracking');
+  }
+
   return attendance;
 };
 
@@ -343,65 +393,68 @@ const getMyAttendance = async (user, query) => {
   const records = await Attendance.findAll(queryOptions);
 
   // Filter records to include only essential fields for user
-  const filteredRecords = records.map(record => ({
-    attendance_id: record.attendance_id,
-    attendance_date: record.attendance_date,
-    check_in_time: record.check_in_time,
-    status: record.status,
-    half_day_type: record.half_day_type,
-    ip_address: record.ip_address,
-    latitude: record.latitude,
-    longitude: record.longitude,
-    geo_address: record.geo_address,
-    attendance_image_path: record.attendance_image_path,
-    attendance_image_name: record.attendance_image_name,
-    attendance_image_size: record.attendance_image_size,
-    device_type: record.device_type,
-    remarks: record.remarks
+  const filteredRecords = await Promise.all(records.map(async (record) => {
+    // Check for active sessions (sessions without check-out time)
+    const activeSession = await AttendanceSession.findOne({
+      where: {
+        attendance_id: record.attendance_id,
+        check_out_time: null
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    logger.info('Session lookup for attendance record:', {
+      attendance_id: record.attendance_id,
+      has_active_session: !!activeSession,
+      active_session_id: activeSession?.session_id,
+      active_check_in_time: activeSession?.check_in_time
+    });
+
+    return {
+      attendance_id: record.attendance_id,
+      attendance_date: record.attendance_date,
+      check_in_time: record.check_in_time,
+      check_out_time: record.check_out_time,
+      status: record.status,
+      half_day_type: record.half_day_type,
+      ip_address: record.ip_address,
+      latitude: record.latitude,
+      longitude: record.longitude,
+      geo_address: record.geo_address,
+      attendance_image_path: record.attendance_image_path,
+      attendance_image_name: record.attendance_image_name,
+      attendance_image_size: record.attendance_image_size,
+      device_type: record.device_type,
+      remarks: record.remarks,
+      // Add session information for state detection
+      has_active_session: !!activeSession,
+      active_session_id: activeSession?.session_id || null,
+      active_check_in_time: activeSession?.check_in_time || null
+    };
   }));
 
-  // Calculate summary
-  const present = records.filter(r => r.status === 'PRESENT').length;
-  const absent = records.filter(r => r.status === 'ABSENT').length;
-  const halfDay = records.filter(r => r.status === 'HALF_DAY').length;
-  const onLeave = records.filter(r => r.status === 'ON_LEAVE').length;
-  
-  let workingDays, summaryData;
+  let summaryData;
   
   if (query.from_date && query.to_date) {
     // Custom date range
     const startDate = new Date(query.from_date);
     const endDate = new Date(query.to_date);
-    workingDays = await getWorkingDaysInRange(startDate, endDate, Holiday);
     summaryData = {
       month: startDate.getMonth() + 1,
       year: startDate.getFullYear(),
       from_date: query.from_date,
-      to_date: query.to_date,
-      working_days: workingDays,
-      present,
-      absent,
-      half_day: halfDay,
-      on_leave: onLeave,
-      attendance_percentage: workingDays > 0 ? Math.round((present / workingDays) * 100) : 0
+      to_date: query.to_date
     };
   } else {
     // Month/year filter (default)
     const now = new Date();
     const month = parseInt(query.month) || (now.getMonth() + 1);
     const year = parseInt(query.year) || now.getFullYear();
-    workingDays = await getWorkingDaysInMonth(year, month, Holiday);
     summaryData = {
       month,
       year,
       from_date: null,
-      to_date: null,
-      working_days: workingDays,
-      present,
-      absent,
-      half_day: halfDay,
-      on_leave: onLeave,
-      attendance_percentage: workingDays > 0 ? Math.round((present / workingDays) * 100) : 0
+      to_date: null
     };
   }
 
@@ -457,13 +510,13 @@ const getAttendanceRecords = async (adminUser, query) => {
         attributes: ['employee_id', 'employee_code', 'post_id', 'district_id', 'component_id'],
         include: [
           {
-            model: db.ApplicantMaster,
+            model: ApplicantMaster,
             as: 'applicant',
             attributes: ['applicant_id', 'email'],
             required: false,
             include: [
               {
-                model: db.ApplicantPersonal,
+                model: ApplicantPersonal,
                 as: 'personal',
                 attributes: ['full_name'],
                 required: false
@@ -540,25 +593,25 @@ const getAttendanceSummary = async (adminUser, query) => {
     attributes: ['employee_id', 'employee_code', 'district_id', 'component_id', 'post_id'],
     include: [
       {
-        model: db.DistrictMaster,
+        model: DistrictMaster,
         as: 'district',
         attributes: ['district_id', 'district_name'],
         required: false
       },
       {
-        model: db.PostMaster,
+        model: PostMaster,
         as: 'post',
         attributes: ['post_id', 'post_name'],
         required: false
       },
       {
-        model: db.ApplicantMaster,
+        model: ApplicantMaster,
         as: 'applicant',
         attributes: ['applicant_id', 'email'],
         required: false,
         include: [
           {
-            model: db.ApplicantPersonal,
+            model: ApplicantPersonal,
             as: 'personal',
             attributes: ['full_name'],
             required: false
@@ -597,6 +650,7 @@ const getAttendanceSummary = async (adminUser, query) => {
     countMap[ac.employee_id] = ac.dataValues;
   });
 
+  
   // Build per-employee result
   const employeeSummaries = employees.map(emp => {
     const counts = countMap[emp.employee_id] || {};
@@ -708,13 +762,13 @@ const markAttendanceByAdmin = async (adminUser, data) => {
         attributes: ['employee_id', 'employee_code', 'contract_start_date', 'contract_end_date'],
         include: [
           {
-            model: db.ApplicantMaster,
+            model: ApplicantMaster,
             as: 'applicant',
             attributes: ['email'],
             required: false,
             include: [
               {
-                model: db.ApplicantPersonal,
+                model: ApplicantPersonal,
                 as: 'personal',
                 attributes: ['full_name'],
                 required: false
@@ -803,10 +857,165 @@ const markAttendanceByAdmin = async (adminUser, data) => {
   }
 };
 
+/**
+ * Simple check-in enhancement for existing attendance
+ * Adds check_in_time and check_in_photo_path to existing mark attendance flow
+ */
+const enhanceMarkAttendanceWithCheckIn = (attendanceData, imageData) => {
+  // Add check-in specific data to existing attendance structure
+  return {
+    ...attendanceData,
+    check_in_time: getCurrentTime(),
+    check_in_photo_path: imageData?.path || attendanceData.attendance_image_path
+  };
+};
+
+/**
+ * Simple check-out enhancement for existing attendance
+ * Updates check_out_time and check_out_photo_path for existing attendance
+ */
+const checkOutSimple = async (user, data, ip) => {
+  const employee = await getEmployeeFromUser(user, EmployeeMaster);
+  if (!employee) {
+    throw new ApiError(404, 'Employee record not found. Please contact admin.');
+  }
+
+  const today = getCurrentDate();
+  const currentTime = getCurrentTime();
+
+  // Find today's attendance record
+  const attendance = await Attendance.findOne({
+    where: {
+      employee_id: employee.employee_id,
+      attendance_date: today,
+      is_deleted: false
+    }
+  });
+
+  if (!attendance) {
+    throw new ApiError(400, 'No attendance record found for today. Please mark attendance first.');
+  }
+
+  // Find the latest incomplete session
+  const latestSession = await AttendanceSession.findOne({
+    where: {
+      attendance_id: attendance.attendance_id,
+      check_out_time: null
+    },
+    order: [['created_at', 'DESC']]
+  });
+
+  if (!latestSession) {
+    throw new ApiError(400, 'No active check-in session found. Please check-in first.');
+  }
+
+  // Calculate session duration
+  const duration = calculateDuration(latestSession.check_in_time, currentTime);
+
+  // Update session with check-out details
+  await latestSession.update({
+    check_out_time: currentTime,
+    check_out_photo_path: data.photoPath || attendance.attendance_image_path,
+    duration_hours: duration
+  });
+
+  // Update attendance with new total hours
+  const totalHours = await AttendanceSession.sum('duration_hours', {
+    where: { attendance_id: attendance.attendance_id }
+  });
+
+  await attendance.update({
+    check_out_time: currentTime,
+    check_out_photo_path: data.photoPath || attendance.attendance_image_path,
+    total_work_hours: totalHours || 0,
+    status: 'PRESENT', // Keep showing present while actively marking
+    ip_address: ip,
+    latitude: data.latitude || attendance.latitude,
+    longitude: data.longitude || attendance.longitude,
+    geo_address: data.geo_address || attendance.geo_address,
+    updated_at: new Date(),
+    updated_by: employee.employee_id
+  });
+
+  logger.info('Employee checked-out successfully', {
+    employeeId: employee.employee_id,
+    checkOutTime: currentTime
+  });
+
+  return {
+    success: true,
+    message: 'Check-out successful',
+    data: attendance
+  };
+};
+
+/**
+ * Calculate duration between check-in and check-out times
+ */
+const calculateDuration = (checkInTime, checkOutTime) => {
+  if (!checkInTime || !checkOutTime) return 0;
+  
+  const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
+  const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
+  
+  const inDate = new Date();
+  inDate.setHours(inHours, inMinutes, inSeconds || 0);
+  
+  const outDate = new Date();
+  outDate.setHours(outHours, outMinutes, outSeconds || 0);
+  
+  const diffMs = outDate - inDate;
+  const diffHours = diffMs / (1000 * 60 * 60);
+  
+  return Math.round(diffHours * 100) / 100; // Round to 2 decimal places
+};
+
+/**
+ * Finalize daily attendance status based on total work hours
+ * Should be run by cron job at end of day
+ */
+const finalizeDailyAttendance = async () => {
+  const today = getCurrentDate();
+  
+  // Find all attendance records for today with PENDING final status
+  const pendingAttendances = await Attendance.findAll({
+    where: {
+      attendance_date: today,
+      final_status: 'PENDING'
+    }
+  });
+
+  for (const attendance of pendingAttendances) {
+    const finalStatus = attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT';
+    
+    await attendance.update({
+      final_status: finalStatus,
+      // Keep main status as PRESENT during day, only final_status changes
+      status: attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT'
+    });
+
+    logger.info('Attendance finalized', {
+      employeeId: attendance.employee_id,
+      date: today,
+      totalHours: attendance.total_work_hours,
+      finalStatus: finalStatus,
+      mainStatus: attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT'
+    });
+  }
+
+  return {
+    processed: pendingAttendances.length,
+    date: today
+  };
+};
+
 module.exports = {
   markAttendance,
   markAttendanceByAdmin,
   getMyAttendance,
   getAttendanceRecords,
-  getAttendanceSummary
+  getAttendanceSummary,
+  enhanceMarkAttendanceWithCheckIn,
+  checkOutSimple,
+  finalizeDailyAttendance
 };

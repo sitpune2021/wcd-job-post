@@ -5,6 +5,7 @@
 
 const db = require('../../../models');
 const { EmployeeMaster, Attendance } = require('../models');
+const { finalizeDailyAttendance } = require('../services/attendanceService');
 const logger = require('../../../config/logger');
 
 /**
@@ -191,12 +192,16 @@ async function runAttendanceCronTasks() {
     // Task 2: Clean up old pending bulk records
     const cleanupResult = await cleanupOldPendingBulkRecords();
     
-    // Task 3: Generate attendance summary
+    // Task 3: Finalize attendance based on 8-hour requirement
+    const finalizationResult = await finalizeDailyAttendance();
+    
+    // Task 4: Generate attendance summary
     const summaryResult = await generateAttendanceSummary();
     
     logger.info('CRON: Attendance cron tasks completed', {
       absent: absentResult.markedAbsent,
       cleanup: cleanupResult.deleted,
+      finalization: finalizationResult.processed,
       summary: summaryResult.summary
     });
     
@@ -205,6 +210,7 @@ async function runAttendanceCronTasks() {
       tasks: {
         markAbsent: absentResult,
         cleanup: cleanupResult,
+        finalization: finalizationResult,
         summary: summaryResult
       }
     };

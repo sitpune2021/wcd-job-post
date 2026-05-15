@@ -1,6 +1,8 @@
 const EmployeeMaster = require('./EmployeeMaster');
 const EmployeeOnboardingLog = require('./EmployeeOnboardingLog');
+const EmployeeBankDetail = require('./EmployeeBankDetail');
 const Attendance = require('./Attendance');
+const AttendanceSession = require('./AttendanceSession');
 const BulkAttendance = require('./BulkAttendance');
 const LeaveType = require('./LeaveType');
 const LeaveBalance = require('./LeaveBalance');
@@ -9,8 +11,6 @@ const MonthlyReport = require('./MonthlyReport');
 const FieldVisit = require('./FieldVisit');
 const PerformanceReview = require('./PerformanceReview');
 const Holiday = require('./Holiday');
-const PayrollCycle = require('./PayrollCycle');
-const Payslip = require('./Payslip');
 
 // Import database models for associations
 const db = require('../../../config/db');
@@ -78,6 +78,17 @@ const setupAssociations = (db) => {
   db.ApplicantMaster.hasOne(EmployeeMaster, {
     foreignKey: 'applicant_id',
     as: 'employeeProfile'
+  });
+
+  // ==================== EmployeeBankDetail ====================
+  EmployeeBankDetail.belongsTo(EmployeeMaster, {
+    foreignKey: 'employee_id',
+    as: 'employee'
+  });
+
+  EmployeeMaster.hasOne(EmployeeBankDetail, {
+    foreignKey: 'employee_id',
+    as: 'bankDetail'
   });
 
   db.Application.hasOne(EmployeeMaster, {
@@ -180,32 +191,7 @@ const setupAssociations = (db) => {
     as: 'performanceReviews'
   });
 
-  // ==================== Payroll (Simplified) ====================
-  PayrollCycle.belongsTo(db.AdminUser, {
-    foreignKey: 'generated_by',
-    as: 'generator'
-  });
-
-  PayrollCycle.hasMany(Payslip, {
-    foreignKey: 'cycle_id',
-    as: 'payslips'
-  });
-
-  Payslip.belongsTo(PayrollCycle, {
-    foreignKey: 'cycle_id',
-    as: 'cycle'
-  });
-
-  Payslip.belongsTo(EmployeeMaster, {
-    foreignKey: 'employee_id',
-    as: 'employee'
-  });
-
-  EmployeeMaster.hasMany(Payslip, {
-    foreignKey: 'employee_id',
-    as: 'payslips'
-  });
-
+  
   // BulkAttendance associations
   BulkAttendance.belongsTo(AdminUser, {
     foreignKey: 'uploaded_by',
@@ -232,12 +218,25 @@ const setupAssociations = (db) => {
     foreignKey: 'approved_by',
     as: 'approver'
   });
+
+  // AttendanceSession associations
+  AttendanceSession.belongsTo(Attendance, {
+    foreignKey: 'attendance_id',
+    as: 'attendance'
+  });
+
+  Attendance.hasMany(AttendanceSession, {
+    foreignKey: 'attendance_id',
+    as: 'sessions'
+  });
 };
 
 module.exports = {
   EmployeeMaster,
   EmployeeOnboardingLog,
+  EmployeeBankDetail,
   Attendance,
+  AttendanceSession,
   BulkAttendance,
   LeaveType,
   LeaveBalance,
@@ -246,7 +245,5 @@ module.exports = {
   FieldVisit,
   PerformanceReview,
   Holiday,
-  PayrollCycle,
-  Payslip,
   setupAssociations
 };

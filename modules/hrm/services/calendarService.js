@@ -259,9 +259,14 @@ const getEmployeeCalendar = async (user, query) => {
     });
   }
 
-  // Calculate attendance percentage
-  const attendancePercentage = workingDays > 0 
-    ? Math.round((presentDays / workingDays) * 100) 
+  // Calculate attendance percentage using only elapsed working days up to today
+  const now = new Date();
+  const isCurrentMonth = (currentYear === now.getFullYear() && currentMonth === (now.getMonth() + 1));
+  const elapsedWorkingDays = isCurrentMonth
+    ? days.filter(d => d.is_working_day && (d.is_past || d.is_today)).length
+    : workingDays;
+  const attendancePercentage = elapsedWorkingDays > 0 
+    ? Math.round((presentDays / elapsedWorkingDays) * 100) 
     : 0;
 
   return {

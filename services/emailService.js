@@ -7,18 +7,46 @@ const logger = require('../config/logger');
  */
 class EmailService {
   constructor() {
-    const port = Number.parseInt(process.env.SMTP_PORT, 10) || 587;
-    const secure = (process.env.SMTP_SECURE != null)
-      ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
-      : port === 465;
+    // Support both SMTP_* and MAIL_* environment variable formats
+    const host = process.env.SMTP_HOST || process.env.MAIL_HOST || 'smtp.gmail.com';
+    const port = Number.parseInt(process.env.SMTP_PORT || process.env.MAIL_PORT, 10) || 587;
+    const user = process.env.SMTP_USER || process.env.MAIL_USERNAME;
+    const pass = process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD;
+    const from = process.env.SMTP_FROM || process.env.MAIL_FROM_ADDRESS;
+    
+    // Handle secure/encryption settings
+    let secure = false;
+    let requireTLS = false;
+    
+    if (process.env.SMTP_SECURE != null) {
+      secure = String(process.env.SMTP_SECURE).toLowerCase() === 'true';
+    } else if (process.env.MAIL_ENCRYPTION) {
+      const encryption = process.env.MAIL_ENCRYPTION.toUpperCase();
+      if (encryption === 'SSL' || encryption === 'SSL/TLS') {
+        secure = true;
+      } else if (encryption === 'TLS' || encryption === 'STARTTLS') {
+        secure = false;
+        requireTLS = true;
+      }
+    } else {
+      secure = port === 465;
+      requireTLS = port === 587;
+    }
+
+    // Store from address for use in send methods
+    this.fromAddress = from || `Mission Shakti <${user}>`;
 
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      host,
       port,
       secure,
+      requireTLS,
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD
+        user,
+        pass
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
   }
@@ -39,7 +67,7 @@ class EmailService {
   async sendOTP(email, otp) {
     try {
       const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || `Mission Shakti <${process.env.SMTP_USER}>`,
+        from: this.fromAddress,
         to: email,
         subject: 'Mission Shakti - OTP Verification',
         html: `
@@ -98,7 +126,7 @@ class EmailService {
   async sendApplicationSubmitted(email, applicationNo, applicantName) {
     try {
       const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || `Mission Shakti <${process.env.SMTP_USER}>`,
+        from: this.fromAddress,
         to: email,
         subject: 'Application Submitted Successfully - Mission Shakti',
         html: `
@@ -187,7 +215,7 @@ class EmailService {
       const statusColor = statusColors[status] || '#95a5a6';
       
       const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || `Mission Shakti <${process.env.SMTP_USER}>`,
+        from: this.fromAddress,
         to: email,
         subject: `Application Status Update - ${status}`,
         html: `
@@ -248,7 +276,7 @@ class EmailService {
       const resetLink = `${this.getFrontendBaseUrl('APPLICANT')}/reset-password?token=${resetToken}`;
       
       const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || `Mission Shakti <${process.env.SMTP_USER}>`,
+        from: this.fromAddress,
         to: email,
         subject: 'Password Reset Request - Mission Shakti',
         html: `
@@ -318,7 +346,7 @@ class EmailService {
   async sendAllotmentEmail({ to, name, postName, postCode, pdfPath, pdfFileName }) {
     try {
       const info = await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || `Mission Shakti <${process.env.SMTP_USER}>`,
+        from: this.fromAddress,
         to,
         subject: `Allotment Letter - ${postName} (${postCode})`,
         html: `

@@ -803,13 +803,28 @@ async function uploadAllotmentLetter(applicantId, file) {
 
     // Move file from temp to employee directory
     const tempPath = file.path;
-    const finalPath = path.join(employeeDir, 'allotment_letter.pdf');
+    
+    // Get the original file extension and preserve it
+    const originalExt = path.extname(file.originalname).toLowerCase();
+    const fileName = originalExt === '.pdf' ? 'allotment_letter.pdf' : `allotment_letter${originalExt}`;
+    const finalPath = path.join(employeeDir, fileName);
+    
+    // Ensure the file exists before moving
+    if (!fs.existsSync(tempPath)) {
+      throw new Error('Temporary file not found');
+    }
+    
+    // If the final file exists, delete it first (proper replacement)
+    if (fs.existsSync(finalPath)) {
+      fs.unlinkSync(finalPath);
+    }
     
     fs.renameSync(tempPath, finalPath);
 
-    // Get full path for database storage (include uploads prefix)
+    // Get relative path for database storage (from uploads folder)
     const fullPath = getRelativePath(finalPath);
     
+        
     // Update employee record
     await EmployeeMaster.update(
       { 

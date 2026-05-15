@@ -12,7 +12,7 @@ const monthlyReportService = require('./monthlyReportService');
 const fieldVisitService = require('./fieldVisitService');
 const performanceService = require('./performanceService');
 const hrmDashboardService = require('./hrmDashboardService');
-const payrollService = require('./payrollService');
+const simplePayrollViewService = require('./simplePayrollViewService');
 
 module.exports = {
   employeeService,
@@ -23,5 +23,5 @@ module.exports = {
   fieldVisitService,
   performanceService,
   hrmDashboardService,
-  payrollService
+  simplePayrollViewService
 };

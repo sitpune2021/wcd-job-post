@@ -75,6 +75,7 @@ db.Payment = require('./Payment');
 const hrmModels = require('../modules/hrm/models');
 db.EmployeeMaster = hrmModels.EmployeeMaster;
 db.EmployeeOnboardingLog = hrmModels.EmployeeOnboardingLog;
+db.EmployeeBankDetail = hrmModels.EmployeeBankDetail;
 // Phase 2 HRM Models
 db.HrmAttendance = hrmModels.Attendance;
 db.HrmLeaveType = hrmModels.LeaveType;
@@ -319,7 +320,7 @@ const modelsWithAudit = [
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
   'AllotmentEmailSchedule',
-  'EmployeeMaster', 'EmployeeOnboardingLog',
+  'EmployeeMaster', 'EmployeeOnboardingLog', 'EmployeeBankDetail',
   // Phase 2 HRM Models
   'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',
   'HrmMonthlyReport', 'HrmFieldVisit', 'HrmPerformanceReview', 'HrmHoliday',

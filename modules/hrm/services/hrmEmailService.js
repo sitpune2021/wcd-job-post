@@ -1,23 +1,10 @@
-const nodemailer = require('nodemailer');
 const logger = require('../../../config/logger');
+const emailService = require('../../../services/emailService');
 
 /**
  * HRM Email Service
- * Reuses existing email infrastructure but focused on HRM onboarding
+ * Uses centralized email infrastructure for HRM onboarding
  */
-
-// Create transporter (reuse existing email config)
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT) || 465,
-    secure: process.env.SMTP_PORT === '465', // SSL for port 465, TLS for others
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD
-    }
-  });
-};
 
 /**
  * Send onboarding email to existing employee (Flow B)
@@ -138,17 +125,13 @@ This is an automated email from WCD HRM System. Please do not reply to this emai
   `;
 
   try {
-    const transporter = createTransporter();
-    
-    const mailOptions = {
-      from: `"WCD HRM System" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+    const info = await emailService.transporter.sendMail({
+      from: emailService.fromAddress,
       to: email,
-      subject: `Welcome to WCD - Your Employee Login Credentials (${employeeCode})`,
+      subject: 'Welcome to WCD HRM System - Your Account Details',
       text: textContent,
       html: htmlContent
-    };
-
-    const info = await transporter.sendMail(mailOptions);
+    });
     
     logger.info('Onboarding email sent successfully', {
       email,
@@ -192,10 +175,8 @@ async function sendPasswordChangeConfirmation(email, fullName) {
   `;
 
   try {
-    const transporter = createTransporter();
-    
-    await transporter.sendMail({
-      from: `"WCD HRM System" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+    await emailService.transporter.sendMail({
+      from: emailService.fromAddress,
       to: email,
       subject: 'Password Changed Successfully - WCD HRM',
       html: htmlContent

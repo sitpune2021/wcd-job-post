@@ -130,6 +130,62 @@ router.post('/upload-allotment-letter',
 });
 
 /**
+ * @route GET /api/hrm/applicant/profile/bank-details
+ * @desc Get employee bank details
+ * @access Employee only
+ */
+router.get('/bank-details', async (req, res, next) => {
+  try {
+    const db = require('../../../../models');
+    const { getEmployeeFromUser } = require('../../utils/hrmHelpers');
+    const employee = await getEmployeeFromUser(req.user, db.EmployeeMaster);
+    if (!employee) throw ApiError.forbidden('Employee profile not found.');
+
+    const bankDetail = await db.EmployeeBankDetail.findOne({
+      where: { employee_id: employee.employee_id }
+    });
+
+    return ApiResponse.success(res, bankDetail || {}, 'Bank details retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route PUT /api/hrm/applicant/profile/bank-details
+ * @desc Create or update employee bank details
+ * @access Employee only
+ */
+router.put('/bank-details', async (req, res, next) => {
+  try {
+    const db = require('../../../../models');
+    const { getEmployeeFromUser } = require('../../utils/hrmHelpers');
+    const employee = await getEmployeeFromUser(req.user, db.EmployeeMaster);
+    if (!employee) throw ApiError.forbidden('Employee profile not found.');
+
+    const { bank_name, account_number, ifsc_code, aadhar_number, state, district } = req.body;
+
+    const [bankDetail, created] = await db.EmployeeBankDetail.upsert({
+      employee_id: employee.employee_id,
+      applicant_id: employee.applicant_id || null,
+      bank_name: bank_name || null,
+      account_number: account_number || null,
+      ifsc_code: ifsc_code ? ifsc_code.toUpperCase() : null,
+      aadhar_number: aadhar_number || null,
+      state: state || null,
+      district: district || null
+    }, {
+      returning: true
+    });
+
+    const msg = created ? 'Bank details saved successfully' : 'Bank details updated successfully';
+    return ApiResponse.success(res, bankDetail, msg);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route POST /api/hrm/applicant/profile/change-password
  * @desc Change employee password
  * @access Employee only

@@ -36,6 +36,57 @@ const getWorkingDaysInMonth = (month, year) => {
 };
 
 /**
+ * Calculate additional deductions based on configurable rules
+ */
+const calculateDeductions = (employee, monthlyPay, calculatedSalary) => {
+  const deductions = [];
+  let totalDeductions = 0;
+
+  // PT Tax (Professional Tax) - Configurable by gender and salary
+  if (process.env.PT_TAX_ENABLED === 'true') {
+    const maleThreshold = parseFloat(process.env.PT_TAX_MALE_THRESHOLD || 10000);
+    const maleAmount = parseFloat(process.env.PT_TAX_MALE_AMOUNT || 200);
+    const femaleThreshold = parseFloat(process.env.PT_TAX_FEMALE_THRESHOLD || 25000);
+    const femaleAmount = parseFloat(process.env.PT_TAX_FEMALE_AMOUNT || 200);
+
+    // Check if employee qualifies for PT tax
+    const gender = employee.applicant?.personal?.gender?.toLowerCase() || 'male'; // Default to male if not specified
+    let ptTaxAmount = 0;
+    let ptTaxReason = '';
+
+    if (gender === 'male' && monthlyPay >= maleThreshold) {
+      ptTaxAmount = maleAmount;
+      ptTaxReason = `PT Tax (Male): Salary ≥ ₹${maleThreshold.toLocaleString('en-IN')}`;
+    } else if (gender === 'female' && monthlyPay > femaleThreshold) {
+      ptTaxAmount = femaleAmount;
+      ptTaxReason = `PT Tax (Female): Salary > ₹${femaleThreshold.toLocaleString('en-IN')}`;
+    }
+
+    if (ptTaxAmount > 0) {
+      deductions.push({
+        type: 'PT_TAX',
+        name: 'Professional Tax',
+        amount: ptTaxAmount,
+        reason: ptTaxReason,
+        calculation: `₹${ptTaxAmount} (Fixed amount based on gender and salary threshold)`
+      });
+      totalDeductions += ptTaxAmount;
+    }
+  }
+
+  return {
+    deductions,
+    totalDeductions,
+    breakdown: deductions.map(d => ({
+      name: d.name,
+      amount: d.amount,
+      reason: d.reason,
+      calculation: d.calculation
+    }))
+  };
+};
+
+/**
  * Calculate attendance summary for an employee
  */
 const calculateAttendanceSummary = async (employeeId, month, year) => {
@@ -147,6 +198,7 @@ const calculateAttendanceSummary = async (employeeId, month, year) => {
   // Calculate absent days as working days minus paid days
   const calculatedAbsentDays = Math.max(0, workingDays - paidDays);
 
+  
   return {
     working_days: workingDays,
     present_days: presentDays,
@@ -183,7 +235,25 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
     const monthlyPay = parseFloat(employee.employee_pay || employee.post?.amount || 0);
 
     if (monthlyPay === 0) {
-      throw ApiError.badRequest('No pay information available for this employee');
+      // Return zero salary for employees without pay information
+      const attendance = await calculateAttendanceSummary(employeeId, month, year);
+      return {
+        employee: {
+          employee_id: employee.employee_id,
+          employee_code: employee.employee_code,
+          full_name: employee.full_name,
+          email: employee.email,
+          post_name: employee.post?.post_name || 'N/A',
+          district_name: employee.district?.district_name || 'N/A'
+        },
+        salary: {
+          monthly_pay: 0,
+          deduction_amount: 0,
+          net_salary: 0
+        },
+        attendance: attendance,
+        generated_at: new Date().toISOString()
+      };
     }
 
     // Calculate attendance
@@ -193,6 +263,11 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
     const perDaySalary = monthlyPay / attendance.working_days;
     const calculatedSalary = perDaySalary * attendance.paid_days;
     const deductionAmount = perDaySalary * attendance.absent_days;
+
+    // Calculate additional deductions
+    const deductions = calculateDeductions(employee, monthlyPay, calculatedSalary);
+    const totalDeductionAmount = deductionAmount + deductions.totalDeductions;
+    const netSalary = monthlyPay - totalDeductionAmount;
 
     // Build payslip data
     const payslipData = {
@@ -213,8 +288,11 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
         monthly_pay: parseFloat(monthlyPay.toFixed(2)),
         per_day_salary: parseFloat(perDaySalary.toFixed(2)),
         calculated_salary: parseFloat(calculatedSalary.toFixed(2)),
-        deduction_amount: parseFloat(deductionAmount.toFixed(2)),
-        net_salary: parseFloat(calculatedSalary.toFixed(2))
+        attendance_deduction: parseFloat(deductionAmount.toFixed(2)),
+        additional_deductions: parseFloat(deductions.totalDeductions.toFixed(2)),
+        total_deduction: parseFloat(totalDeductionAmount.toFixed(2)),
+        net_salary: parseFloat(netSalary.toFixed(2)),
+        deduction_breakdown: deductions.breakdown
       },
       attendance: attendance,
       generated_at: new Date().toISOString()
@@ -252,7 +330,6 @@ const getEmployeesPayslips = async (adminUser, filters) => {
     if (search) {
       const { Op } = db.Sequelize;
       where[Op.or] = [
-        { full_name: { [Op.iLike]: `%${search}%` } },
         { employee_code: { [Op.iLike]: `%${search}%` } }
       ];
     }
@@ -265,7 +342,21 @@ const getEmployeesPayslips = async (adminUser, filters) => {
       where,
       include: [
         { model: PostMaster, as: 'post', attributes: ['post_name', 'amount'] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_name'] }
+        { model: DistrictMaster, as: 'district', attributes: ['district_name'] },
+        { 
+          model: db.ApplicantMaster, 
+          as: 'applicant',
+          attributes: ['applicant_id'],
+          required: false,
+          include: [
+            {
+              model: db.ApplicantPersonal,
+              as: 'personal',
+              attributes: ['gender'],
+              required: false
+            }
+          ]
+        }
       ],
       limit: parseInt(limit),
       offset,
@@ -285,8 +376,8 @@ const getEmployeesPayslips = async (adminUser, filters) => {
         
         // Add to totals
         totalEmployees++;
-        totalGrossSalary += payslipData.salary.monthly_pay;
-        totalDeduction += payslipData.salary.deduction_amount;
+        totalGrossSalary += payslipData.salary.calculated_salary;
+        totalDeduction += payslipData.salary.total_deduction;
         totalNetPay += payslipData.salary.net_salary;
         
         // Create simplified employee payslip entry
@@ -297,8 +388,12 @@ const getEmployeesPayslips = async (adminUser, filters) => {
           district_name: payslipData.employee.district_name,
           post_name: payslipData.employee.post_name,
           basic_salary: payslipData.salary.monthly_pay,
-          deducted_amount: payslipData.salary.deduction_amount,
-          net_pay: payslipData.salary.net_salary
+          calculated_salary: payslipData.salary.calculated_salary,
+          attendance_deduction: payslipData.salary.attendance_deduction,
+          additional_deductions: payslipData.salary.additional_deductions,
+          total_deduction: payslipData.salary.total_deduction,
+          net_pay: payslipData.salary.net_salary,
+          deduction_breakdown: payslipData.salary.deduction_breakdown
         });
       } catch (error) {
         // Skip employees with errors (e.g., no pay info)
@@ -344,7 +439,7 @@ const getEmployeesPayslips = async (adminUser, filters) => {
  */
 const getMyPayslip = async (employeeId, month, year) => {
   try {
-    // Get employee details
+    // Get employee details with personal information
     const employee = await EmployeeMaster.findOne({
       where: {
         employee_id: employeeId,
@@ -352,7 +447,21 @@ const getMyPayslip = async (employeeId, month, year) => {
       },
       include: [
         { model: PostMaster, as: 'post', attributes: ['post_name', 'amount'] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_name'] }
+        { model: DistrictMaster, as: 'district', attributes: ['district_name'] },
+        { 
+          model: db.ApplicantMaster, 
+          as: 'applicant',
+          attributes: ['applicant_id'],
+          required: false,
+          include: [
+            {
+              model: db.ApplicantPersonal,
+              as: 'personal',
+              attributes: ['gender'],
+              required: false
+            }
+          ]
+        }
       ]
     });
 
