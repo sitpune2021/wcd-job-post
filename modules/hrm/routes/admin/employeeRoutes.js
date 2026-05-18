@@ -165,21 +165,26 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
 router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm.*']), async (req, res, next) => {
   try {
     const { employeeId } = req.params;
-    
+
     if (!employeeId || isNaN(parseInt(employeeId))) {
       throw new ApiError(400, 'Valid employee ID is required');
     }
 
     const db = require('../../../../models');
     const { EmployeeMaster } = db;
-    
+
+    // Only include applicant association if personal_info is being updated
     const employee = await EmployeeMaster.findOne({
-      where: { 
-        employee_id: parseInt(employeeId), 
-        is_deleted: false 
-      }
+      where: {
+        employee_id: parseInt(employeeId),
+        is_deleted: false
+      },
+      include: req.body.personal_info ? [{
+        model: db.ApplicantMaster,
+        as: 'applicant'
+      }] : []
     });
-    
+
     if (!employee) {
       throw new ApiError(404, 'Employee not found');
     }
@@ -243,39 +248,49 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
         
         // Update ms_applicant_master table
         if (Object.keys(masterUpdateData).length > 0) {
-          // Check for mobile number uniqueness if mobile_no is being updated
-          if (masterUpdateData.mobile_no) {
-            const existingMobile = await ApplicantMaster.findOne({
-              where: { 
-                mobile_no: masterUpdateData.mobile_no,
-                applicant_id: { [Op.ne]: employee.applicant_id }
+          // Check for mobile number uniqueness if mobile_no is being updated and changing
+          if (masterUpdateData.mobile_no !== undefined) {
+            // Skip update if mobile_no is empty string or not changing
+            if (masterUpdateData.mobile_no === '' || masterUpdateData.mobile_no === employee.applicant?.mobile_no) {
+              delete masterUpdateData.mobile_no;
+            } else {
+              const existingMobile = await ApplicantMaster.findOne({
+                where: {
+                  mobile_no: masterUpdateData.mobile_no,
+                  applicant_id: { [Op.ne]: employee.applicant_id }
+                }
+              });
+
+              if (existingMobile) {
+                throw new ApiError(409, 'Mobile number already exists');
               }
-            });
-            
-            if (existingMobile) {
-              throw new ApiError(409, 'Mobile number already exists');
             }
           }
-          
-          // Check for email uniqueness if email is being updated
+
+          // Check for email uniqueness if email is being updated and changing
           if (masterUpdateData.email) {
-            const existingEmail = await ApplicantMaster.findOne({
-              where: { 
-                email: masterUpdateData.email,
-                applicant_id: { [Op.ne]: employee.applicant_id }
+            if (masterUpdateData.email !== employee.applicant?.email) {
+              const existingEmail = await ApplicantMaster.findOne({
+                where: {
+                  email: masterUpdateData.email,
+                  applicant_id: { [Op.ne]: employee.applicant_id }
+                }
+              });
+
+              if (existingEmail) {
+                throw new ApiError(409, 'Email already exists');
               }
-            });
-            
-            if (existingEmail) {
-              throw new ApiError(409, 'Email already exists');
+            } else {
+              // Remove email from updateData since it's not changing
+              delete masterUpdateData.email;
             }
           }
-          
+
           await ApplicantMaster.update(masterUpdateData, {
             where: { applicant_id: employee.applicant_id }
           });
         }
-        
+
         // Update ms_applicant_personal table
         if (Object.keys(personalUpdateData).length > 0) {
           await ApplicantPersonal.update(personalUpdateData, {
@@ -286,15 +301,15 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
     }
 
     if (Object.keys(updateData).length === 0 && !req.body.personal_info) {
-      throw new ApiError(400, 'No valid fields to update');
+      throw new ApiError(400, 'No data provided for update');
     }
 
-    if (Object.keys(updateData).length > 0) {
-      updateData.updated_at = new Date();
-      await employee.update(updateData);
-    }
+    await EmployeeMaster.update(updateData, {
+      where: { employee_id: parseInt(employeeId) }
+    });
 
-    logger.info(`Employee ${employeeId} updated by admin ${req.user.admin_id}`, { updateData });
+    updateData.updated_at = new Date();
+    await employee.update(updateData);
 
     return ApiResponse.success(res, employee, 'Employee updated successfully');
   } catch (error) {
