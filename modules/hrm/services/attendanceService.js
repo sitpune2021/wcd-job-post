@@ -289,15 +289,30 @@ const markAttendance = async (user, data, ip) => {
       });
 
       if (!validation.isWithinRange) {
-        const locationName = targetLocation.hub_name || targetLocation.component_name;
+        // Extract location name based on location type
+        let locationName = 'Unknown Location';
+        if (locationType === 'Hub') {
+          locationName = targetLocation.hub_name || targetLocation.dataValues?.hub_name || 'Unknown Hub';
+        } else if (locationType === 'OSC') {
+          locationName = targetLocation.component_name || targetLocation.dataValues?.component_name || 'Unknown OSC';
+        }
+        
         const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
         
-        throw new ApiError(403, 
-          `You are too far from your assigned ${locationType} "${locationName}". ` +
-          `Current distance: ${validation.distance}m, Allowed range: ${validation.allowedRadius}m. ` +
-          `You are ${metersOutOfRange} meters out of range. ` +
-          `Please move closer to your ${locationType} location and try again.`
-        );
+        // Create detailed error message with all location information
+        const errorMessage = 
+          `Location Access Denied\n\n` +
+          `You are too far from your assigned ${locationType}: "${locationName}"\n\n` +
+          `Distance Details:\n` +
+          `• Your current distance: ${validation.distance}m\n` +
+          `• Maximum allowed distance: ${validation.allowedRadius}m\n` +
+          `• You are ${metersOutOfRange} meters out of range\n\n` +
+          `Target Location:\n` +
+          `• ${locationType}: ${locationName}\n` +
+          `• Coordinates: ${targetLocation.latitude}, ${targetLocation.longitude}\n\n` +
+          `Please move closer to your ${locationType} location and try again.`;
+        
+        throw new ApiError(403, errorMessage);
       }
     }
   }

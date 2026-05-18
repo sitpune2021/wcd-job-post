@@ -124,6 +124,37 @@ router.get('/payslips/export', async (req, res, next) => {
 });
 
 /**
+ * @route GET /api/hrm/admin/payroll-view/payslip/export
+ * @desc Export single employee payslip as PDF
+ * @access Admin
+ */
+router.get('/payslip/export', async (req, res, next) => {
+  try {
+    const { error, value } = singlePayslipSchema.validate(req.query);
+    if (error) {
+      throw ApiError.badRequest(error.details[0].message);
+    }
+
+    const payslipData = await simplePayrollViewService.getEmployeePayslip(
+      req.user,
+      value.employee_id,
+      value.month,
+      value.year
+    );
+
+    // Generate PDF file using reportExport utility
+    const reportExport = require('../../../../utils/reportExport');
+    
+    const html = reportExport.buildPayslipHtml(payslipData);
+    const filename = `payslip_${payslipData.employee.employee_code}_${value.month}_${value.year}`;
+    
+    await reportExport.sendPdfFromHtml(res, filename, html);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/hrm/admin/payroll-view/payslip/:employeeId/export
  * @desc Export single employee payslip as PDF
  * @access Admin
@@ -298,65 +329,5 @@ const generateSinglePayslipHtml = (data, filters) => {
     </html>
   `;
 };
-
-/**
- * @route GET /api/hrm/admin/payroll-view/payslip/export
- * @desc Export single employee payslip as Excel
- * @access Admin
- */
-router.get('/payslip/export', async (req, res, next) => {
-  try {
-    const { error, value } = singlePayslipSchema.validate(req.query);
-    if (error) {
-      throw ApiError.badRequest(error.details[0].message);
-    }
-
-    const payslipData = await simplePayrollViewService.getEmployeePayslip(
-      req.user,
-      value.employee_id,
-      value.month,
-      value.year
-    );
-
-    // Generate Excel file using existing reportExport utility
-    const reportExport = require('../../../../utils/reportExport');
-    
-    // Prepare payslip data for Excel
-    const columns = [
-      { key: 'label', header: 'Description', width: 30 },
-      { key: 'value', header: 'Amount', width: 20 }
-    ];
-    
-    const rows = [
-      { label: 'Employee Code', value: payslipData.employee.employee_code },
-      { label: 'Employee Name', value: payslipData.employee.full_name },
-      { label: 'Post', value: payslipData.employee.post_name },
-      { label: 'District', value: payslipData.employee.district_name },
-      { label: 'Pay Period', value: `${payslipData.pay_period.month_name} ${payslipData.pay_period.year}` },
-      { label: '', value: '' },
-      { label: 'Monthly Pay', value: `₹${payslipData.salary.monthly_pay.toLocaleString('en-IN')}` },
-      { label: 'Calculated Salary', value: `₹${payslipData.salary.calculated_salary.toLocaleString('en-IN')}` },
-      { label: 'Attendance Deduction', value: `₹${payslipData.salary.attendance_deduction.toLocaleString('en-IN')}` },
-      { label: 'Additional Deductions', value: `₹${payslipData.salary.additional_deductions.toLocaleString('en-IN')}` },
-      { label: 'Total Deduction', value: `₹${payslipData.salary.total_deduction.toLocaleString('en-IN')}` },
-      { label: 'Net Salary', value: `₹${payslipData.salary.net_salary.toLocaleString('en-IN')}` }
-    ];
-    
-    // Add deduction breakdown if exists
-    if (payslipData.salary.deduction_breakdown && payslipData.salary.deduction_breakdown.length > 0) {
-      rows.push({ label: '', value: '' });
-      rows.push({ label: 'Deduction Breakdown', value: '' });
-      payslipData.salary.deduction_breakdown.forEach(deduction => {
-        rows.push({ label: deduction.name, value: `₹${deduction.amount.toLocaleString('en-IN')}` });
-        rows.push({ label: `  ${deduction.reason}`, value: '' });
-      });
-    }
-    
-    const filename = `payslip_${payslipData.employee.employee_code}_${value.month}_${value.year}`;
-    await reportExport.sendXlsxFromRows(res, filename, columns, rows);
-  } catch (error) {
-    next(error);
-  }
-});
 
 module.exports = router;

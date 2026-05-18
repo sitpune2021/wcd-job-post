@@ -176,8 +176,6 @@ router.get('/mypayslips', async (req, res, next) => {
     
     // Fetch payslips for the current page
     for (const { month: currentMonth, year: currentYear } of paginatedMonths) {
-      console.log(`Processing payslip for employee ${employee.employee_id}, month ${currentMonth}, year ${currentYear}`);
-
       try {
         let attendance;
         try {
@@ -186,9 +184,7 @@ router.get('/mypayslips', async (req, res, next) => {
             currentMonth,
             currentYear
           );
-          console.log(`Attendance calculated:`, attendance);
         } catch (attendanceError) {
-          console.log(`Attendance calculation failed, using defaults:`, attendanceError.message);
           // Use default attendance if calculation fails
           attendance = {
             working_days: 26,
@@ -221,10 +217,8 @@ router.get('/mypayslips', async (req, res, next) => {
           absent_days: absentDays
         };
         
-        console.log(`Generated payslip:`, payslipData);
         payslips.push(payslipData);
       } catch (error) {
-        console.log(`Payslip generation failed, using defaults:`, error.message);
         // Add default payslip even if everything fails
         const workingDays = 26;
         const paidDays = 26;
@@ -242,13 +236,9 @@ router.get('/mypayslips', async (req, res, next) => {
           absent_days: 0
         };
         
-        console.log(`Generated default payslip:`, defaultPayslip);
         payslips.push(defaultPayslip);
       }
     }
-
-    console.log(`Final payslips array:`, payslips);
-    console.log(`Total payslips generated: ${payslips.length}`);
 
     // Get last paid info (previous month with data)
     let lastPaidGross = 0;
@@ -319,94 +309,32 @@ router.get('/mypayslip/export', async (req, res, next) => {
       value.year
     );
     
-    const { sendPdfFromHtml, sanitizeFileName } = require('../../../../utils/reportExport');
+    const reportExport = require('../../../../utils/reportExport');
     
-    // Generate HTML for PDF
-    const html = generateSinglePayslipHtml(result, value);
-    const filename = sanitizeFileName(`payslip_${employee.employee_code}_${value.month}_${value.year}`);
+    // Transform data to match buildPayslipHtml format
+    const payslipData = {
+      employee: result.employee,
+      salary: {
+        monthly_pay: result.payslip?.basic_salary || 0,
+        calculated_salary: result.payslip?.basic_salary || 0,
+        attendance_deduction: result.payslip?.deducted_amount || 0,
+        additional_deductions: 0,
+        total_deduction: result.payslip?.deducted_amount || 0,
+        net_salary: result.payslip?.net_pay || 0
+      },
+      pay_period: {
+        month_name: value.month,
+        year: value.year
+      }
+    };
     
-    await sendPdfFromHtml(res, filename, html);
+    const html = reportExport.buildPayslipHtml(payslipData);
+    const filename = `payslip_${employee.employee_code}_${value.month}_${value.year}`;
+    
+    await reportExport.sendPdfFromHtml(res, filename, html);
   } catch (error) {
     next(error);
   }
 });
-
-// Helper function to generate single payslip HTML
-const generateSinglePayslipHtml = (data, filters) => {
-  const { employee, attendance, payslip } = data;
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Payslip - ${employee.employee_code}</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .employee-info { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
-        .salary-details { margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .text-right { text-align: right; }
-        .total { font-weight: bold; background-color: #f9f9f9; }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>Employee Payslip</h1>
-        <h2>${filters.month} ${filters.year}</h2>
-      </div>
-      
-      <div class="employee-info">
-        <h3>Employee Information</h3>
-        <p><strong>Employee Code:</strong> ${employee.employee_code}</p>
-        <p><strong>District:</strong> ${employee.district_name}</p>
-        <p><strong>Post:</strong> ${employee.post_name}</p>
-      </div>
-      
-      <div class="salary-details">
-        <h3>Attendance Details</h3>
-        <table>
-          <tr>
-            <td>Working Days</td>
-            <td class="text-right">${attendance.working_days}</td>
-          </tr>
-          <tr>
-            <td>Present Days</td>
-            <td class="text-right">${attendance.present_days}</td>
-          </tr>
-          <tr>
-            <td>Leave Days</td>
-            <td class="text-right">${attendance.leave_days}</td>
-          </tr>
-          <tr>
-            <td>Absent Days</td>
-            <td class="text-right">${attendance.absent_days}</td>
-          </tr>
-        </table>
-      </div>
-      
-      <div class="salary-details">
-        <h3>Salary Calculation</h3>
-        <table>
-          <tr>
-            <td>Basic Salary</td>
-            <td class="text-right">INR ${payslip.basic_salary.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <td>Deductions (Absent Days)</td>
-            <td class="text-right">INR ${payslip.deducted_amount.toLocaleString()}</td>
-          </tr>
-          <tr class="total">
-            <td><strong>Net Pay</strong></td>
-            <td class="text-right"><strong>INR ${payslip.net_pay.toLocaleString()}</strong></td>
-          </tr>
-        </table>
-      </div>
-    </body>
-    </html>
-  `;
-};
 
 module.exports = router;

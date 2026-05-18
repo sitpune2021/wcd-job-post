@@ -96,7 +96,7 @@ const transformPost = (language = 'en') => (p) => ({
   updated_at: p.updated_at,
   min_education_level_id: p.min_education_level_id,
   max_education_level_id: p.max_education_level_id,
-  amount: p.amount
+  amount: p.amount ? parseFloat(p.amount) : null
 });
 
 // ==================== POST CATEGORY OPERATIONS ====================
@@ -239,7 +239,13 @@ const getPosts = async (query = {}) => {
         district_specific: { field: 'district_specific', type: 'boolean' },
         district_id: { field: 'district_id', type: 'number' }
       },
-      attributes: { exclude: ['amount'] },
+      attributes: [
+        'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
+        'component_id', 'hub_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
+        'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
+        'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
+        'is_active', 'created_at', 'updated_at', 'min_education_level_id', 'max_education_level_id', 'amount'
+      ],
       include: [{
         model: Component,
         as: 'component',
@@ -326,6 +332,13 @@ const getPosts = async (query = {}) => {
 const getPostById = async (postId, language = 'en') => {
   try {
     const post = await PostMaster.findByPk(postId, {
+      attributes: [
+        'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
+        'component_id', 'hub_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
+        'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
+        'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
+        'is_active', 'created_at', 'updated_at', 'min_education_level_id', 'max_education_level_id', 'amount'
+      ],
       include: [{
         model: Component,
         as: 'component',
@@ -405,7 +418,7 @@ const getPostById = async (postId, language = 'en') => {
       updated_at: post.updated_at,
       min_education_level_id: post.min_education_level_id,
       max_education_level_id: post.max_education_level_id,
-      amount: post.amount,
+      amount: post.amount ? parseFloat(post.amount) : null,
       allowed_categories: categories,
       allowed_category_ids: categories.map(c => c.category_id)
     };

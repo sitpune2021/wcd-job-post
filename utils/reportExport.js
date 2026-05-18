@@ -50,6 +50,169 @@ const sendPdfFromHtml = async (res, filename, html) => {
   }
 };
 
+const buildPayslipHtml = (payslipData) => {
+  const escapeHtml = (value) =>
+    value === null || value === undefined
+      ? ''
+      : String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const now = new Date();
+  const generatedAt = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(now);
+
+  const salary = payslipData.salary || {};
+  const employee = payslipData.employee || {};
+  const payPeriod = payslipData.pay_period || {};
+
+  const deductionRows = salary.deduction_breakdown && salary.deduction_breakdown.length > 0
+    ? salary.deduction_breakdown.map(deduction => `
+        <tr>
+          <th style="padding-left: 20px; font-weight: 500;">${escapeHtml(deduction.name)}</th>
+          <td class="amount">₹${escapeHtml(deduction.amount.toLocaleString('en-IN'))}</td>
+        </tr>
+        ${deduction.reason ? `
+        <tr>
+          <td colspan="2" style="padding-left: 30px; color: #666; font-size: 10px;">${escapeHtml(deduction.reason)}</td>
+        </tr>
+        ` : ''}
+      `).join('')
+    : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Payslip - ${escapeHtml(employee.employee_code)}</title>
+  <style>
+    @page { size: A4; margin: 20mm; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      color: #333;
+      background: #fff;
+      margin: 0;
+      padding: 0;
+      line-height: 1.5;
+    }
+    .page {
+      padding: 5px;
+    }
+    .title {
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .subtitle {
+      text-align: center;
+      font-size: 10px;
+      color: #666;
+      margin-bottom: 25px;
+    }
+    .section {
+      margin-bottom: 25px;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      padding-bottom: 3px;
+      border-bottom: 1px solid #333;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-bottom: 0;
+    }
+    th, td {
+      border: 1px solid #999;
+      padding: 8px 12px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      background: #f5f5f5;
+      font-weight: 600;
+      width: 40%;
+      color: #333;
+    }
+    .amount {
+      text-align: right;
+      font-weight: 600;
+      font-family: Arial, sans-serif;
+    }
+    .total-row {
+      background: #e8e8e8;
+      font-weight: bold;
+    }
+    .total-row th {
+      background: #e8e8e8;
+    }
+    .net-salary {
+      font-size: 13px;
+      font-weight: bold;
+      background: #d4edda;
+    }
+    .net-salary td {
+      background: #d4edda;
+    }
+    .footer {
+      margin-top: 35px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+      text-align: center;
+      font-size: 9px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="title">Salary Slip</div>
+    <div class="subtitle">Maharashtra State Commission for Women</div>
+
+    <div class="section">
+      <div class="section-title">Employee Information</div>
+      <table>
+        <tr><th>Employee Code</th><td>${escapeHtml(employee.employee_code)}</td></tr>
+        <tr><th>Employee Name</th><td>${escapeHtml(employee.full_name)}</td></tr>
+        <tr><th>Post</th><td>${escapeHtml(employee.post_name)}</td></tr>
+        <tr><th>District</th><td>${escapeHtml(employee.district_name)}</td></tr>
+        <tr><th>Pay Period</th><td>${escapeHtml(payPeriod.month_name)} ${escapeHtml(payPeriod.year)}</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Salary Details</div>
+      <table>
+        <tr><th>Monthly Pay</th><td class="amount">₹${escapeHtml(salary.monthly_pay?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr><th>Calculated Salary</th><td class="amount">₹${escapeHtml(salary.calculated_salary?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr><th>Attendance Deduction</th><td class="amount">-₹${escapeHtml(salary.attendance_deduction?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr><th>Additional Deductions</th><td class="amount">-₹${escapeHtml(salary.additional_deductions?.toLocaleString('en-IN') || '0')}</td></tr>
+        ${deductionRows ? `
+        <tr><th colspan="2" style="background: #e8e8e8; font-weight: bold;">Deduction Breakdown</th></tr>
+        ${deductionRows}
+        ` : ''}
+        <tr class="total-row"><th>Total Deduction</th><td class="amount">-₹${escapeHtml(salary.total_deduction?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr class="net-salary"><th>NET SALARY</th><td class="amount">₹${escapeHtml(salary.net_salary?.toLocaleString('en-IN') || '0')}</td></tr>
+      </table>
+    </div>
+
+    <div class="footer">
+      Generated on ${generatedAt} • Computer Generated Document
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
 const buildSimpleReportHtml = (title, columns, rows) => {
   const escapeHtml = (value) =>
     value === null || value === undefined
@@ -177,5 +340,6 @@ module.exports = {
   sanitizeFileName,
   sendXlsxFromRows,
   sendPdfFromHtml,
-  buildSimpleReportHtml
+  buildSimpleReportHtml,
+  buildPayslipHtml
 };

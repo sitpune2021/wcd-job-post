@@ -8,6 +8,7 @@ const db = require('../../../models');
 const { ApiError } = require('../../../middleware/errorHandler');
 const logger = require('../../../config/logger');
 const { buildHierarchyFilter } = require('../utils/hrmHelpers');
+const ApplicantPersonal = db.ApplicantPersonal;
 
 const EmployeeMaster = db.EmployeeMaster;
 const Attendance = db.HrmAttendance;
@@ -231,6 +232,23 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
       throw ApiError.notFound('Employee not found or not in your jurisdiction');
     }
 
+    // Get personal information for full name
+    let fullName = employee.full_name;
+    if (employee.applicant_id) {
+      try {
+        const personalInfo = await ApplicantPersonal.findOne({
+          where: { applicant_id: employee.applicant_id, is_deleted: false },
+          attributes: ['full_name'],
+          raw: true
+        });
+        if (personalInfo?.full_name) {
+          fullName = personalInfo.full_name;
+        }
+      } catch (e) {
+        // Fallback to employee_code if personal info fetch fails
+      }
+    }
+
     // Get employee pay (priority to employee_pay, fallback to post.amount)
     const monthlyPay = parseFloat(employee.employee_pay || employee.post?.amount || 0);
 
@@ -241,7 +259,7 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
         employee: {
           employee_id: employee.employee_id,
           employee_code: employee.employee_code,
-          full_name: employee.full_name,
+          full_name: fullName || employee.employee_code,
           email: employee.email,
           post_name: employee.post?.post_name || 'N/A',
           district_name: employee.district?.district_name || 'N/A'
@@ -274,7 +292,7 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
       employee: {
         employee_id: employee.employee_id,
         employee_code: employee.employee_code,
-        full_name: employee.full_name,
+        full_name: fullName || employee.employee_code,
         email: employee.email,
         post_name: employee.post?.post_name || 'N/A',
         district_name: employee.district?.district_name || 'N/A'
@@ -457,7 +475,7 @@ const getMyPayslip = async (employeeId, month, year) => {
             {
               model: db.ApplicantPersonal,
               as: 'personal',
-              attributes: ['gender'],
+              attributes: ['full_name', 'gender'],
               required: false
             }
           ]
@@ -522,11 +540,12 @@ const getMyPayslip = async (employeeId, month, year) => {
     const lastPaidGross = monthlyPay; // Simplified - same as monthly pay
 
     // Build payslip data
+    const fullName = employee.applicant?.personal?.full_name || employee.full_name || employee.employee_code;
     const payslipData = {
       employee: {
         employee_id: employee.employee_id,
         employee_code: employee.employee_code,
-        full_name: employee.full_name,
+        full_name: fullName,
         email: employee.email,
         post_name: employee.post?.post_name || 'N/A',
         district_name: employee.district?.district_name || 'N/A'
