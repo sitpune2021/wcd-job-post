@@ -140,6 +140,17 @@ const Attendance = sequelize.define('HrmAttendance', {
   updated_by: {
     type: DataTypes.INTEGER,
     allowNull: true
+  },
+  total_work_hours: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    defaultValue: 0.00,
+    comment: 'Total work hours for the day'
+  },
+  final_status: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    comment: 'Final attendance status after approval'
   }
 }, {
   tableName: 'ms_hrm_attendance',
