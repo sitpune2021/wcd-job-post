@@ -37,16 +37,24 @@ const sendPdfFromHtml = async (res, filename, html) => {
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
       }
     );
+    
+    // Validate PDF buffer
+    if (!pdfBuffer || Buffer.byteLength(pdfBuffer) < 100) {
+      throw new Error('PDF generation failed: Empty or invalid PDF buffer');
+    }
+    
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    res.setHeader('Content-Length', Buffer.byteLength(pdfBuffer));
     return res.status(200).send(pdfBuffer);
   } catch (error) {
     logger.error('PDF export failed (html-pdf-node)', {
       filename,
       nodeVersion: process.version,
+      errorMessage: error.message,
       stack: error?.stack || String(error)
     });
-    throw error;
+    res.status(500).json({ error: 'Failed to generate PDF', message: error.message });
   }
 };
 
@@ -65,7 +73,7 @@ const buildPayslipHtml = (payslipData) => {
 
   const salary = payslipData.salary || {};
   const employee = payslipData.employee || {};
-  const payPeriod = payslipData.pay_period || {};
+  const payPeriod = payslipData.pay_period || { month_name: '', year: '' };
 
   const deductionRows = salary.deduction_breakdown && salary.deduction_breakdown.length > 0
     ? salary.deduction_breakdown.map(deduction => `
@@ -192,16 +200,16 @@ const buildPayslipHtml = (payslipData) => {
     <div class="section">
       <div class="section-title">Salary Details</div>
       <table>
-        <tr><th>Monthly Pay</th><td class="amount">₹${escapeHtml(salary.monthly_pay?.toLocaleString('en-IN') || '0')}</td></tr>
-        <tr><th>Calculated Salary</th><td class="amount">₹${escapeHtml(salary.calculated_salary?.toLocaleString('en-IN') || '0')}</td></tr>
-        <tr><th>Attendance Deduction</th><td class="amount">-₹${escapeHtml(salary.attendance_deduction?.toLocaleString('en-IN') || '0')}</td></tr>
-        <tr><th>Additional Deductions</th><td class="amount">-₹${escapeHtml(salary.additional_deductions?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr><th>Monthly Pay</th><td class="amount">₹${escapeHtml((salary.monthly_pay || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr><th>Calculated Salary</th><td class="amount">₹${escapeHtml((salary.calculated_salary || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr><th>Attendance Deduction</th><td class="amount">-₹${escapeHtml((salary.attendance_deduction || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr><th>Additional Deductions</th><td class="amount">-₹${escapeHtml((salary.additional_deductions || 0).toLocaleString('en-IN'))}</td></tr>
         ${deductionRows ? `
         <tr><th colspan="2" style="background: #e8e8e8; font-weight: bold;">Deduction Breakdown</th></tr>
         ${deductionRows}
         ` : ''}
-        <tr class="total-row"><th>Total Deduction</th><td class="amount">-₹${escapeHtml(salary.total_deduction?.toLocaleString('en-IN') || '0')}</td></tr>
-        <tr class="net-salary"><th>NET SALARY</th><td class="amount">₹${escapeHtml(salary.net_salary?.toLocaleString('en-IN') || '0')}</td></tr>
+        <tr class="total-row"><th>Total Deduction</th><td class="amount">-₹${escapeHtml((salary.total_deduction || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr class="net-salary"><th>NET SALARY</th><td class="amount">₹${escapeHtml((salary.net_salary || 0).toLocaleString('en-IN'))}</td></tr>
       </table>
     </div>
 
