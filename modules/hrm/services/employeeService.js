@@ -76,6 +76,32 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       where.is_active = filters.is_active;
     }
 
+    // Handle only_hub and only_osc filters
+    if (filters.only_hub) {
+      // When only_hub is true, exclude OSCs (component_id must be null)
+      where.component_id = null;
+      // If specific hub_id provided, filter by it
+      if (filters.hub_id) {
+        where.hub_id = filters.hub_id;
+      }
+    } else if (filters.only_osc) {
+      // When only_osc is true, exclude hubs (hub_id must be null)
+      where.hub_id = null;
+      // If specific component_id provided, filter by it
+      if (filters.component_id) {
+        where.component_id = filters.component_id;
+      }
+    } else {
+      // Normal filtering logic
+      if (filters.component_id) {
+        where.component_id = filters.component_id;
+      }
+
+      if (filters.hub_id) {
+        where.hub_id = filters.hub_id;
+      }
+    }
+
     // Search by employee code or name
     if (filters.search) {
       where[Op.or] = [

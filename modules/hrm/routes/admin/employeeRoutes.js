@@ -14,6 +14,7 @@ const logger = require('../../../../config/logger');
 const { authenticate } = require('../../../../middleware/auth');
 const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
+const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileName } = require('../../../../utils/reportExport');
 
 // Validation functions
 const validateAadhar = (aadhar) => {
@@ -49,7 +50,9 @@ router.get('/', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), asyn
       onboarding_type: req.query.onboarding_type,
       is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
       contract_status: req.query.contract_status,
-      search: req.query.search
+      search: req.query.search,
+      only_hub: req.query.only_hub === 'true',
+      only_osc: req.query.only_osc === 'true'
     };
 
     const pagination = {
@@ -96,7 +99,9 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*'])
       onboarding_type: req.query.onboarding_type,
       is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
       contract_status: req.query.contract_status,
-      search: req.query.search
+      search: req.query.search,
+      only_hub: req.query.only_hub === 'true',
+      only_osc: req.query.only_osc === 'true'
     };
 
     // Get all employees without pagination for export
