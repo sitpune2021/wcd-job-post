@@ -42,11 +42,11 @@ async function sendOnboardingEmail(employeeData) {
     <body>
       <div class="container">
         <div class="header">
-          <h1>Welcome to WCD HRM System</h1>
+          <h1>Welcome to WCD CHRM System</h1>
         </div>
         <div class="content">
           <h2>Dear ${fullName},</h2>
-          <p>Welcome to the Women and Child Development Department! Your employee profile has been created in our HRM system.</p>
+          <p>Welcome to the Women and Child Development Department! Your employee profile has been created in our CHRM system.</p>
           
           <h3>Your Employment Details:</h3>
           <ul>
@@ -82,7 +82,7 @@ async function sendOnboardingEmail(employeeData) {
           <p style="margin-top: 20px;">If you have any questions or face any issues, please contact your administrator.</p>
         </div>
         <div class="footer">
-          <p>This is an automated email from WCD HRM System. Please do not reply to this email.</p>
+          <p>This is an automated email from WCD CHRM System. Please do not reply to this email.</p>
           <p>&copy; ${new Date().getFullYear()} Women and Child Development Department</p>
         </div>
       </div>
@@ -91,11 +91,11 @@ async function sendOnboardingEmail(employeeData) {
   `;
 
   const textContent = `
-Welcome to WCD HRM System
+Welcome to WCD CHRM System
 
 Dear ${fullName},
 
-Welcome to the Women and Child Development Department! Your employee profile has been created in our HRM system.
+Welcome to the Women and Child Development Department! Your employee profile has been created in our CHRM system.
 
 Your Employment Details:
 - Employee Code: ${employeeCode}
@@ -120,7 +120,7 @@ You will not be able to access the system until you complete these steps.
 If you have any questions or face any issues, please contact your administrator.
 
 ---
-This is an automated email from WCD HRM System. Please do not reply to this email.
+This is an automated email from WCD CHRM System. Please do not reply to this email.
 © ${new Date().getFullYear()} Women and Child Development Department
   `;
 
@@ -128,7 +128,7 @@ This is an automated email from WCD HRM System. Please do not reply to this emai
     const info = await emailService.transporter.sendMail({
       from: emailService.fromAddress,
       to: email,
-      subject: 'Welcome to WCD HRM System - Your Account Details',
+      subject: 'Welcome to WCD CHRM System - Your Account Details',
       text: textContent,
       html: htmlContent
     });
@@ -167,7 +167,7 @@ async function sendPasswordChangeConfirmation(email, fullName) {
         <p>Your password has been changed successfully. You can now access the HRM system with your new password.</p>
         <p>If you did not make this change, please contact your administrator immediately.</p>
         <p style="margin-top: 30px; color: #666; font-size: 12px;">
-          This is an automated email from WCD HRM System.
+          This is an automated email from WCD CHRM System.
         </p>
       </div>
     </body>
@@ -178,7 +178,7 @@ async function sendPasswordChangeConfirmation(email, fullName) {
     await emailService.transporter.sendMail({
       from: emailService.fromAddress,
       to: email,
-      subject: 'Password Changed Successfully - WCD HRM',
+      subject: 'Password Changed Successfully - WCD CHRMS',
       html: htmlContent
     });
 
