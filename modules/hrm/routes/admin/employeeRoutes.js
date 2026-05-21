@@ -79,6 +79,85 @@ router.get('/', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), asyn
 });
 
 /**
+ * @route GET /api/hrm/admin/employees/export
+ * @desc Export employees to Excel or PDF (backend generation)
+ * @access Admin only
+ */
+router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), async (req, res, next) => {
+  try {
+    const { format = 'excel' } = req.query;
+
+    const filters = {
+      district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
+      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
+      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      post_id: req.query.post_id ? parseInt(req.query.post_id) : undefined,
+      onboarding_status: req.query.onboarding_status,
+      onboarding_type: req.query.onboarding_type,
+      is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
+      contract_status: req.query.contract_status,
+      search: req.query.search
+    };
+
+    // Get all employees without pagination for export
+    const result = await employeeService.getEmployeeList(filters, req.hrmScope, {
+      page: 1,
+      limit: null,
+      sortBy: 'created_at',
+      sortOrder: 'DESC'
+    });
+
+    // Format data for export
+    const exportData = result.employees.map(emp => {
+      const status = emp.employment_status === 'INACTIVE' ? 'Inactive' :
+                     emp.employment_status === 'ACTIVE' ? 'Active' :
+                     emp.contract_end_date && new Date(emp.contract_end_date) < new Date() ? 'Expired' : 'Active';
+
+      return {
+        employee_code: emp.employee_code,
+        full_name: emp.applicant?.personal?.full_name || '-',
+        email: emp.applicant?.email || '-',
+        mobile_no: emp.applicant?.mobile_no || '-',
+        post_name: emp.post?.post_name || '-',
+        district_name: emp.district?.district_name || '-',
+        location_name: emp.component?.component_name || emp.hub?.hub_name || '-',
+        location_type: emp.component_id ? 'OSC' : emp.hub_id ? 'Hub' : '-',
+        contract_start_date: emp.contract_start_date,
+        contract_end_date: emp.contract_end_date,
+        status: status,
+        onboarding_status: emp.onboarding_status,
+        employment_status: emp.employment_status
+      };
+    });
+
+    const columns = [
+      { header: 'Employee Code', key: 'employee_code', width: 15 },
+      { header: 'Full Name', key: 'full_name', width: 20 },
+      { header: 'Email', key: 'email', width: 20 },
+      { header: 'Mobile', key: 'mobile_no', width: 12 },
+      { header: 'Post', key: 'post_name', width: 15 },
+      { header: 'District', key: 'district_name', width: 15 },
+      { header: 'Location', key: 'location_name', width: 15 },
+      { header: 'Contract Start', key: 'contract_start_date', width: 12 },
+      { header: 'Contract End', key: 'contract_end_date', width: 12 }
+    ];
+
+    const filename = sanitizeFileName('employee-records');
+
+    if (format === 'excel') {
+      await sendXlsxFromRows(res, filename, columns, exportData);
+    } else if (format === 'pdf') {
+      const html = buildSimpleReportHtml('Employee Records', columns, exportData);
+      await sendPdfFromHtml(res, filename, html);
+    } else {
+      throw new ApiError(400, 'Invalid format. Use "excel" or "pdf"');
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/hrm/admin/employees/statistics
  * @desc Get employee statistics for dashboard
  * @access Admin only

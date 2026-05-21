@@ -277,28 +277,28 @@ const buildSimpleReportHtml = (title, columns, rows) => {
     }
     body {
       font-family: "Segoe UI", Arial, Helvetica, sans-serif;
-      font-size: 11.5px;
+      font-size: 9px;
       color: var(--text);
       background: #ffffff;
       margin: 0;
       padding: 0;
     }
     .page {
-      padding: 6px 4px 0 4px;
+      padding: 4px 2px 0 2px;
     }
     .title {
       text-align: center;
-      font-size: 18px;
+      font-size: 14px;
       font-weight: 700;
       letter-spacing: 0.1px;
-      margin: 0 0 4px 0;
+      margin: 0 0 2px 0;
       color: var(--text);
     }
     .subdesc {
       text-align: center;
-      font-size: 10.5px;
+      font-size: 8px;
       color: var(--muted);
-      margin: 0 0 10px 0;
+      margin: 0 0 6px 0;
     }
     table {
       border-collapse: collapse;
@@ -307,21 +307,21 @@ const buildSimpleReportHtml = (title, columns, rows) => {
     }
     th, td {
       border: 1px solid var(--border);
-      padding: 6px 8px;
+      padding: 3px 4px;
       vertical-align: top;
       word-break: break-word;
-      line-height: 1.35;
+      line-height: 1.2;
     }
     th {
       background: var(--header-bg);
       color: var(--header-text);
       font-weight: 700;
-      font-size: 11px;
+      font-size: 8px;
       text-transform: uppercase;
       letter-spacing: 0.25px;
     }
     tbody tr:nth-child(odd) { background: var(--row-alt); }
-    td { font-size: 11px; }
+    td { font-size: 8px; }
     .empty td {
       text-align: center;
       font-style: italic;
