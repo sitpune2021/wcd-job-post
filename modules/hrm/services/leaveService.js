@@ -10,6 +10,10 @@ const { ApiError } = require('../../../middleware/errorHandler');
 const db = require('../../../models');
 const { LeaveApplication, LeaveType, LeaveBalance, Attendance } = require('../models');
 const EmployeeMaster = db.EmployeeMaster;
+const DistrictMaster = require('../../../models/DistrictMaster');
+const PostMaster = require('../../../models/PostMaster');
+const ApplicantMaster = require('../../../models/ApplicantMaster');
+const ApplicantPersonal = require('../../../models/ApplicantPersonal');
 const { getEmployeeFromUser, buildHierarchyFilter, getEmployeeIdsUnderAdmin, calculateLeaveDays, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
 const { buildQueryOptions, buildResponse } = require('../utils/hrmFilterBuilder');
 
@@ -579,9 +583,8 @@ const getAdminLeaveSummary = async (adminUser, query) => {
       },
       searchFields: [
         'employee_code',
-        'applicant.personal.full_name',
-        'district.district_name',
-        'post.post_name'
+        '$applicant.email$',
+        '$applicant.personal.full_name$'
       ],
       filterableFields: {
         district_id: {
@@ -594,27 +597,27 @@ const getAdminLeaveSummary = async (adminUser, query) => {
         }
       },
       sortableFields: ['employee_code', 'employment_status'],
-      defaultSort: [['employee_code', 'ASC']],
+      defaultSort: [['employee_id', 'DESC']],
       include: [
         {
-          model: db.DistrictMaster,
+          model: DistrictMaster,
           as: 'district',
           attributes: ['district_name'],
           required: false
         },
         {
-          model: db.PostMaster,
+          model: PostMaster,
           as: 'post',
           attributes: ['post_name'],
           required: false
         },
         {
-          model: db.ApplicantMaster,
+          model: ApplicantMaster,
           as: 'applicant',
           attributes: ['applicant_id', 'mobile_no'],
           include: [
             {
-              model: db.ApplicantPersonal,
+              model: ApplicantPersonal,
               as: 'personal',
               attributes: ['full_name'],
               required: false
@@ -637,7 +640,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
         baseWhere: {
           employee_id: { [Op.in]: employeeIds }
         },
-        searchFields: ['employee_code', 'district.district_name'],
+        searchFields: ['employee_code', '$applicant.email$', '$applicant.personal.full_name$'],
         filterableFields: {
           district_id: {
             transform: (value) => parseInt(value),
@@ -645,21 +648,21 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           }
         },
         sortableFields: ['employee_code', 'employment_status'],
-        defaultSort: [['employee_code', 'ASC']],
+        defaultSort: [['employee_id', 'DESC']],
         include: [
           {
-            model: db.DistrictMaster,
+            model: DistrictMaster,
             as: 'district',
             attributes: ['district_name'],
             required: false
           },
           {
-            model: db.ApplicantMaster,
+            model: ApplicantMaster,
             as: 'applicant',
             attributes: ['applicant_id', 'mobile_no'],
             include: [
               {
-                model: db.ApplicantPersonal,
+                model: ApplicantPersonal,
                 as: 'personal',
                 attributes: ['full_name'],
                 required: false

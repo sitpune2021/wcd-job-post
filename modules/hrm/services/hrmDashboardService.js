@@ -205,7 +205,29 @@ const getEmployeeDashboard = async (user) => {
       logger.warn('getEmployeeDashboard: Employee not found for user', { 
         user_id: user.id || user.employee_id || user.applicant_id 
       });
-      throw new Error('Employee record not found');
+      // Return safe default response instead of throwing error
+      return {
+        success: true,
+        message: 'No employee record found',
+        data: {
+          employee_id: null,
+          full_name: user.username || 'User',
+          employee_code: null,
+          employment_status: 'NOT_ONBOARDED',
+          is_active: false,
+          attendance_summary: {
+            present_days: 0,
+            absent_days: 0,
+            half_days: 0,
+            leave_days: 0,
+            holidays: 0,
+            total_days: 0
+          },
+          leave_balance: [],
+          upcoming_holidays: [],
+          recent_activities: []
+        }
+      };
     }
 
     employeeId = employee.employee_id;

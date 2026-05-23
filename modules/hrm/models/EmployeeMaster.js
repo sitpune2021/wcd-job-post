@@ -136,7 +136,7 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
     allowNull: false,
     defaultValue: 'ACTIVE',
     validate: {
-      isIn: [['ACTIVE', 'INACTIVE', 'TERMINATED', 'ON_LEAVE']]
+      isIn: [['ACTIVE', 'INACTIVE', 'TERMINATED', 'ON_LEAVE', 'SUSPENDED', 'RESIGNED', 'CONTRACT_ENDED']]
     },
     comment: 'Employment status for HRM operations'
   },

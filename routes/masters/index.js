@@ -33,6 +33,7 @@ const experienceDomainRoutes = require('./experienceDomains');
 const applicationStatusRoutes = require('./applicationStatuses');
 const skillRoutes = require('./skills');
 const bannerRoutes = require('./banners');
+const schemeTypeRoutes = require('./schemeTypes');
 
 // Mount sub-routers
 router.use('/districts', districtRoutes);
@@ -48,5 +49,6 @@ router.use('/categories', categoryRoutes);
 router.use('/experience-domains', experienceDomainRoutes);
 router.use('/skills', skillRoutes);
 router.use('/banners', bannerRoutes);
+router.use('/scheme-types', schemeTypeRoutes);
 
 module.exports = router;

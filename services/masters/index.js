@@ -17,6 +17,7 @@ const applicationStatusService = require('./applicationStatusService');
 const postMasterService = require('./postMasterService');
 const experienceDomainService = require('./experienceDomainService');
 const skillService = require('./skillService');
+const schemeTypeService = require('./schemeTypeService');
 
 // Re-export individual services for granular imports
 module.exports = {
@@ -123,5 +124,13 @@ module.exports = {
   getSkillById: skillService.getSkillById,
   createSkill: skillService.createSkill,
   updateSkill: skillService.updateSkill,
-  deleteSkill: skillService.deleteSkill
+  deleteSkill: skillService.deleteSkill,
+
+  // Scheme Types
+  schemeTypeService,
+  getSchemeTypes: schemeTypeService.getSchemeTypes,
+  getSchemeTypeById: schemeTypeService.getSchemeTypeById,
+  createSchemeType: schemeTypeService.createSchemeType,
+  updateSchemeType: schemeTypeService.updateSchemeType,
+  deleteSchemeType: schemeTypeService.deleteSchemeType
 };

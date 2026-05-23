@@ -71,6 +71,10 @@ db.AllotmentEmailTracking = require('./AllotmentEmailTracking');
 // Payment Gateway Integration
 db.Payment = require('./Payment');
 
+// Scheme Type and Payment Distribution
+db.SchemeType = require('./SchemeType');
+db.PaymentDistributionSetting = require('./PaymentDistributionSetting');
+
 // HRM Module Models
 const hrmModels = require('../modules/hrm/models');
 db.EmployeeMaster = hrmModels.EmployeeMaster;
@@ -290,6 +294,14 @@ db.Application.hasMany(db.ApplicationStageHistory, { foreignKey: 'application_id
 db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'entered_by', as: 'enteredByUser' });
 db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'exited_by', as: 'exitedByUser' });
 
+// SchemeType -> PaymentDistributionSetting
+db.SchemeType.hasOne(db.PaymentDistributionSetting, { foreignKey: 'scheme_type_id', as: 'paymentSetting' });
+db.PaymentDistributionSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+// uncomment here for new scheme chnage
+// EmployeeMaster -> SchemeType (TODO: Add scheme_type_id column to ms_employee_master when implementing migration)
+// db.EmployeeMaster.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+// db.SchemeType.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_type_id', as: 'employees' });
+
 // ==================== HRM MODULE ASSOCIATIONS ====================
 // Set up associations for HRM models
 hrmModels.setupAssociations(db);
@@ -320,6 +332,7 @@ const modelsWithAudit = [
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
   'AllotmentEmailSchedule',
+  'SchemeType', 'PaymentDistributionSetting',
   'EmployeeMaster', 'EmployeeOnboardingLog', 'EmployeeBankDetail',
   // Phase 2 HRM Models
   'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',

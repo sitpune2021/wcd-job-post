@@ -30,7 +30,8 @@ const leaveQuery = Joi.object({
   employee_id: Joi.number().integer().min(1),
   district_id: Joi.number().integer().min(1),
   page: Joi.number().integer().min(1),
-  limit: Joi.number().integer().min(1).max(100)
+  limit: Joi.number().integer().min(1).max(100),
+  search: Joi.string().trim().max(100)
 });
 
 module.exports = {

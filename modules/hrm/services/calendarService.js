@@ -63,7 +63,6 @@ const getEmployeeCalendar = async (user, query) => {
     // Get holidays for this year
     Holiday.findAll({
       where: {
-        year: currentYear,
         holiday_date: {
           [Op.between]: [
             startDate.toISOString().split('T')[0],
@@ -302,16 +301,25 @@ const getHolidaysByYear = async (year, month) => {
   const validatedYear = year ? validateYear(year) : new Date().getFullYear();
   
   const whereClause = {
-    year: validatedYear,
+    is_active: true,
     is_deleted: false
   };
 
-  // Add month filter if provided
+  // Filter by year
+  if (validatedYear) {
+    whereClause.year = validatedYear;
+  }
+
+  // Add month filter if provided using date range
   if (month) {
-    whereClause[db.Sequelize.Op.and] = db.Sequelize.where(
-      db.Sequelize.fn('EXTRACT', db.Sequelize.literal('MONTH FROM holiday_date')),
-      month
-    );
+    const startDate = new Date(validatedYear, month - 1, 1);
+    const endDate = new Date(validatedYear, month, 0);
+    whereClause.holiday_date = {
+      [Op.between]: [
+        startDate.toISOString().split('T')[0],
+        endDate.toISOString().split('T')[0]
+      ]
+    };
   }
 
   const holidays = await Holiday.findAll({

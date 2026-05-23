@@ -62,7 +62,8 @@ const safeHolidayCheck = async (date) => {
     return await Holiday.findOne({
       where: { 
         holiday_date: date,
-        is_active: true
+        is_active: true,
+        is_deleted: false
       }
     });
   }, null, 'Holiday check');

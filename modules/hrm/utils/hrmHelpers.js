@@ -24,10 +24,9 @@ const getEmployeeFromUser = async (user, EmployeeMaster) => {
   const employee = await EmployeeMaster.findOne({
     where: {
       applicant_id: applicantId,
-      is_deleted: false,
-      is_active: true
+      is_deleted: false
     },
-    attributes: ['employee_id', 'employee_code', 'applicant_id', 'post_id', 'district_id', 'component_id', 'hub_id', 'onboarding_status', 'employment_status', 'reporting_officer_id', 'contract_start_date', 'contract_end_date']
+    attributes: ['employee_id', 'employee_code', 'applicant_id', 'post_id', 'district_id', 'component_id', 'hub_id', 'onboarding_status', 'employment_status', 'reporting_officer_id', 'contract_start_date', 'contract_end_date', 'is_active']
   });
   
   return employee;

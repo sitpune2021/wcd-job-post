@@ -277,7 +277,7 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
     const allowedFields = [
       'post_id', 'district_id', 'component_id', 'hub_id',
       'contract_start_date', 'contract_end_date', 'employee_pay',
-      'is_active', 'reporting_officer_id'
+      'is_active', 'employment_status', 'reporting_officer_id'
     ];
 
     const updateData = {};
@@ -287,8 +287,8 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
       }
     }
     
-    // Auto-sync employment_status with is_active
-    if (updateData.is_active !== undefined) {
+    // Auto-sync employment_status with is_active only if employment_status not explicitly provided
+    if (updateData.is_active !== undefined && !updateData.employment_status) {
       updateData.employment_status = updateData.is_active ? 'ACTIVE' : 'INACTIVE';
     }
 
@@ -328,6 +328,18 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
           if (personalInfo[field] !== undefined) {
             personalUpdateData[field] = personalInfo[field];
           }
+        }
+        
+        // Calculate age if DOB is provided
+        if (personalInfo.dob) {
+          const dob = new Date(personalInfo.dob);
+          const today = new Date();
+          let age = today.getFullYear() - dob.getFullYear();
+          const monthDiff = today.getMonth() - dob.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+            age--;
+          }
+          personalUpdateData.age = age;
         }
         
         // Update ms_applicant_master table

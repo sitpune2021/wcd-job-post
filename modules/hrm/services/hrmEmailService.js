@@ -46,7 +46,7 @@ async function sendOnboardingEmail(employeeData) {
         </div>
         <div class="content">
           <h2>Dear ${fullName},</h2>
-          <p>Welcome to the Women and Child Development Department! Your employee profile has been created in our CHRM system.</p>
+          <p>Welcome to the Women and Child Development Department! Your employee profile has been created in our HRM system.</p>
           
           <h3>Your Employment Details:</h3>
           <ul>
@@ -95,7 +95,7 @@ Welcome to WCD CHRM System
 
 Dear ${fullName},
 
-Welcome to the Women and Child Development Department! Your employee profile has been created in our CHRM system.
+Welcome to the Women and Child Development Department! Your employee profile has been created in our HRM system.
 
 Your Employment Details:
 - Employee Code: ${employeeCode}
@@ -178,7 +178,7 @@ async function sendPasswordChangeConfirmation(email, fullName) {
     await emailService.transporter.sendMail({
       from: emailService.fromAddress,
       to: email,
-      subject: 'Password Changed Successfully - WCD CHRMS',
+      subject: 'Password Changed Successfully - WCD CHRM',
       html: htmlContent
     });
 

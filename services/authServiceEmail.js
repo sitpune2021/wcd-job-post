@@ -395,11 +395,11 @@ const loginApplicant = async (email, password) => {
         is_verified: applicant.is_verified,
         role: 'APPLICANT',
         // Employee status flags
-        is_employee: isEmployee,
+        is_employee: isEmployee && employee?.is_active === true,
         employee_code: employee?.employee_code || null,
         password_changed: employee?.password_change_required === false, // Inverted logic
         allotment_uploaded: !!(employee?.allotment_letter_uploaded_at || employee?.allotment_letter_path), // Check if timestamp or path exists
-        can_view_crm: isEmployee && profileComplete ? true : false
+        can_view_crm: isEmployee && employee?.is_active === true && profileComplete ? true : false
       },
       token,
       declarations: {

@@ -1097,7 +1097,7 @@ async function getCompleteEmployeeProfile(applicantId) {
         {
           model: db.PostMaster,
           as: 'post',
-          attributes: ['post_id', 'post_name', 'post_code'],
+          attributes: ['post_id', 'post_name', 'post_code', 'amount'],
           where: { is_deleted: false },
           required: false
         },
@@ -1158,7 +1158,7 @@ async function getCompleteEmployeeProfile(applicantId) {
       contract_start_date: employee.contract_start_date,
       contract_end_date: employee.contract_end_date,
       joining_date: employee.created_at,
-      employee_pay: employee.employee_pay,
+      employee_pay: employee.employee_pay || employee.post?.amount || null,
       // Post details (handle null joins gracefully)
       post_id: employee.post_id,
       post_name: employee.post?.post_name || null,

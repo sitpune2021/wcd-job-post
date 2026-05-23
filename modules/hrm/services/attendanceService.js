@@ -516,31 +516,99 @@ const getAttendanceRecords = async (adminUser, query) => {
     where.employee_id = parseInt(query.employee_id);
   }
 
+  // Build include options with all necessary associations for search
+  const includeOptions = [
+    {
+      model: EmployeeMaster,
+      as: 'employee',
+      attributes: ['employee_id', 'employee_code', 'post_id', 'district_id', 'component_id'],
+      include: [
+        {
+          model: ApplicantMaster,
+          as: 'applicant',
+          attributes: ['applicant_id', 'email'],
+          required: false,
+          include: [
+            {
+              model: ApplicantPersonal,
+              as: 'personal',
+              attributes: ['full_name'],
+              required: false
+            }
+          ]
+        },
+        {
+          model: DistrictMaster,
+          as: 'district',
+          attributes: ['district_name'],
+          required: false
+        },
+        {
+          model: PostMaster,
+          as: 'post',
+          attributes: ['post_name'],
+          required: false
+        }
+      ]
+    }
+  ];
+
+  // Add search functionality
+  if (query.search && query.search.trim()) {
+    const searchTerm = query.search.trim();
+    
+    // Apply status filter if provided
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    const { count, rows } = await Attendance.findAndCountAll({
+      where: {
+        ...where,
+        [Op.and]: [
+          where[Op.and] || [],
+          [
+            {
+              [Op.or]: [
+                { '$employee.employee_code$': { [Op.iLike]: `%${searchTerm}%` } },
+                { '$employee.applicant.email$': { [Op.iLike]: `%${searchTerm}%` } },
+                { '$employee.applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } },
+                { '$employee.district.district_name$': { [Op.iLike]: `%${searchTerm}%` } },
+                { '$employee.post.post_name$': { [Op.iLike]: `%${searchTerm}%` } }
+              ]
+            }
+          ]
+        ]
+      },
+      include: includeOptions,
+      order: [['attendance_date', 'DESC'], ['check_in_time', 'DESC']],
+      limit,
+      offset
+    });
+
+    // Flatten the response to avoid deep nesting
+    const flattenedRows = rows.map(row => {
+      const rowData = row.toJSON();
+      
+      // Extract employee info
+      if (rowData.employee) {
+        rowData.employee_code = rowData.employee.employee_code;
+        rowData.employee_name = rowData.employee.applicant?.personal?.full_name || null;
+        rowData.employee_email = rowData.employee.applicant?.email || null;
+        
+        // Remove nested employee object
+        delete rowData.employee;
+      }
+      
+      return rowData;
+    });
+
+    return paginatedResponse(flattenedRows, count, page, limit);
+  }
+
   const { count, rows } = await Attendance.findAndCountAll({
     where,
-    include: [
-      {
-        model: EmployeeMaster,
-        as: 'employee',
-        attributes: ['employee_id', 'employee_code', 'post_id', 'district_id', 'component_id'],
-        include: [
-          {
-            model: ApplicantMaster,
-            as: 'applicant',
-            attributes: ['applicant_id', 'email'],
-            required: false,
-            include: [
-              {
-                model: ApplicantPersonal,
-                as: 'personal',
-                attributes: ['full_name'],
-                required: false
-              }
-            ]
-          }
-        ]
-      }
-    ],
+    include: includeOptions,
     order: [['attendance_date', 'DESC'], ['check_in_time', 'DESC']],
     limit,
     offset
@@ -596,9 +664,34 @@ const getAttendanceSummary = async (adminUser, query) => {
     ...(district_id && { district_id })
   };
 
+  // Add search filter to employee query
+  if (search) {
+    employeeFilter[Op.or] = [
+      { employee_code: { [Op.like]: `%${search}%` } },
+      { '$applicant.email$': { [Op.like]: `%${search}%` } },
+      { '$applicant.personal.full_name$': { [Op.like]: `%${search}%` } }
+    ];
+  }
+
   // Get total count for pagination
   const totalCount = await EmployeeMaster.count({
-    where: employeeFilter
+    where: employeeFilter,
+    include: [
+      {
+        model: ApplicantMaster,
+        as: 'applicant',
+        attributes: [],
+        required: false,
+        include: [
+          {
+            model: ApplicantPersonal,
+            as: 'personal',
+            attributes: [],
+            required: false
+          }
+        ]
+      }
+    ]
   });
 
   // Get paginated employees with related data
@@ -636,7 +729,7 @@ const getAttendanceSummary = async (adminUser, query) => {
     ],
     limit,
     offset,
-    order: [['employee_code', 'ASC']]
+    order: [['employee_id', 'DESC']]
   });
 
   const dateRange = {
@@ -653,9 +746,9 @@ const getAttendanceSummary = async (adminUser, query) => {
     attributes: [
       'employee_id',
       [fn('COUNT', literal("CASE WHEN status = 'PRESENT' THEN 1 END")), 'present_count'],
-      [fn('COUNT', literal("CASE WHEN status = 'ABSENT' THEN 1 END")), 'absent_count'],
       [fn('COUNT', literal("CASE WHEN status = 'ON_LEAVE' THEN 1 END")), 'leave_count'],
-      [fn('COUNT', literal("CASE WHEN status = 'HALF_DAY' THEN 1 END")), 'half_day_count']
+      [fn('COUNT', literal("CASE WHEN status = 'HALF_DAY' THEN 1 END")), 'half_day_count'],
+      [fn('COUNT', literal("CASE WHEN status = 'HOLIDAY' THEN 1 END")), 'holiday_count']
     ],
     group: ['employee_id']
   });
@@ -670,16 +763,14 @@ const getAttendanceSummary = async (adminUser, query) => {
   const employeeSummaries = employees.map(emp => {
     const counts = countMap[emp.employee_id] || {};
     const present = parseInt(counts.present_count) || 0;
-    const absent = parseInt(counts.absent_count) || 0;
     const onLeave = parseInt(counts.leave_count) || 0;
-    const halfDay = parseInt(counts.half_day_count) || 0;
-    
-    // Apply search filter if provided
+    const halfDayCount = parseInt(counts.half_day_count) || 0;
+    const halfDayDays = halfDayCount * 0.5;
+    const holiday = parseInt(counts.holiday_count) || 0;
     const fullName = emp.applicant?.personal?.full_name || '';
-    if (search && !emp.employee_code.toLowerCase().includes(search.toLowerCase()) && 
-        !fullName.toLowerCase().includes(search.toLowerCase())) {
-      return null;
-    }
+    
+    // Calculate absent as working days minus all other statuses
+    const absent = Math.max(0, workingDays - present - onLeave - halfDayDays - holiday);
     
     return {
       employee_id: emp.employee_id,
@@ -693,10 +784,12 @@ const getAttendanceSummary = async (adminUser, query) => {
       present,
       absent,
       on_leave: onLeave,
-      half_day: halfDay,
-      attendance_percentage: workingDays > 0 ? Math.round(((present + halfDay/2) / workingDays) * 100) : 0
+      half_day: halfDayCount,
+      half_day_days: halfDayDays,
+      holiday,
+      attendance_percentage: workingDays > 0 ? Math.round(((present + halfDayDays) / workingDays) * 100) : 0
     };
-  }).filter(emp => emp !== null); // Remove filtered out employees
+  });
 
   // Single summary object for filtered data
   const summary = {
@@ -704,10 +797,12 @@ const getAttendanceSummary = async (adminUser, query) => {
     total_present: employeeSummaries.reduce((sum, e) => sum + e.present, 0),
     total_absent: employeeSummaries.reduce((sum, e) => sum + e.absent, 0),
     total_on_leave: employeeSummaries.reduce((sum, e) => sum + e.on_leave, 0),
-    total_half_day: employeeSummaries.reduce((sum, e) => sum + e.half_day, 0),
+    total_half_day: employeeSummaries.reduce((sum, e) => sum + (e.half_day || 0), 0),
+    total_half_day_days: employeeSummaries.reduce((sum, e) => sum + (e.half_day_days || 0), 0),
+    total_holiday: employeeSummaries.reduce((sum, e) => sum + (e.holiday || 0), 0),
     total_working: employeeSummaries.length * workingDays,
     attendance_percentage: employeeSummaries.length > 0 ? 
-      Math.round(((employeeSummaries.reduce((sum, e) => sum + e.present + (e.half_day/2), 0)) / (employeeSummaries.length * workingDays)) * 100) : 0,
+      Math.round(((employeeSummaries.reduce((sum, e) => sum + e.present + (e.half_day_days || 0), 0)) / (employeeSummaries.length * workingDays)) * 100) : 0,
     month,
     year,
     working_days: workingDays,

@@ -85,7 +85,7 @@ router.post('/create-existing',
 
     // Validate either component_id or hub_id is provided
     if (!employeeData.component_id && !employeeData.hub_id) {
-      throw ApiError.badRequest('Either component_id or hub_id must be provided');
+      throw ApiError.badRequest('Either OSC or HUB must be provided');
     }
 
     // Validate password if provided

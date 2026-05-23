@@ -54,13 +54,12 @@ const calculateDeductions = (employee, monthlyPay, calculatedSalary) => {
     const gender = employee.applicant?.personal?.gender?.toLowerCase() || 'male'; // Default to male if not specified
     let ptTaxAmount = 0;
     let ptTaxReason = '';
-
     if (gender === 'male' && monthlyPay >= maleThreshold) {
       ptTaxAmount = maleAmount;
       ptTaxReason = `PT Tax (Male): Salary ≥ ₹${maleThreshold.toLocaleString('en-IN')}`;
-    } else if (gender === 'female' && monthlyPay > femaleThreshold) {
+    } else if (gender === 'female' && monthlyPay >= femaleThreshold) {
       ptTaxAmount = femaleAmount;
-      ptTaxReason = `PT Tax (Female): Salary > ₹${femaleThreshold.toLocaleString('en-IN')}`;
+      ptTaxReason = `PT Tax (Female): Salary ≥ ₹${femaleThreshold.toLocaleString('en-IN')}`;
     }
 
     if (ptTaxAmount > 0) {
@@ -161,19 +160,6 @@ const calculateAttendanceSummary = async (employeeId, month, year) => {
     }
   });
 
-  // Add approved leaves
-  approvedLeaves.forEach(leave => {
-    const fromDate = new Date(leave.from_date);
-    const toDate = new Date(leave.to_date);
-    
-    // Calculate days in the specified month
-    for (let date = new Date(fromDate); date <= toDate; date.setDate(date.getDate() + 1)) {
-      if (date.getMonth() === month - 1 && date.getFullYear() === year) {
-        leaveDays += leave.is_half_day ? 0.5 : 1;
-      }
-    }
-  });
-
   // Calculate working days considering contract start date
   let workingDays = getWorkingDaysInMonth(month, year);
   
@@ -194,7 +180,8 @@ const calculateAttendanceSummary = async (employeeId, month, year) => {
     }
   }
   
-  const paidDays = presentDays + leaveDays + halfDays;
+  // Paid days = present + half days + leave days (from attendance records only)
+  const paidDays = presentDays + halfDays + leaveDays;
   
   // Calculate absent days as working days minus paid days
   const calculatedAbsentDays = Math.max(0, workingDays - paidDays);
@@ -224,7 +211,21 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
       },
       include: [
         { model: PostMaster, as: 'post', attributes: ['post_name', 'amount'] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_name'] }
+        { model: DistrictMaster, as: 'district', attributes: ['district_name'] },
+        {
+          model: db.ApplicantMaster,
+          as: 'applicant',
+          attributes: ['applicant_id'],
+          required: false,
+          include: [
+            {
+              model: ApplicantPersonal,
+              as: 'personal',
+              attributes: ['full_name', 'gender'],
+              required: false
+            }
+          ]
+        }
       ]
     });
 
@@ -233,21 +234,7 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
     }
 
     // Get personal information for full name
-    let fullName = employee.full_name;
-    if (employee.applicant_id) {
-      try {
-        const personalInfo = await ApplicantPersonal.findOne({
-          where: { applicant_id: employee.applicant_id, is_deleted: false },
-          attributes: ['full_name'],
-          raw: true
-        });
-        if (personalInfo?.full_name) {
-          fullName = personalInfo.full_name;
-        }
-      } catch (e) {
-        // Fallback to employee_code if personal info fetch fails
-      }
-    }
+    let fullName = employee.full_name || employee.applicant?.personal?.full_name || employee.employee_code;
 
     // Get employee pay (priority to employee_pay, fallback to post.amount)
     const monthlyPay = parseFloat(employee.employee_pay || employee.post?.amount || 0);
@@ -277,15 +264,16 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
     // Calculate attendance
     const attendance = await calculateAttendanceSummary(employeeId, month, year);
 
-    // Calculate salary
-    const perDaySalary = monthlyPay / attendance.working_days;
+    // Calculate salary - PT deduction first, then attendance-based
+    const deductions = calculateDeductions(employee, monthlyPay, monthlyPay);
+    const salaryAfterPT = monthlyPay - deductions.totalDeductions;
+    
+    // Calculate per-day salary after PT deduction
+    const perDaySalary = salaryAfterPT / attendance.working_days;
     const calculatedSalary = perDaySalary * attendance.paid_days;
-    const deductionAmount = perDaySalary * attendance.absent_days;
-
-    // Calculate additional deductions
-    const deductions = calculateDeductions(employee, monthlyPay, calculatedSalary);
-    const totalDeductionAmount = deductionAmount + deductions.totalDeductions;
-    const netSalary = monthlyPay - totalDeductionAmount;
+    const attendanceDeduction = perDaySalary * attendance.absent_days;
+    
+    const netSalary = calculatedSalary;
 
     // Build payslip data
     const payslipData = {
@@ -306,9 +294,9 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
         monthly_pay: parseFloat(monthlyPay.toFixed(2)),
         per_day_salary: parseFloat(perDaySalary.toFixed(2)),
         calculated_salary: parseFloat(calculatedSalary.toFixed(2)),
-        attendance_deduction: parseFloat(deductionAmount.toFixed(2)),
+        attendance_deduction: parseFloat(attendanceDeduction.toFixed(2)),
         additional_deductions: parseFloat(deductions.totalDeductions.toFixed(2)),
-        total_deduction: parseFloat(totalDeductionAmount.toFixed(2)),
+        total_deduction: parseFloat((attendanceDeduction + deductions.totalDeductions).toFixed(2)),
         net_salary: parseFloat(netSalary.toFixed(2)),
         deduction_breakdown: deductions.breakdown
       },

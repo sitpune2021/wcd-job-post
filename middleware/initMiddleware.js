@@ -87,7 +87,7 @@ const getAllowedOrigins = () => {
     'http://192.168.1.14:5000',
     'http://192.168.1.2:5000/',
     'http://192.168.1.2:5174/',
-     'http://192.168.1.32:5174/',
+     'http://192.168.1.2:5175/',
     'https://dev.wcdchrms.in',
     'https://wcdchrms.in'
   ];

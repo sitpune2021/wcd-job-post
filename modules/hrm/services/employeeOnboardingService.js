@@ -115,7 +115,7 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
     const hubId = application.post?.hub_id;
 
     if (!componentId && !hubId) {
-      throw new Error('Post must have either component_id or hub_id');
+      throw new Error('Post must have either OSC or HUB');
     }
 
     // Create employee record
@@ -235,7 +235,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     }
 
     if (!component_id && !hub_id) {
-      throw ApiError.badRequest('Either component_id or hub_id must be provided');
+      throw ApiError.badRequest('Either OSC or HUB must be provided');
     }
 
     // Check if email already exists in applicant table
