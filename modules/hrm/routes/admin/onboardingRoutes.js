@@ -194,6 +194,7 @@ router.get('/pending-applications',
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
       component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
       hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      search: req.query.search || undefined,
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 50
     };

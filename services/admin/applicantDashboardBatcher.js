@@ -110,6 +110,7 @@ const batchGetDashboards = async (applicantIds) => {
       const personalMissing = [];
       if (!personal || !personal.dob) personalMissing.push('dob');
       if (!personal || !personal.gender) personalMissing.push('gender');
+      if (!personal || !personal.marital_status) personalMissing.push('marital_status');
       const personalCompleted = personalMissing.length === 0;
 
       const addressMissing = [];

@@ -538,6 +538,8 @@ async function bulkImportExistingEmployees(employeesData, adminId, ipAddress) {
  * Get list of selected applicants pending onboarding (for "Onboard from Applications" tab)
  */
 async function getPendingSelectedApplicants(filters = {}) {
+  const { Op } = require('sequelize');
+  
   const where = {
     status: 'SELECTED',
     is_deleted: false
@@ -548,29 +550,71 @@ async function getPendingSelectedApplicants(filters = {}) {
     where.district_id = filters.district_id;
   }
 
-  if (filters.component_id || filters.hub_id) {
-    where['$post.component_id$'] = filters.component_id || null;
-    where['$post.hub_id$'] = filters.hub_id || null;
+  // Handle location type filtering
+  if (filters.only_hub) {
+    // Hub only mode - only show applications with posts that have hubs
+    where['$post.hub_id$'] = { [Op.ne]: null };
+  } else if (filters.only_osc) {
+    // OSC only mode - only show applications with posts that have components
+    where['$post.component_id$'] = { [Op.ne]: null };
+  } else {
+    // All mode - apply specific hub/component filters
+    if (filters.component_id || filters.hub_id) {
+      where['$post.component_id$'] = filters.component_id || null;
+      where['$post.hub_id$'] = filters.hub_id || null;
+    }
+  }
+
+  // Apply search filter
+  if (filters.search) {
+    const searchTerm = filters.search.trim();
+    where[Op.or] = [
+      {
+        application_no: {
+          [Op.iLike]: `%${searchTerm}%`
+        }
+      },
+      {
+        '$applicant.personal.full_name$': {
+          [Op.iLike]: `%${searchTerm}%`
+        }
+      },
+      {
+        '$applicant.email$': {
+          [Op.iLike]: `%${searchTerm}%`
+        }
+      },
+      {
+        '$applicant.mobile_no$': {
+          [Op.iLike]: `%${searchTerm}%`
+        }
+      },
+      {
+        '$applicant.applicant_no$': {
+          [Op.iLike]: `%${searchTerm}%`
+        }
+      }
+    ];
   }
 
   const page = filters.page || 1;
   const limit = filters.limit || 50;
   const offset = (page - 1) * limit;
 
-  // Get total count first
+  // Get total count first - use simpler query without associations for count
+  let countWhere = { ...where };
+  
+  // Remove complex associations from count where clause to avoid errors
+  if (filters.search) {
+    delete countWhere[Op.or];
+    // For count, only search on application_no to avoid association issues
+    countWhere.application_no = {
+      [Op.iLike]: `%${filters.search.trim()}%`
+    };
+  }
+  
   const totalApplications = await db.Application.count({
-    where,
-    include: [
-      {
-        model: db.PostMaster,
-        as: 'post',
-        attributes: { exclude: ['amount'] },
-        include: [
-          { model: db.Component, as: 'component' },
-          { model: db.Hub, as: 'hub' }
-        ]
-      }
-    ]
+    where: countWhere
   });
 
   // Get paginated applications
