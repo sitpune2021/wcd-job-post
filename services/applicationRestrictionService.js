@@ -1,33 +1,34 @@
 /**
  * Application Restriction Service
- * Handles validation for application limits based on post names and locations (OSC/Hub)
+ * Handles validation for application limits based on post names and scheme locations
  * 
  * Rules:
  * 1. All applications must be in the same district
- * 2. Max 2 distinct post names across OSC + Hub combined
- * 3. For each post name, max 2 different locations (could be 2 OSCs, 2 Hubs, or 1 OSC + 1 Hub)
+ * 2. Max 2 distinct post names across all schemes combined
+ * 3. For each post name, max 2 different scheme locations
  * 4. Total max 4 applications (2 post names × 2 locations each)
- * 5. Location = component_id (for OSC posts) OR hub_id (for Hub posts)
+ * 5. Location = scheme_id (unified approach for all operational units)
  * 
  * Example valid 4 applications in same district:
- * - "Case Worker" at OSC-1
- * - "Case Worker" at Hub-3 (same post name, different location)
+ * - "Case Worker" at OSC-1 (scheme_type: OSC)
+ * - "Case Worker" at HUB-3 (scheme_type: HUB) (same post name, different location)
  * - "Centre Administrator" at OSC-2 (different post name)
- * - "Centre Administrator" at Hub-1 (same post name, different location)
+ * - "Centre Administrator" at HUB-1 (same post name, different location)
  */
 
 const db = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
+const Scheme = require('../models/Scheme');
 
 class ApplicationRestrictionService {
 
   constructor() {
     // Get limits from ENV with defaults
     // MAX_DISTINCT_POST_NAMES: Max different post names (e.g., Case Worker, Centre Administrator)
-    // MAX_OSC_PER_POST_NAME: Max locations per post name (OSCs + Hubs combined, default 2)
+    // MAX_SCHEMES_PER_POST_NAME: Max locations per post name (all schemes combined, default 2)
     this.MAX_DISTINCT_POST_NAMES = parseInt(process.env.MAX_DISTINCT_POST_NAMES) || 2;
-    this.MAX_OSC_PER_POST_NAME = parseInt(process.env.MAX_OSC_PER_POST_NAME) || 2;
+    this.MAX_SCHEMES_PER_POST_NAME = parseInt(process.env.MAX_SCHEMES_PER_POST_NAME) || 2;
   }
 
   /**
@@ -40,13 +41,25 @@ class ApplicationRestrictionService {
   async canApplyToPost(applicantId, postId, districtId = null) {
     try {
       logger.info('[canApplyToPost] start', { applicantId, postId, districtId });
-      // Get the post details
+      // Get the post details (scheme-only approach)
       const targetPost = await db.PostMaster.unscoped().findOne({
         where: { post_id: postId },
         include: [
-          { model: db.Component, as: 'component', required: false, attributes: ['component_id', 'component_name', 'district_id'] },
-          { model: db.DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name'] },
-          { model: db.Hub, as: 'hub', required: false, attributes: ['hub_id'] }
+          {
+            model: Scheme,
+            as: 'scheme',
+            include: [
+              {
+                model: db.SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: true
+              }
+            ],
+            attributes: ['scheme_id', 'scheme_code', 'scheme_name'],
+            required: true
+          },
+          { model: db.DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name'] }
         ]
       });
 
@@ -63,11 +76,18 @@ class ApplicationRestrictionService {
       // This ensures consistency with existing applications
       const targetDistrictId = districtId !== null ? districtId : targetPost.district_id;
       const targetPostName = targetPost.post_name;
-      const targetComponentId = targetPost.component_id;
-      const targetHubId = targetPost.hub_id;
-      // Use component_id or hub_id as location identifier for restrictions
-      const targetLocationId = targetComponentId || targetHubId;
-      const targetLocationType = targetComponentId ? 'component' : 'hub';
+      
+      // Scheme-only approach: All posts must have a scheme assignment
+      if (!targetPost.scheme || !targetPost.scheme.schemeType) {
+        return {
+          allowed: false,
+          reason: 'Post scheme assignment not configured. Please contact admin.',
+          details: {}
+        };
+      }
+      
+      const targetLocationId = targetPost.scheme.scheme_id;
+      const targetLocationType = 'scheme';
 
       // Get all existing applications for this applicant
       const existingApplications = await db.Application.findAll({
@@ -80,12 +100,21 @@ class ApplicationRestrictionService {
           {
             model: db.PostMaster,
             as: 'post',
-            attributes: ['post_id', 'post_name', 'component_id', 'district_id'],
+            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
             include: [
               {
-                model: db.Component,
-                as: 'component',
-                attributes: ['component_id', 'component_name', 'district_id']
+                model: Scheme,
+                as: 'scheme',
+                include: [
+                  {
+                    model: db.SchemeType,
+                    as: 'schemeType',
+                    attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                    required: true
+                  }
+                ],
+                attributes: ['scheme_id', 'scheme_code', 'scheme_name'],
+                required: true
               },
               {
                 model: db.DistrictMaster,
@@ -144,13 +173,19 @@ class ApplicationRestrictionService {
             model: db.PostMaster,
             as: 'post',
             required: false, // LEFT JOIN to keep payments even if post is null
-            attributes: ['post_id', 'post_name', 'component_id', 'district_id'],
+            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
             include: [
               {
-                model: db.Component,
-                as: 'component',
-                required: false,
-                attributes: ['component_id', 'component_name', 'district_id']
+                model: db.Scheme,
+                as: 'scheme',
+                required: true,
+                attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+                include: [{
+                  model: db.SchemeType,
+                  as: 'schemeType',
+                  attributes: ['scheme_type_id', 'scheme_code'],
+                  required: true
+                }]
               },
               {
                 model: db.DistrictMaster,
@@ -200,7 +235,7 @@ class ApplicationRestrictionService {
         paymentCount: paymentApplications.length,
         targetDistrictId,
         targetPostName,
-        targetComponentId
+        targetSchemeId
       });
 
       // Check if already applied to this exact post (exclude all payment records)
@@ -248,9 +283,9 @@ class ApplicationRestrictionService {
         };
       }
 
-      // Get district from first application (prefer stored application district, fallback to component/post)
+      // Get district from first application (prefer stored application district, fallback to scheme/post)
       const firstApp = combinedApplications[0];
-      const firstAppDistrictId = firstApp.district_id || firstApp.post?.district_id || firstApp.post?.component?.district_id;
+      const firstAppDistrictId = firstApp.district_id || firstApp.post?.district_id || firstApp.post?.scheme?.district_id;
 
       // Rule 1: All applications must be in same district
       if (targetDistrictId !== firstAppDistrictId) {
@@ -261,8 +296,8 @@ class ApplicationRestrictionService {
           details: {
             existingDistrictId: firstAppDistrictId,
             targetDistrictId,
-            existingDistrictName: firstApp.post?.district?.district_name || firstApp.post?.component?.district?.district_name,
-            targetDistrictName: targetPost.district?.district_name || targetPost.component?.district?.district_name
+            existingDistrictName: firstApp.post?.district?.district_name || firstApp.post?.scheme?.district?.district_name,
+            targetDistrictName: targetPost.district?.district_name || targetPost.scheme?.district?.district_name
           }
         };
       }
@@ -277,39 +312,50 @@ class ApplicationRestrictionService {
         // Rule 2: Check OSC limit for this post name
         const existingOSCsForPostName = postNameGroups[targetPostName];
 
-        // Check if already applied to this location (OSC/Hub) for this post name
+        // Check if already applied to this location (Scheme-only) for this post name
         const alreadyAppliedToThisLocation = existingOSCsForPostName.some(
           app => {
-            const appLocationId = app.post.component_id || app.post.hub_id;
+            // Scheme-only approach: All posts must have a scheme assignment
+            if (!app.post.scheme || !app.post.scheme.schemeType) {
+              logger.warn('Application with missing scheme assignment found', {
+                applicationId: app.application_id,
+                postId: app.post_id
+              });
+              return false;
+            }
+            
+            const appLocationId = app.post.scheme.scheme_id;
             return appLocationId === targetLocationId;
           }
         );
 
         if (alreadyAppliedToThisLocation) {
-          const locationName = targetLocationType === 'component' ? 'OSC' : 'Hub';
+          const locationName = targetPost.scheme.schemeType.scheme_code; // 'OSC' or 'HUB'
+          
           return {
             allowed: false,
             reason: `You have already applied to "${targetPostName}" in this ${locationName}`,
             details: {
               postName: targetPostName,
               locationId: targetLocationId,
-              locationType: targetLocationType
+              locationType: targetLocationType,
+              locationName: locationName
             }
           };
         }
 
         // Check if location limit reached for this post name
-        if (existingOSCsForPostName.length >= this.MAX_OSC_PER_POST_NAME) {
+        if (existingOSCsForPostName.length >= this.MAX_SCHEMES_PER_POST_NAME) {
           return {
             allowed: false,
-            reason: `You have reached the maximum limit of ${this.MAX_OSC_PER_POST_NAME} location applications for "${targetPostName}"`,
+            reason: `You have reached the maximum limit of ${this.MAX_SCHEMES_PER_POST_NAME} location applications for "${targetPostName}"`,
             details: {
               postName: targetPostName,
               currentLocationCount: existingOSCsForPostName.length,
-              maxLocationAllowed: this.MAX_OSC_PER_POST_NAME,
+              maxLocationAllowed: this.MAX_SCHEMES_PER_POST_NAME,
               existingLocations: existingOSCsForPostName.map(app => ({
-                locationName: app.post.component?.component_name || app.post.hub?.hub_name,
-                locationType: app.post.component_id ? 'component' : 'hub',
+                locationName: app.post.scheme?.scheme_name,
+                locationType: app.post.scheme?.schemeType?.scheme_code || 'SCHEME',
                 applicationNo: app.application_no
               }))
             }
@@ -317,15 +363,15 @@ class ApplicationRestrictionService {
         }
 
         // Allow - applying to same post name, different location, within limit
-        const locationName = targetLocationType === 'component' ? 'OSC' : 'Hub';
+        const locationName = targetPost.scheme?.schemeType?.scheme_code || 'SCHEME';
         return {
           allowed: true,
-          reason: `Applying to "${targetPostName}" in a different ${locationName} (${existingOSCsForPostName.length + 1}/${this.MAX_OSC_PER_POST_NAME})`,
+          reason: `Applying to "${targetPostName}" in a different ${locationName} (${existingOSCsForPostName.length + 1}/${this.MAX_SCHEMES_PER_POST_NAME})`,
           details: {
             postName: targetPostName,
             isNewPostName: false,
             currentLocationCount: existingOSCsForPostName.length,
-            maxLocationAllowed: this.MAX_OSC_PER_POST_NAME
+            maxLocationAllowed: this.MAX_SCHEMES_PER_POST_NAME
           }
         };
       } else {
@@ -401,12 +447,18 @@ class ApplicationRestrictionService {
           {
             model: db.PostMaster,
             as: 'post',
-            attributes: ['post_id', 'post_name', 'component_id', 'district_id'],
+            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
             include: [
               {
-                model: db.Component,
-                as: 'component',
-                attributes: ['component_id', 'component_name', 'district_id']
+                model: db.Scheme,
+                as: 'scheme',
+                attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+                include: [{
+                  model: db.SchemeType,
+                  as: 'schemeType',
+                  attributes: ['scheme_type_id', 'scheme_code'],
+                  required: true
+                }]
               },
               {
                 model: db.DistrictMaster,
@@ -426,26 +478,27 @@ class ApplicationRestrictionService {
       let districtName = null;
       if (existingApplications.length > 0) {
         const firstApp = existingApplications[0];
-        districtId = firstApp.post?.component?.district_id || firstApp.post?.district_id;
-        districtName = firstApp.post?.district?.district_name || firstApp.post?.component?.district?.district_name;
+        districtId = firstApp.post?.scheme?.district_id || firstApp.post?.district_id;
+        districtName = firstApp.post?.district?.district_name || firstApp.post?.scheme?.district?.district_name;
       }
 
       return {
         totalApplications: existingApplications.length,
         distinctPostNames: distinctPostNameCount,
         maxDistinctPostNames: this.MAX_DISTINCT_POST_NAMES,
-        maxOSCPerPostName: this.MAX_OSC_PER_POST_NAME,
+        maxSchemesPerPostName: this.MAX_SCHEMES_PER_POST_NAME,
         canApplyToNewPostName: distinctPostNameCount < this.MAX_DISTINCT_POST_NAMES,
         restrictedToDistrict: districtId,
         restrictedToDistrictName: districtName,
         postNameBreakdown: Object.keys(postNameGroups).map(postName => ({
           postName,
           applicationCount: postNameGroups[postName].length,
-          canApplyToMoreOSC: postNameGroups[postName].length < this.MAX_OSC_PER_POST_NAME,
+          canApplyToMoreSchemes: postNameGroups[postName].length < this.MAX_SCHEMES_PER_POST_NAME,
           applications: postNameGroups[postName].map(app => ({
             applicationNo: app.application_no,
             status: app.status,
-            componentName: app.post?.component?.component_name,
+            schemeName: app.post?.scheme?.scheme_name,
+            schemeType: app.post?.scheme?.schemeType?.scheme_code,
             postId: app.post_id
           }))
         }))

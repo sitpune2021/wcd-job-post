@@ -494,6 +494,64 @@ registerPermission({
   module: 'permissions'
 });
 
+// Schemes
+registerPermission({
+  code: 'masters.schemes.create',
+  name: 'Create Scheme',
+  description: 'Create scheme',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.schemes.delete',
+  name: 'Delete Scheme',
+  description: 'Delete scheme',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.schemes.edit',
+  name: 'Edit Scheme',
+  description: 'Edit scheme',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.schemes.view',
+  name: 'View Schemes',
+  description: 'View schemes',
+  module: 'masters'
+});
+
+// Scheme Types
+registerPermission({
+  code: 'masters.scheme_types.create',
+  name: 'Create Scheme Type',
+  description: 'Create scheme type',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.scheme_types.delete',
+  name: 'Delete Scheme Type',
+  description: 'Delete scheme type',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.scheme_types.edit',
+  name: 'Edit Scheme Type',
+  description: 'Edit scheme type',
+  module: 'masters'
+});
+
+registerPermission({
+  code: 'masters.scheme_types.view',
+  name: 'View Scheme Types',
+  description: 'View scheme types',
+  module: 'masters'
+});
+
 // Posts Module (6)
 registerPermission({
   code: 'posts.close',
@@ -677,6 +735,21 @@ registerPermission({
   code: 'hrm.calendar.manage',
   name: 'Manage HRM Calendar',
   description: 'Manage holidays and calendar settings',
+  module: 'hrm'
+});
+
+// HRM Settings
+registerPermission({
+  code: 'hrm.settings.view',
+  name: 'View HRM Settings',
+  description: 'View HRM system settings and configurations',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.settings.edit',
+  name: 'Edit HRM Settings',
+  description: 'Edit HRM system settings and configurations',
   module: 'hrm'
 });
 

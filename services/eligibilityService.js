@@ -30,7 +30,17 @@ class EligibilityService {
         include: [
           { model: db.EducationLevel, as: 'minEducationLevel', required: false },
           { model: db.EducationLevel, as: 'maxEducationLevel', required: false },
-          { model: db.Component, as: 'component', required: false }
+          { 
+            model: db.Scheme, 
+            as: 'scheme', 
+            required: true,
+            include: [{
+              model: db.SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: true
+            }]
+          }
         ]
       });
 
@@ -90,7 +100,8 @@ class EligibilityService {
 
       result.postName = post.post_name;
       result.postCode = post.post_code;
-      result.componentName = post.component?.component_name;
+      result.schemeName = post.scheme?.scheme_name;
+      result.schemeType = post.scheme?.schemeType?.scheme_code;
 
       logger.info(`Eligibility check for applicant ${applicantId} on post ${postId}: ${result.isEligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}`);
 
@@ -926,8 +937,17 @@ class EligibilityService {
       const posts = await db.PostMaster.findAll({
         where: postWhereClause,
         include: [
-          { model: db.Component, as: 'component', required: false },
-          { model: db.Hub, as: 'hub', required: false, attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr'] },
+          { 
+            model: db.Scheme, 
+            as: 'scheme', 
+            required: true,
+            include: [{
+              model: db.SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: true
+            }]
+          },
           { model: db.EducationLevel, as: 'minEducationLevel', required: false },
           { model: db.EducationLevel, as: 'maxEducationLevel', required: false },
           {
@@ -958,12 +978,10 @@ class EligibilityService {
             post.post_name,
             post.post_name_mr,
             post.post_code,
-            post.component?.component_name,
-            post.component?.component_name_mr,
-            post.component?.component_code,
-            post.hub?.hub_name,
-            post.hub?.hub_name_mr,
-            post.hub?.hub_code,
+            post.scheme?.scheme_name,
+            post.scheme?.scheme_name_mr,
+            post.scheme?.scheme_code,
+            post.scheme?.schemeType?.scheme_code,
             post.district?.district_name,
             post.district?.district_name_mr
           ].filter(Boolean).map((value) => value.toString().toLowerCase());
@@ -1058,8 +1076,7 @@ class EligibilityService {
           continue;
         }
 
-        const component = post.component || {};
-        const hub = post.hub || {};
+        const scheme = post.scheme || {};
         const district = post.district || {};
 
         // Get post-specific document requirements
@@ -1074,12 +1091,10 @@ class EligibilityService {
           district_id: post.district_id || null,
           district_name: district?.district_name || null,
           district_name_mr: district?.district_name_mr || null,
-          component: component?.component_name,
-          component_name_mr: component?.component_name_mr,
-          component_code: component?.component_code,
-          hub: hub?.hub_name,
-          hub_name_mr: hub?.hub_name_mr,
-          hub_code: hub?.hub_code,
+          scheme: scheme?.scheme_name,
+          scheme_name_mr: scheme?.scheme_name_mr,
+          scheme_code: scheme?.scheme_code,
+          scheme_type: scheme?.schemeType?.scheme_code,
           female_only: post.female_only,
           male_only: post.male_only,
           is_eligible: isEligible,

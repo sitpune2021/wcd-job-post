@@ -11,6 +11,7 @@ const db = require('../../../models');
 const { Attendance, Holiday, LeaveApplication, LeaveType } = require('../models');
 const EmployeeMaster = db.EmployeeMaster;
 const { getEmployeeFromUser } = require('../utils/hrmHelpers');
+const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
 
 // Enhanced utilities for precise date/time handling
 const { getCurrentDate, validateYear, isWeekend } = require('../utils/dateTimeHelpers');
@@ -117,8 +118,29 @@ const getEmployeeCalendar = async (user, query) => {
 
   // Create lookup maps for quick access
   const attendanceMap = new Map();
+  let presentCount = 0;
+  let halfDayCount = 0;
+  let onLeaveCount = 0;
+  let holidayStatusCount = 0;
+
   attendanceRecords.forEach(record => {
     attendanceMap.set(record.attendance_date, record);
+    switch (record.status) {
+      case 'PRESENT':
+        presentCount += 1;
+        break;
+      case 'HALF_DAY':
+        halfDayCount += 1;
+        break;
+      case 'ON_LEAVE':
+        onLeaveCount += 1;
+        break;
+      case 'HOLIDAY':
+        holidayStatusCount += 1;
+        break;
+      default:
+        break;
+    }
   });
 
   const holidayMap = new Map();
@@ -148,12 +170,12 @@ const getEmployeeCalendar = async (user, query) => {
     }
   });
 
+  // Get working days using the same method as admin attendance summary
+  const workingDaysResult = await getWorkingDaysInMonth(currentMonth, currentYear);
+  const workingDays = workingDaysResult.workingDays;
+
   // Build calendar days
   const days = [];
-  let workingDays = 0;
-  let presentDays = 0;
-  let absentDays = 0;
-  let leaveDaysCount = 0;
   let holidayCount = 0;
   let sundayCount = 0;
 
@@ -195,21 +217,12 @@ const getEmployeeCalendar = async (user, query) => {
     else if (leaveDates.has(dateStr)) {
       dayStatus = 'ON_LEAVE';
       isWorkingDay = false;
-      leaveDaysCount++;
       details = leaveDetailsMap.get(dateStr);
     }
     // Check attendance record
     else if (attendanceMap.has(dateStr)) {
       const attendance = attendanceMap.get(dateStr);
       dayStatus = attendance.status;
-      
-      if (attendance.status === 'PRESENT') {
-        presentDays++;
-      } else if (attendance.status === 'ABSENT') {
-        absentDays++;
-      } else if (attendance.status === 'HALF_DAY') {
-        presentDays += 0.5;
-      }
       
       details = {
         check_in_time: attendance.check_in_time,
@@ -226,7 +239,6 @@ const getEmployeeCalendar = async (user, query) => {
       
       if (isWithinContract) {
         dayStatus = 'ABSENT';
-        absentDays++;
       } else {
         // Outside contract period - don't count as absent
         dayStatus = 'NOT_MARKED';
@@ -234,17 +246,7 @@ const getEmployeeCalendar = async (user, query) => {
       }
     }
 
-    // Count working days (exclude Sundays, holidays, and days outside contract period)
-    if (isWorkingDay) {
-      // Check if date is within contract period
-      const isWithinContract = (!employee.contract_start_date || dateStr >= employee.contract_start_date) &&
-                               (!employee.contract_end_date || dateStr <= employee.contract_end_date);
-      
-      if (isWithinContract) {
-        workingDays++;
-      }
-    }
-
+    
     days.push({
       date: dateStr,
       day: day,
@@ -258,14 +260,18 @@ const getEmployeeCalendar = async (user, query) => {
     });
   }
 
-  // Calculate attendance percentage using only elapsed working days up to today
-  const now = new Date();
-  const isCurrentMonth = (currentYear === now.getFullYear() && currentMonth === (now.getMonth() + 1));
-  const elapsedWorkingDays = isCurrentMonth
-    ? days.filter(d => d.is_working_day && (d.is_past || d.is_today)).length
-    : workingDays;
-  const attendancePercentage = elapsedWorkingDays > 0 
-    ? Math.round((presentDays / elapsedWorkingDays) * 100) 
+  const halfDayDays = halfDayCount * 0.5;
+  // Count actual absent records from attendance data
+  let absentCount = 0;
+  attendanceRecords.forEach(record => {
+    if (record.status === 'ABSENT') {
+      absentCount += 1;
+    }
+  });
+  
+  const absentDays = absentCount;
+  const attendancePercentage = workingDays > 0 
+    ? Math.round(((presentCount + halfDayDays) / workingDays) * 100) 
     : 0;
 
   return {
@@ -282,9 +288,11 @@ const getEmployeeCalendar = async (user, query) => {
       days: days
     },
     summary: {
-      present_days: presentDays,
+      present_days: presentCount,
       absent_days: absentDays,
-      leave_days: leaveDaysCount,
+      leave_days: onLeaveCount,
+      half_days: halfDayCount,
+      half_day_days: halfDayDays,
       holidays: holidayCount,
       sundays: sundayCount,
       attendance_percentage: attendancePercentage

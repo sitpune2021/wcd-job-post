@@ -89,9 +89,8 @@ router.use(authenticate);
 router.get('/posts', requirePermission('applications.view'), auditLog('VIEW_POSTS_FOR_REVIEW'), async (req, res, next) => {
   try {
     const {
-      component_id,
+      scheme_id,
       district_id,
-      hub_id,
       search,
       page = 1,
       limit = 20
@@ -103,9 +102,8 @@ router.get('/posts', requirePermission('applications.view'), auditLog('VIEW_POST
 
     // Get all posts with counts (this function doesn't support pagination natively)
     const allPosts = await applicationReviewService.getActivePostsWithCounts({
-      component_id,
+      scheme_id,
       district_id,
-      hub_id,
       search
     });
 

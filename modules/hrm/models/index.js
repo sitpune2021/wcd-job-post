@@ -39,16 +39,6 @@ const setupAssociations = (db) => {
     as: 'district'
   });
 
-  EmployeeMaster.belongsTo(db.Component, {
-    foreignKey: 'component_id',
-    as: 'component'
-  });
-
-  EmployeeMaster.belongsTo(db.Hub, {
-    foreignKey: 'hub_id',
-    as: 'hub'
-  });
-
   EmployeeMaster.belongsTo(db.AdminUser, {
     foreignKey: 'onboarding_email_sent_by',
     as: 'emailSentByAdmin'

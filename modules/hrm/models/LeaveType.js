@@ -19,7 +19,7 @@ const LeaveType = sequelize.define('HrmLeaveType', {
   default_days_per_year: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 12
+    defaultValue: process.env.DEFAULT_LEAVE_DAYS || 11
   },
   description: {
     type: DataTypes.TEXT,

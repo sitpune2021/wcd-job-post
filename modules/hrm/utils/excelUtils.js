@@ -12,42 +12,44 @@ const logger = require('../../../config/logger');
  * Fetch lookup data for dropdowns
  */
 async function fetchLookups() {
-  const [districts, hubs, components, posts] = await Promise.all([
+  const [districts, schemes, posts] = await Promise.all([
     db.DistrictMaster.scope('onlyActive').findAll({ 
       attributes: ['district_id', 'district_name'], 
       order: [['district_name', 'ASC']] 
     }),
-    db.Hub.scope('withDeleted').findAll({ 
-      attributes: ['hub_id', 'hub_name'], 
+    db.Scheme.findAll({ 
+      attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'], 
       where: { is_deleted: false }, 
-      order: [['hub_name', 'ASC']] 
-    }),
-    db.Component.scope('onlyActive').findAll({ 
-      attributes: ['component_id', 'component_name'], 
-      order: [['component_name', 'ASC']] 
+      include: [{
+        model: db.SchemeType,
+        as: 'schemeType',
+        attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+        required: true
+      }],
+      order: [['scheme_name', 'ASC']] 
     }),
     db.PostMaster.findAll({ 
-      attributes: ['post_id', 'post_name', 'post_code', 'component_id', 'hub_id'], 
+      attributes: ['post_id', 'post_name', 'post_code', 'scheme_id'], 
       where: { is_deleted: false }, 
       include: [
         {
-          model: db.Component,
-          as: 'component',
-          attributes: ['component_id', 'component_name'],
-          required: false
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          attributes: ['hub_id', 'hub_name'],
-          required: false
+          model: db.Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          required: true,
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         }
       ],
       order: [['post_name', 'ASC']] 
     })
   ]);
 
-  return { districts, hubs, components, posts };
+  return { districts, schemes, posts };
 }
 
 /**
@@ -66,12 +68,9 @@ async function generateTemplate(res) {
     // Add validation lists to hidden sheet
     // Column 1: District names only (for dropdown display)
     dataSheet.getColumn(1).values = ['Districts', ...lookups.districts.map(d => d.district_name)];
-    // Column 2: Hub names only (for dropdown display)
-    dataSheet.getColumn(2).values = ['Hubs', ...lookups.hubs.map(h => h.hub_name)];
-    // Column 3: OSC names only (for dropdown display)
-    dataSheet.getColumn(3).values = ['OSCs', ...lookups.components.map(c => c.component_name)];
-    // Column 4: Post names with OSC/Hub info (for dropdown display)
-    dataSheet.getColumn(4).values = ['Posts', ...lookups.posts.map(p => {
+    // Column 2: Scheme names only (for dropdown display)
+    dataSheet.getColumn(2).values = ['Schemes', ...lookups.schemes.map(s => s.scheme_name)];
+    dataSheet.getColumn(3).values = ['Posts', ...lookups.posts.map(p => {
       let displayName = p.post_name;
       
       // Add post code if available
@@ -79,21 +78,18 @@ async function generateTemplate(res) {
         displayName += ` (${p.post_code})`;
       }
       
-      // Add OSC/Hub information for better identification
-      if (p.component && p.component.component_name) {
-        displayName += ` | ${p.component.component_name}`;
-      } else if (p.hub && p.hub.hub_name) {
-        displayName += ` | ${p.hub.hub_name}`;
+      // Add Scheme information for better identification
+      if (p.scheme && p.scheme.scheme_name) {
+        displayName += ` | ${p.scheme.scheme_name}`;
       }
       
       return displayName;
     })];
     
-    // Columns 5-8: Hidden ID mappings (for lookup during import)
-    dataSheet.getColumn(5).values = ['District_IDs', ...lookups.districts.map(d => d.district_id)];
-    dataSheet.getColumn(6).values = ['Hub_IDs', ...lookups.hubs.map(h => h.hub_id)];
-    dataSheet.getColumn(7).values = ['OSC_IDs', ...lookups.components.map(c => c.component_id)];
-    dataSheet.getColumn(8).values = ['Post_IDs', ...lookups.posts.map(p => p.post_id)];
+    // Columns 4-6: Hidden ID mappings (for lookup during import)
+    dataSheet.getColumn(4).values = ['District_IDs', ...lookups.districts.map(d => d.district_id)];
+    dataSheet.getColumn(5).values = ['Scheme_IDs', ...lookups.schemes.map(s => s.scheme_id)];
+    dataSheet.getColumn(6).values = ['Post_IDs', ...lookups.posts.map(p => p.post_id)];
 
     // Helper function to build range
     const listRange = (colLetter, list) => {
@@ -104,8 +100,7 @@ async function generateTemplate(res) {
     // Header row
     const headers = [
       'District',
-      'Hub',
-      'OSC',
+      'Scheme',
       'Post',
       'Monthly Pay',
       'Start Date (DD/MM/YYYY)',
@@ -117,7 +112,7 @@ async function generateTemplate(res) {
     ];
 
     // Instructions row
-    ws.mergeCells('A1:K1');
+    ws.mergeCells('A1:J1');
     ws.getCell('A1').value = 'Instructions: Select values from dropdowns. Monthly Pay: Enter numeric value (e.g., 25000). Start Date, End Date & DOB format: DD/MM/YYYY. Gender: Male/Female/Other. One row per employee. IDs are hidden for security - just select names from dropdowns.';
     ws.getCell('A1').alignment = { wrapText: true };
     ws.getRow(1).height = 30;
@@ -130,15 +125,13 @@ async function generateTemplate(res) {
     // Apply dropdown validation for first 100 rows
     const maxRows = 100;
     const districtRange = listRange('A', lookups.districts);
-    const hubRange = listRange('B', lookups.hubs);
-    const oscRange = listRange('C', lookups.components);
-    const postRange = listRange('D', lookups.posts);
+    const schemeRange = listRange('B', lookups.schemes);
+    const postRange = listRange('C', lookups.posts);
 
     for (let i = 3; i < 3 + maxRows; i++) {
       ws.getCell(`A${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [districtRange] };
-      ws.getCell(`B${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [hubRange] };
-      ws.getCell(`C${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [oscRange] };
-      ws.getCell(`D${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [postRange] };
+      ws.getCell(`B${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [schemeRange] };
+      ws.getCell(`C${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [postRange] };
       
       // Gender dropdown (moved to column K)
       ws.getCell(`K${i}`).dataValidation = { 
@@ -151,8 +144,7 @@ async function generateTemplate(res) {
     // Column widths
     ws.columns = [
       { width: 25 }, // District
-      { width: 25 }, // Hub
-      { width: 25 }, // OSC
+      { width: 25 }, // Scheme
       { width: 35 }, // Post
       { width: 18 }, // Monthly Pay
       { width: 20 }, // Start Date
@@ -248,17 +240,16 @@ async function parseExcelFile(buffer) {
       };
 
       const employee = {
-        district_id: lookupIdByName(row.getCell(1).value, 1, 5), // Name from col 1, ID from col 5
-        hub_id: lookupIdByName(row.getCell(2).value, 2, 6), // Name from col 2, ID from col 6
-        component_id: lookupIdByName(row.getCell(3).value, 3, 7), // Name from col 3, ID from col 7
-        post_id: lookupIdByName(row.getCell(4).value, 4, 8), // Name from col 4, ID from col 8
-        employee_pay: row.getCell(5).value ? parseFloat(row.getCell(5).value) : null, // Monthly Pay
-        contract_start_date: row.getCell(6).value, // Start Date
-        contract_end_date: row.getCell(7).value, // End Date
-        full_name: row.getCell(8).value,
-        email: extractEmail(row.getCell(9)),
-        dob: row.getCell(10).value, // Date of Birth
-        gender: row.getCell(11).value // Gender
+        district_id: lookupIdByName(row.getCell(1).value, 1, 4), // Name from col 1, ID from col 4
+        scheme_id: lookupIdByName(row.getCell(2).value, 2, 5), // Name from col 2, ID from col 5
+        post_id: lookupIdByName(row.getCell(3).value, 3, 6), // Name from col 3, ID from col 6
+        employee_pay: row.getCell(4).value ? parseFloat(row.getCell(4).value) : null, // Monthly Pay
+        contract_start_date: row.getCell(5).value, // Start Date
+        contract_end_date: row.getCell(6).value, // End Date
+        full_name: row.getCell(7).value,
+        email: extractEmail(row.getCell(8)),
+        dob: row.getCell(9).value, // Date of Birth
+        gender: row.getCell(10).value // Gender
       };
 
       // Validate required fields
@@ -266,7 +257,7 @@ async function parseExcelFile(buffer) {
         const missingFields = [];
         if (!employee.district_id) missingFields.push('District (select from dropdown)');
         if (!employee.post_id) missingFields.push('Post (select from dropdown)');
-        if (!employee.hub_id && !employee.component_id) missingFields.push('Hub or OSC (select from dropdown)');
+        if (!employee.scheme_id) missingFields.push('Scheme (select from dropdown)');
         if (!employee.contract_start_date) missingFields.push('Start Date');
         if (!employee.full_name) missingFields.push('Full Name');
         if (!employee.email) missingFields.push('Email');
@@ -276,9 +267,9 @@ async function parseExcelFile(buffer) {
         throw ApiError.badRequest(`Row ${rowNum}: Missing or invalid fields: ${missingFields.join(', ')}. Please ensure all dropdown values are selected correctly.`);
       }
 
-      // Validate either hub_id or component_id is provided
-      if (!employee.hub_id && !employee.component_id) {
-        throw ApiError.badRequest(`Row ${rowNum}: Either Hub or OSC must be selected from dropdown`);
+      // Validate scheme_id is provided
+      if (!employee.scheme_id) {
+        throw ApiError.badRequest(`Row ${rowNum}: Scheme must be selected from dropdown`);
       }
 
       employees.push(employee);

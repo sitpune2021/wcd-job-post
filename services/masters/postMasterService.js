@@ -6,7 +6,7 @@
 // ============================================================================
 
 const db = require('../../models');
-const { PostMaster, Component, Hub, CategoryMaster, PostCategory, ExperienceDomain } = db;
+const { PostMaster, Scheme, CategoryMaster, PostCategory, ExperienceDomain } = db;
 const { Op } = require('sequelize');
 const logger = require('../../config/logger');
 const { paginatedQuery, isPaginatedResponse } = require('../../utils/pagination');
@@ -59,17 +59,12 @@ const transformPost = (language = 'en') => (p) => ({
   description: language === 'mr' && p.description_mr ? p.description_mr : p.description,
   description_en: p.description,
   description_mr: p.description_mr,
-  component_id: p.component_id,
-  component: p.component ? {
-    component_id: p.component.component_id,
-    component_code: p.component.component_code,
-    component_name: localizeField(p.component, 'component_name', language)
-  } : null,
-  hub_id: p.hub_id || null,
-  hub: p.hub ? {
-    hub_id: p.hub.hub_id,
-    hub_code: p.hub.hub_code,
-    hub_name: localizeField(p.hub, 'hub_name', language)
+  scheme_id: p.scheme_id,
+  scheme: p.scheme ? {
+    scheme_id: p.scheme.scheme_id,
+    scheme_code: p.scheme.scheme_code,
+    scheme_name: localizeField(p.scheme, 'scheme_name', language),
+    scheme_type: p.scheme.schemeType ? p.scheme.schemeType.scheme_code : null
   } : null,
   experience_domain_id: p.experience_domain_id || null,
   min_qualification: p.min_qualification,
@@ -234,28 +229,28 @@ const getPosts = async (query = {}) => {
       query,
       searchFields: ['post_name', 'post_name_mr', 'post_code', 'description'],
       filterConfig: {
-        component_id: { field: 'component_id', type: 'number' },
-        hub_id: { field: 'hub_id', type: 'number' },
+        scheme_id: { field: 'scheme_id', type: 'number' },
         district_specific: { field: 'district_specific', type: 'boolean' },
         district_id: { field: 'district_id', type: 'number' }
       },
       attributes: [
         'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
-        'component_id', 'hub_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
+        'scheme_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
         'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
         'is_active', 'created_at', 'updated_at', 'min_education_level_id', 'max_education_level_id', 'amount'
       ],
       include: [{
-        model: Component,
-        as: 'component',
-        required: false,
-        attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
-      }, {
-        model: Hub,
-        as: 'hub',
-        required: false,
-        attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
+        model: Scheme,
+        as: 'scheme',
+        required: true,
+        include: [{
+          model: db.SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+          required: true
+        }],
+        attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr']
       }, {
         model: ExperienceDomain,
         as: 'experienceDomain',
@@ -334,21 +329,22 @@ const getPostById = async (postId, language = 'en') => {
     const post = await PostMaster.findByPk(postId, {
       attributes: [
         'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
-        'component_id', 'hub_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
+        'scheme_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
         'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
         'is_active', 'created_at', 'updated_at', 'min_education_level_id', 'max_education_level_id', 'amount'
       ],
       include: [{
-        model: Component,
-        as: 'component',
-        required: false,
-        attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
-      }, {
-        model: Hub,
-        as: 'hub',
-        required: false,
-        attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
+        model: Scheme,
+        as: 'scheme',
+        required: true,
+        include: [{
+          model: db.SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+          required: true
+        }],
+        attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr']
       }, {
         model: ExperienceDomain,
         as: 'experienceDomain',
@@ -381,17 +377,12 @@ const getPostById = async (postId, language = 'en') => {
       description: language === 'mr' && post.description_mr ? post.description_mr : post.description,
       description_en: post.description,
       description_mr: post.description_mr,
-      component_id: post.component_id,
-      component: post.component ? {
-        component_id: post.component.component_id,
-        component_code: post.component.component_code,
-        component_name: localizeField(post.component, 'component_name', language)
-      } : null,
-      hub_id: post.hub_id || null,
-      hub: post.hub ? {
-        hub_id: post.hub.hub_id,
-        hub_code: post.hub.hub_code,
-        hub_name: localizeField(post.hub, 'hub_name', language)
+      scheme_id: post.scheme_id,
+      scheme: post.scheme ? {
+        scheme_id: post.scheme.scheme_id,
+        scheme_code: post.scheme.scheme_code,
+        scheme_name: localizeField(post.scheme, 'scheme_name', language),
+        scheme_type: post.scheme.schemeType ? post.scheme.schemeType.scheme_code : null
       } : null,
       experience_domain_id: post.experience_domain_id || null,
       min_qualification: post.min_qualification,
@@ -438,8 +429,7 @@ const createPost = async (data, userId) => {
   try {
     const minEducationLevelId = parseOptionalInt(data.min_education_level_id);
     const maxEducationLevelId = parseOptionalInt(data.max_education_level_id);
-    const componentId = parseOptionalInt(data.component_id);
-    const hubId = parseOptionalInt(data.hub_id);
+    const schemeId = parseOptionalInt(data.scheme_id);
     const experienceDomainId = parseOptionalInt(data.experience_domain_id);
     const districtId = parseOptionalInt(data.district_id);
 
@@ -464,8 +454,7 @@ const createPost = async (data, userId) => {
       post_name_mr: data.post_name_mr || null,
       description: data.description || null,
       description_mr: data.description_mr || null,
-      component_id: componentId,
-      hub_id: hubId,
+      scheme_id: schemeId,
       min_qualification: data.min_qualification || null,
       min_experience_months: parseOptionalInt(data.min_experience_months) || 0,
       min_education_level_id: minEducationLevelId,
@@ -524,7 +513,7 @@ const updatePost = async (postId, data, userId) => {
     const updateData = { updated_by: userId, updated_at: new Date() };
     const fields = [
       'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
-      'component_id', 'hub_id', 'min_qualification', 'min_experience_months', 'min_age', 'max_age',
+      'scheme_id', 'min_qualification', 'min_experience_months', 'min_age', 'max_age',
       'district_specific', 'required_domains', 'eligibility_criteria',
       'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only', 'is_active', 'amount'
     ];
@@ -532,7 +521,7 @@ const updatePost = async (postId, data, userId) => {
     fields.forEach(field => {
       if (data[field] === undefined) return;
 
-      if (['component_id', 'hub_id', 'min_experience_months', 'min_age', 'max_age', 'total_positions', 'filled_positions'].includes(field)) {
+      if (['scheme_id', 'min_experience_months', 'min_age', 'max_age', 'total_positions', 'filled_positions'].includes(field)) {
         updateData[field] = parseOptionalInt(data[field]);
         return;
       }

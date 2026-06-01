@@ -309,21 +309,27 @@ router.get('/document-types', async (req, res, next) => {
   }
 });
 
-// ==================== COMPONENTS & POSTS ====================
+// ==================== SCHEMES & POSTS ====================
 
 /**
- * @route GET /api/v1/public/components
- * @desc Get all components
+ * @route GET /api/v1/public/schemes
+ * @desc Get all schemes
  * @access Public
  */
-router.get('/components', async (req, res, next) => {
+router.get('/schemes', async (req, res, next) => {
   try {
-    const components = await db.Component.findAll({
+    const schemes = await db.Scheme.findAll({
       where: { is_active: true },
-      attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr', 'description'],
-      order: [['component_id', 'ASC']]
+      attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr', 'description'],
+      include: [{
+        model: db.SchemeType,
+        as: 'schemeType',
+        attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+        required: true
+      }],
+      order: [['scheme_id', 'ASC']]
     });
-    res.status(200).json(components);
+    res.status(200).json(schemes);
   } catch (error) {
     next(error);
   }
@@ -336,7 +342,7 @@ router.get('/components', async (req, res, next) => {
  */
 router.get('/posts', async (req, res, next) => {
   try {
-    const { component_id, district_id, search } = req.query;
+    const { scheme_id, district_id, search } = req.query;
     const page = parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
     const limit = parseInt(req.query.limit, 10) > 0 ? parseInt(req.query.limit, 10) : 20;
     const offset = (page - 1) * limit;
@@ -346,8 +352,8 @@ router.get('/posts', async (req, res, next) => {
       is_deleted: false
     };
     
-    if (component_id) {
-      where.component_id = component_id;
+    if (scheme_id) {
+      where.scheme_id = scheme_id;
     }
     if (district_id) {
       where.district_id = district_id;
@@ -360,10 +366,10 @@ router.get('/posts', async (req, res, next) => {
             { post_name_mr: { [Op.iLike]: `%${search}%` } },
             { '$district.district_name$': { [Op.iLike]: `%${search}%` } },
             { '$district.district_name_mr$': { [Op.iLike]: `%${search}%` } },
-            { '$component.component_name$': { [Op.iLike]: `%${search}%` } },
-            { '$component.component_name_mr$': { [Op.iLike]: `%${search}%` } },
-            { '$hub.hub_name$': { [Op.iLike]: `%${search}%` } },
-            { '$hub.hub_name_mr$': { [Op.iLike]: `%${search}%` } },
+            { '$scheme.scheme_name$': { [Op.iLike]: `%${search}%` } },
+            { '$scheme.scheme_name_mr$': { [Op.iLike]: `%${search}%` } },
+            { '$scheme.scheme_code$': { [Op.iLike]: `%${search}%` } },
+            { '$scheme.schemeType.scheme_code$': { [Op.iLike]: `%${search}%` } },
             { '$minEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
             { '$minEducationLevel.level_name_mr$': { [Op.iLike]: `%${search}%` } },
             { '$maxEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
@@ -383,20 +389,20 @@ router.get('/posts', async (req, res, next) => {
         'opening_date', 'closing_date', 'total_positions', 'filled_positions',
         'district_specific', 'is_state_level', 'is_active', 'created_at', 'updated_at',
         'min_education_level_id', 'max_education_level_id',
-        'component_id', 'district_id', 'hub_id'
+        'scheme_id', 'district_id'
       ],
       include: [
         { 
-          model: db.Component, 
-          as: 'component',
-          required: false,
-          attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          required: false,
-          attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
+          model: db.Scheme, 
+          as: 'scheme',
+          required: true,
+          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         },
         {
           model: db.DistrictMaster,
@@ -414,7 +420,7 @@ router.get('/posts', async (req, res, next) => {
           attributes: ['level_id', 'level_code', 'level_name', 'level_name_mr']
         }
       ],
-      order: [['component_id', 'ASC'], ['display_order', 'ASC'], ['post_id', 'ASC']],
+      order: [['scheme_id', 'ASC'], ['display_order', 'ASC'], ['post_id', 'ASC']],
       limit,
       offset
     });
@@ -432,16 +438,12 @@ router.get('/posts', async (req, res, next) => {
         description_mr: row.description_mr,
         female_only: row.female_only,
         male_only: row.male_only,
-        component_id: row.component?.component_id || row.component_id || null,
-        component_code: row.component?.component_code || null,
-        component_name: row.component?.component_name || null,
-        component_name_en: row.component?.component_name || null,
-        component_name_mr: row.component?.component_name_mr || null,
-        hub_id: row.hub?.hub_id || row.hub_id || null,
-        hub_code: row.hub?.hub_code || null,
-        hub_name: row.hub?.hub_name || null,
-        hub_name_en: row.hub?.hub_name || null,
-        hub_name_mr: row.hub?.hub_name_mr || null,
+        scheme_id: row.scheme?.scheme_id || row.scheme_id || null,
+        scheme_code: row.scheme?.scheme_code || null,
+        scheme_name: row.scheme?.scheme_name || null,
+        scheme_name_en: row.scheme?.scheme_name || null,
+        scheme_name_mr: row.scheme?.scheme_name_mr || null,
+        scheme_type: row.scheme?.schemeType?.scheme_code || null,
         district_id: row.district?.district_id || row.district_id || null,
         district_name: row.district?.district_name || null,
         district_name_en: row.district?.district_name || null,
@@ -467,8 +469,7 @@ router.get('/posts', async (req, res, next) => {
           (row.total_positions || 0) - (row.filled_positions || 0)
         ),
         district: row.district || null,
-        component: row.component || null,
-        hub: row.hub || null
+        scheme: row.scheme || null
       };
     });
 
@@ -504,16 +505,16 @@ router.get('/posts/:postId', async (req, res, next) => {
       },
       include: [
         { 
-          model: db.Component, 
-          as: 'component',
-          attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr'],
-          required: false
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr'],
-          required: false
+          model: db.Scheme, 
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }],
+          required: true
         },
         {
           model: db.DistrictMaster,
@@ -557,7 +558,7 @@ router.get('/posts/:postId', async (req, res, next) => {
       throw new ApiError(404, 'Post not found');
     }
 
-    const { component, hub, district, ...rest } = post.toJSON();
+    const { scheme, district, ...rest } = post.toJSON();
 
     const formatted = {
       ...rest,
@@ -567,15 +568,11 @@ router.get('/posts/:postId', async (req, res, next) => {
         0,
         (post.total_positions || 0) - (post.filled_positions || 0)
       ),
-      component_code: component?.component_code || null,
-      component_name: component?.component_name || null,
-      component_name_en: component?.component_name || null,
-      component_name_mr: component?.component_name_mr || null,
-      hub_id: hub?.hub_id || rest.hub_id || null,
-      hub_code: hub?.hub_code || null,
-      hub_name: hub?.hub_name || null,
-      hub_name_en: hub?.hub_name || null,
-      hub_name_mr: hub?.hub_name_mr || null,
+      scheme_code: scheme?.scheme_code || null,
+      scheme_name: scheme?.scheme_name || null,
+      scheme_name_en: scheme?.scheme_name || null,
+      scheme_name_mr: scheme?.scheme_name_mr || null,
+      scheme_type: scheme?.schemeType?.scheme_code || null,
       district_name: district?.district_name || null,
       district_name_en: district?.district_name || null,
       district_name_mr: district?.district_name_mr || null,
@@ -747,8 +744,8 @@ router.get('/stats', async (req, res, next) => {
       where: { is_deleted: false }
     });
 
-    // Count active, non-deleted OSC components
-    const componentCount = await db.Component.count({
+    // Count active, non-deleted schemes
+    const schemeCount = await db.Scheme.count({
       where: { is_active: true, is_deleted: false }
     });
 
@@ -756,19 +753,19 @@ router.get('/stats', async (req, res, next) => {
       total_districts: districtCount,
       total_posts: postCount,
       total_applicants: applicantCount,
-      total_osc: componentCount,
+      total_schemes: schemeCount,
       labels: {
         en: {
           districts: 'Districts',
           posts: 'Available Posts',
           applicants: 'Registered Applicants',
-          osc: 'OSCs'
+          schemes: 'Schemes'
         },
         mr: {
           districts: 'जिल्हे',
           posts: 'उपलब्ध पदे',
           applicants: 'नोंदणीकृत अर्जदार',
-          osc: 'ओएससी'
+          schemes: 'योजना'
         }
       }
     };

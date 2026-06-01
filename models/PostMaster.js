@@ -28,22 +28,14 @@ const PostMaster = sequelize.define('PostMaster', {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },
-  component_id: {
+  scheme_id: {
     type: DataTypes.INTEGER,
-    allowNull: true,
+    allowNull: false,
     references: {
-      model: 'components',
-      key: 'component_id'
-    }
-  },
-  hub_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: 'ms_hub_master',
-      key: 'hub_id'
+      model: 'ms_schemes',
+      key: 'scheme_id'
     },
-    comment: 'Linked hub for the post'
+    comment: 'Linked scheme for the post (required)'
   },
   amount: {
     type: DataTypes.DECIMAL(10, 2),

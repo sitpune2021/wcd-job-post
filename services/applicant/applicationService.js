@@ -22,8 +22,8 @@ const {
   PostMaster,
   DistrictMaster,
   TalukaMaster,
-  Component,
-  Hub,
+  Scheme,
+  SchemeType,
   EducationLevel,
   ExperienceDomain,
   SkillMaster,
@@ -52,7 +52,17 @@ const getEligiblePosts = async (applicantId) => {
         is_active: true,
         is_deleted: false
       },
-      include: [{ model: Component, as: 'component', required: false }],
+      include: [{ 
+        model: Scheme, 
+        as: 'scheme', 
+        required: true,
+        include: [{
+          model: SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+          required: true
+        }]
+      }],
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']]
     });
 
@@ -120,16 +130,16 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
         attributes: ['post_id', 'post_code', 'post_name', 'post_name_mr'],
         include: [
           {
-            model: Component,
-            as: 'component',
-            required: false,
-            attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr']
-          },
-          {
-            model: Hub,
-            as: 'hub',
-            required: false,
-            attributes: ['hub_id', 'hub_code', 'hub_name', 'hub_name_mr']
+            model: Scheme,
+            as: 'scheme',
+            required: true,
+            attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
+            include: [{
+              model: SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: true
+            }]
           }
         ]
       },
@@ -147,9 +157,9 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
         { '$post.post_name$': { [Op.iLike]: `%${q}%` } },
         { '$post.post_name_mr$': { [Op.iLike]: `%${q}%` } },
         { '$post.post_code$': { [Op.iLike]: `%${q}%` } },
-        { '$post.component.component_name$': { [Op.iLike]: `%${q}%` } },
-        { '$post.component.component_name_mr$': { [Op.iLike]: `%${q}%` } },
-        { '$post.component.component_code$': { [Op.iLike]: `%${q}%` } },
+        { '$post.scheme.scheme_name$': { [Op.iLike]: `%${q}%` } },
+        { '$post.scheme.scheme_name_mr$': { [Op.iLike]: `%${q}%` } },
+        { '$post.scheme.scheme_code$': { [Op.iLike]: `%${q}%` } },
         { '$district.district_name$': { [Op.iLike]: `%${q}%` } },
         { '$district.district_name_mr$': { [Op.iLike]: `%${q}%` } }
       ];
@@ -160,7 +170,7 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
           { application_id: qAsNumber },
           { post_id: qAsNumber },
           { district_id: qAsNumber },
-          { '$post.component.component_id$': qAsNumber }
+          { '$post.scheme.scheme_id$': qAsNumber }
         );
       }
 
@@ -294,12 +304,22 @@ const createApplication = async (applicantId, data, transaction = null) => {
 
     // Check if post exists and is active
     // const post = await PostMaster.findByPk(post_id, {
-    //   include: [{ model: Component, as: 'component', required: false }]
+    //   include: [{ model: Scheme, as: 'scheme', required: true }]
     // });
     // unscope just like canappltopost function
     const post = await PostMaster.unscoped().findOne({
       where: { post_id: post_id , is_deleted: false },
-      include: [{ model: Component, as: 'component', required: false }]
+      include: [{ 
+        model: Scheme, 
+        as: 'scheme', 
+        required: true,
+        include: [{
+          model: SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+          required: true
+        }]
+      }]
     });
 
     if (!post || !post.is_active) {
@@ -382,8 +402,17 @@ const createApplication = async (applicantId, data, transaction = null) => {
       include: [
         {
           model: PostMaster, as: 'post', include: [
-            { model: Component, as: 'component', required: false },
-            { model: Hub, as: 'hub', required: false }
+            { 
+              model: Scheme, 
+              as: 'scheme', 
+              required: true,
+              include: [{
+                model: SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: true
+              }]
+            }
           ]
         },
         { model: DistrictMaster, as: 'district' }
@@ -542,8 +571,17 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
       include: [
         {
           model: PostMaster, as: 'post', include: [
-            { model: Component, as: 'component', required: false },
-            { model: Hub, as: 'hub', required: false }
+            { 
+              model: Scheme, 
+              as: 'scheme', 
+              required: true,
+              include: [{
+                model: SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: true
+              }]
+            }
           ]
         },
         { model: DistrictMaster, as: 'district' },
@@ -584,8 +622,17 @@ const getApplications = async (applicantId) => {
       include: [
         {
           model: PostMaster, as: 'post', include: [
-            { model: Component, as: 'component', required: false },
-            { model: Hub, as: 'hub', required: false }
+            { 
+              model: Scheme, 
+              as: 'scheme', 
+              required: true,
+              include: [{
+                model: SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: true
+              }]
+            }
           ]
         },
         { model: DistrictMaster, as: 'district' },
@@ -666,8 +713,17 @@ const getApplicationById = async (applicantId, applicationId) => {
       include: [
         {
           model: PostMaster, as: 'post', include: [
-            { model: Component, as: 'component', required: false },
-            { model: Hub, as: 'hub', required: false }
+            { 
+              model: Scheme, 
+              as: 'scheme', 
+              required: true,
+              include: [{
+                model: SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: true
+              }]
+            }
           ]
         },
         { model: DistrictMaster, as: 'district' },

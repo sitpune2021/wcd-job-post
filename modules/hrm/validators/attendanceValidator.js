@@ -12,15 +12,19 @@ const markAttendance = Joi.object({
 const attendanceQuery = Joi.object({
   month: Joi.number().integer().min(1).max(12),
   year: Joi.number().integer().min(2020).max(2100),
+  yearly: Joi.boolean(),
   page: Joi.number().integer().min(1),
   limit: Joi.number().integer().min(1).max(100),
   employee_id: Joi.number().integer().min(1),
   district_id: Joi.number().integer().min(1),
+  scheme_type_id: Joi.number().integer().min(1),
+  scheme_id: Joi.number().integer().min(1),
+  filter_type: Joi.string().valid('all', 'osc_only', 'hub_only').default('all'),
   status: Joi.string().valid('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY'),
   from_date: Joi.date().iso(),
   to_date: Joi.date().iso().min(Joi.ref('from_date')),
-  search: Joi.string().max(100).allow('')
-});
+  search: Joi.string().max(100).allow(''),
+  }).xor('month', 'from_date'); // Either month/year OR date range, not both
 
 // Admin attendance marking schema
 const markAttendanceByAdmin = Joi.object({

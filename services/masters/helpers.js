@@ -2,7 +2,7 @@
 // MASTER SERVICE HELPERS
 // ============================================================================
 // Purpose: Shared utility functions for all master services
-// Used by: districtService, talukaService, componentService, etc.
+// Used by: districtService, talukaService, schemeService, etc.
 // ============================================================================
 
 /**

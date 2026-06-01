@@ -47,23 +47,14 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
       key: 'district_id'
     }
   },
-  component_id: {
+  scheme_id: {
     type: DataTypes.INTEGER,
-    allowNull: true,
+    allowNull: false,
     references: {
-      model: 'ms_components',
-      key: 'component_id'
+      model: 'ms_schemes',
+      key: 'scheme_id'
     },
-    comment: 'OSC assignment'
-  },
-  hub_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: 'ms_hub_master',
-      key: 'hub_id'
-    },
-    comment: 'Hub assignment'
+    comment: 'Scheme assignment (required)'
   },
   contract_start_date: {
     type: DataTypes.DATEONLY,

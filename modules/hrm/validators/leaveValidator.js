@@ -20,6 +20,11 @@ const leaveAction = Joi.object({
     is: 'REJECTED',
     then: Joi.required(),
     otherwise: Joi.allow('', null)
+  }),
+  is_paid: Joi.boolean().when('status', {
+    is: 'APPROVED',
+    then: Joi.required().messages({ 'any.required': 'Please specify if this leave is paid or unpaid' }),
+    otherwise: Joi.optional()
   })
 });
 
@@ -29,6 +34,8 @@ const leaveQuery = Joi.object({
   year: Joi.number().integer().min(2020).max(2100),
   employee_id: Joi.number().integer().min(1),
   district_id: Joi.number().integer().min(1),
+  scheme_type_id: Joi.number().integer().min(1),
+  scheme_id: Joi.number().integer().min(1),
   page: Joi.number().integer().min(1),
   limit: Joi.number().integer().min(1).max(100),
   search: Joi.string().trim().max(100)

@@ -71,6 +71,12 @@ const LeaveApplication = sequelize.define('HrmLeaveApplication', {
     type: DataTypes.TEXT,
     allowNull: true
   },
+  is_paid: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: true,
+    comment: 'Whether this leave is paid (deducted from balance) or unpaid. Set by admin during approval.'
+  },
   is_deleted: {
     type: DataTypes.BOOLEAN,
     defaultValue: false

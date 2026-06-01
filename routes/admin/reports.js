@@ -24,7 +24,7 @@ router.use(authenticate);
 router.get('/post-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_POST_WISE'), async (req, res, next) => {
   try {
     const rows = await reportsService.getPostWiseReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
     });
@@ -126,7 +126,7 @@ router.delete('/post-selected/:postId/allotment-upload', requirePermission('repo
 router.get('/post-selected', requirePermission('reports.view'), auditLog('VIEW_REPORT_POST_SELECTED'), async (req, res, next) => {
   try {
     const rows = await reportsService.getPostSelectedCandidatesReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
     });
@@ -340,7 +340,7 @@ router.get('/post-wise/export', requirePermission('reports.view'), auditLog('EXP
     }
 
     const rows = await reportsService.getPostWiseReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
     });
@@ -377,7 +377,7 @@ router.post('/post-wise/export', requirePermission('reports.view'), auditLog('EX
     }
 
     const rows = await reportsService.getPostWiseReport({
-      component_id: req.body?.component_id ?? req.query.component_id,
+      scheme_id: req.body?.scheme_id ?? req.query.scheme_id,
       district_id: req.body?.district_id ?? req.query.district_id,
       post_id: req.body?.post_id ?? req.query.post_id
     });
@@ -412,7 +412,7 @@ router.post('/post-wise/export', requirePermission('reports.view'), auditLog('EX
 router.get('/district-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_DISTRICT_WISE'), async (req, res, next) => {
   try {
     const rows = await reportsService.getDistrictWiseReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
     return ApiResponse.success(res, { rows, total: rows.length }, 'District wise report generated successfully');
@@ -432,7 +432,7 @@ router.get('/district-wise/export', requirePermission('reports.view'), auditLog(
     }
 
     const rows = await reportsService.getDistrictWiseReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
 
@@ -455,100 +455,55 @@ router.get('/district-wise/export', requirePermission('reports.view'), auditLog(
 });
 
 /**
- * @route GET /api/admin/reports/component-wise
+ * @route GET /api/admin/reports/scheme-wise
  */
-router.get('/component-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_COMPONENT_WISE'), async (req, res, next) => {
+router.get('/scheme-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_SCHEME_WISE'), async (req, res, next) => {
   try {
-    const rows = await reportsService.getComponentWiseReport({
-      component_id: req.query.component_id,
+    const rows = await reportsService.getSchemeWiseReport({
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
-    return ApiResponse.success(res, { rows, total: rows.length }, 'Component wise report generated successfully');
+    return ApiResponse.success(res, { rows, total: rows.length }, 'Scheme wise report generated successfully');
   } catch (error) {
     next(error);
   }
 });
 
 /**
- * @route GET /api/admin/reports/component-wise/export
+ * @route GET /api/admin/reports/scheme-wise/export
  */
-router.get('/component-wise/export', requirePermission('reports.view'), auditLog('EXPORT_REPORT_COMPONENT_WISE'), async (req, res, next) => {
+router.get('/scheme-wise/export', requirePermission('reports.view'), auditLog('EXPORT_REPORT_SCHEME_WISE'), async (req, res, next) => {
   try {
     const format = String(req.query.format || '').toLowerCase();
     if (!format || !['csv', 'pdf', 'xlsx'].includes(format)) {
       throw new ApiError(400, 'Invalid export format.');
     }
 
-    const rows = await reportsService.getComponentWiseReport({
-      component_id: req.query.component_id,
+    const rows = await reportsService.getSchemeWiseReport({
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
 
     const columns = [
       { key: 'sr_no', header: 'Sr No.', width: 10, value: (_r, idx) => idx + 1 },
-      { key: 'component_name', header: 'Component Name', width: 40 },
+      { key: 'scheme_code', header: 'Scheme Code', width: 20 },
+      { key: 'scheme_name', header: 'Scheme Name', width: 40 },
+      { key: 'scheme_type_code', header: 'Scheme Type', width: 15 },
       { key: 'application_count', header: 'Applications', width: 20 },
       { key: 'selected_count', header: 'Selected', width: 20 }
     ];
 
-    const filename = sanitizeFileName('component_wise_report');
+    const filename = sanitizeFileName('scheme_wise_report');
     if (format === 'csv') return await sendCsvFromRows(res, filename, columns, rows);
     if (format === 'xlsx') return await sendXlsxFromRows(res, filename, columns, rows);
 
-    const html = buildSimpleReportHtml('Component Wise Report', columns, rows);
+    const html = buildSimpleReportHtml('Scheme Wise Report', columns, rows);
     return await sendPdfFromHtml(res, filename, html);
   } catch (error) {
     next(error);
   }
 });
 
-/**
- * @route GET /api/admin/reports/hub-wise
- */
-router.get('/hub-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_HUB_WISE'), async (req, res, next) => {
-  try {
-    const rows = await reportsService.getHubWiseReport({
-      hub_id: req.query.hub_id,
-      district_id: req.query.district_id
-    });
-    return ApiResponse.success(res, { rows, total: rows.length }, 'Hub wise report generated successfully');
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * @route GET /api/admin/reports/hub-wise/export
- */
-router.get('/hub-wise/export', requirePermission('reports.view'), auditLog('EXPORT_REPORT_HUB_WISE'), async (req, res, next) => {
-  try {
-    const format = String(req.query.format || '').toLowerCase();
-    if (!format || !['csv', 'pdf', 'xlsx'].includes(format)) {
-      throw new ApiError(400, 'Invalid export format.');
-    }
-
-    const rows = await reportsService.getHubWiseReport({
-      hub_id: req.query.hub_id,
-      district_id: req.query.district_id
-    });
-
-    const columns = [
-      { key: 'sr_no', header: 'Sr No.', width: 10, value: (_r, idx) => idx + 1 },
-      { key: 'hub_name', header: 'Hub Name', width: 40 },
-      { key: 'application_count', header: 'Applications', width: 20 },
-      { key: 'selected_count', header: 'Selected', width: 20 }
-    ];
-
-    const filename = sanitizeFileName('hub_wise_report');
-    if (format === 'csv') return await sendCsvFromRows(res, filename, columns, rows);
-    if (format === 'xlsx') return await sendXlsxFromRows(res, filename, columns, rows);
-
-    const html = buildSimpleReportHtml('Hub Wise Report', columns, rows);
-    return await sendPdfFromHtml(res, filename, html);
-  } catch (error) {
-    next(error);
-  }
-});
 
 /**
  * @route GET /api/admin/reports/post-selected/export
@@ -563,7 +518,7 @@ router.get('/post-selected/export', requirePermission('reports.view'), auditLog(
     }
 
     const rows = await reportsService.getPostSelectedCandidatesReport({
-      component_id: req.query.component_id,
+      scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
     });
@@ -572,16 +527,16 @@ router.get('/post-selected/export', requirePermission('reports.view'), auditLog(
       const list = Array.isArray(r.selected_candidates) ? r.selected_candidates : [];
       if (list.length === 0) {
         return [{
-          component_id: r.component_id,
-          component_name: r.component_name,
+          scheme_id: r.scheme_id,
+          scheme_name: r.scheme_name,
           post_code: r.post_code,
           post_name: r.post_name,
           candidate_name: ''
         }];
       }
       return list.map((name) => ({
-        component_id: r.component_id,
-        component_name: r.component_name,
+        scheme_id: r.scheme_id,
+        scheme_name: r.scheme_name,
         post_code: r.post_code,
         post_name: r.post_name,
         candidate_name: name
@@ -591,11 +546,11 @@ router.get('/post-selected/export', requirePermission('reports.view'), auditLog(
     const columns = [
       { key: 'sr_no', header: 'Sr No.', width: 10, value: (_r, idx) => idx + 1 },
       {
-        key: 'component',
-        header: 'Component',
+        key: 'scheme',
+        header: 'Scheme',
         width: 35,
         value: (r) => {
-          const name = r.component_name || '';
+          const name = r.scheme_name || '';
           return name;
         }
       },
@@ -628,7 +583,7 @@ router.post('/post-selected/export', requirePermission('reports.view'), auditLog
     }
 
     const rows = await reportsService.getPostSelectedCandidatesReport({
-      component_id: req.body?.component_id ?? req.query.component_id,
+      scheme_id: req.body?.scheme_id ?? req.query.scheme_id,
       district_id: req.body?.district_id ?? req.query.district_id,
       post_id: req.body?.post_id ?? req.query.post_id
     });
@@ -637,16 +592,16 @@ router.post('/post-selected/export', requirePermission('reports.view'), auditLog
       const list = Array.isArray(r.selected_candidates) ? r.selected_candidates : [];
       if (list.length === 0) {
         return [{
-          component_id: r.component_id,
-          component_name: r.component_name,
+          scheme_id: r.scheme_id,
+          scheme_name: r.scheme_name,
           post_code: r.post_code,
           post_name: r.post_name,
           candidate_name: ''
         }];
       }
       return list.map((name) => ({
-        component_id: r.component_id,
-        component_name: r.component_name,
+        scheme_id: r.scheme_id,
+        scheme_name: r.scheme_name,
         post_code: r.post_code,
         post_name: r.post_name,
         candidate_name: name
@@ -656,11 +611,11 @@ router.post('/post-selected/export', requirePermission('reports.view'), auditLog
     const columns = [
       { key: 'sr_no', header: 'Sr No.', width: 10, value: (_r, idx) => idx + 1 },
       {
-        key: 'component',
-        header: 'Component',
+        key: 'scheme',
+        header: 'Scheme',
         width: 35,
         value: (r) => {
-          const name = r.component_name || '';
+          const name = r.scheme_name || '';
           return name;
         }
       },

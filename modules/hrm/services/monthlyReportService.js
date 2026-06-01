@@ -185,7 +185,7 @@ const getReportsForReview = async (adminUser, query) => {
 const reviewReport = async (adminUser, reportId, data) => {
   const report = await MonthlyReport.findOne({
     where: { report_id: reportId, is_deleted: false },
-    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'component_id', 'hub_id'] }]
+    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'scheme_id'] }]
   });
   if (!report) throw new ApiError(404, 'Report not found.');
   if (report.status !== 'SUBMITTED') throw new ApiError(400, 'Only submitted reports can be reviewed.');

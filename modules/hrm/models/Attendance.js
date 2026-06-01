@@ -151,6 +151,27 @@ const Attendance = sequelize.define('HrmAttendance', {
     type: DataTypes.STRING(20),
     allowNull: true,
     comment: 'Final attendance status after approval'
+  },
+  previous_status: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    comment: 'Previous attendance status before admin override'
+  },
+  status_changed_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'ms_admin_users', key: 'admin_id' },
+    comment: 'Admin who changed the attendance status'
+  },
+  status_changed_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: 'When the attendance status was changed by admin'
+  },
+  status_change_reason: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: 'Mandatory reason/remark for admin status override'
   }
 }, {
   tableName: 'ms_hrm_attendance',

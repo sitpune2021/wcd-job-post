@@ -827,10 +827,16 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
         post_id,
         is_deleted: false
       },
-      attributes: ['post_id', 'post_name', 'district_id', 'female_only', 'male_only', 'component_id', 'hub_id', 'is_active'],
+      attributes: ['post_id', 'post_name', 'district_id', 'female_only', 'male_only', 'scheme_id', 'is_active'],
       include: [
-        { model: db.Component, as: 'component', required: false, attributes: ['component_id'] },
-        { model: db.Hub, as: 'hub', required: false, attributes: ['hub_id'] }
+        { model: db.Scheme, as: 'scheme', required: true, attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
+        }
       ]
     });
     
@@ -1327,7 +1333,7 @@ router.get('/applications', auditLog('VIEW_APPLICATIONS'), async (req, res, next
  * @route GET /api/v1/applicant/applications/status
  * @desc Get applicant applications with current status (search/filter/pagination)
  * @access Private (Applicant)
- * @query page, limit, q/search, status (comma-separated), post_id, district_id, component_id, sort_by, sort_dir
+ * @query page, limit, q/search, status (comma-separated), post_id, district_id, scheme_id, sort_by, sort_dir
  */
 router.get('/applications/status', auditLog('VIEW_APPLICATION_STATUS_LIST'), async (req, res, next) => {
   try {

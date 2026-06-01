@@ -8,25 +8,26 @@
 
 const districtService = require('./districtService');
 const talukaService = require('./talukaService');
-const componentService = require('./componentService');
 const departmentService = require('./departmentService');
 const categoryService = require('./categoryService');
 const educationLevelService = require('./educationLevelService');
+const schemeService = require('./schemeService');
+const schemeTypeService = require('./schemeTypeService');
 const documentTypeService = require('./documentTypeService');
 const applicationStatusService = require('./applicationStatusService');
 const postMasterService = require('./postMasterService');
 const experienceDomainService = require('./experienceDomainService');
 const skillService = require('./skillService');
-const schemeTypeService = require('./schemeTypeService');
 
 // Re-export individual services for granular imports
 module.exports = {
   districtService,
   talukaService,
-  componentService,
   departmentService,
   categoryService,
   educationLevelService,
+  schemeService,
+  schemeTypeService,
   documentTypeService,
   applicationStatusService,
   postMasterService,
@@ -50,13 +51,22 @@ module.exports = {
   deleteTaluka: talukaService.deleteTaluka,
   getAllTalukas: talukaService.getAllTalukas,
   
-  // Components
-  getComponents: componentService.getComponents,
-  getComponentById: componentService.getComponentById,
-  createComponent: componentService.createComponent,
-  updateComponent: componentService.updateComponent,
-  deleteComponent: componentService.deleteComponent,
-  getAllComponents: componentService.getAllComponents,
+  // Schemes
+  getSchemes: schemeService.getAllSchemes,
+  getSchemeById: schemeService.getSchemeById,
+  createScheme: schemeService.createScheme,
+  updateScheme: schemeService.updateScheme,
+  deleteScheme: schemeService.deleteScheme,
+  getSchemesByType: schemeService.getSchemesByType,
+  getSchemeOptions: schemeService.getSchemeOptions,
+  validateSchemeCode: schemeService.validateSchemeCode,
+  
+  // Scheme Types
+  getSchemeTypes: schemeTypeService.getAllSchemeTypes,
+  getSchemeTypeById: schemeTypeService.getSchemeTypeById,
+  createSchemeType: schemeTypeService.createSchemeType,
+  updateSchemeType: schemeTypeService.updateSchemeType,
+  deleteSchemeType: schemeTypeService.deleteSchemeType,
   
   // Departments
   getDepartments: departmentService.getDepartments,

@@ -140,7 +140,7 @@ router.get('/my', async (req, res, next) => {
   }
 });
 
-// Export attendance logs as Excel with embedded images
+// Export attendance logs as PDF
 router.get('/my/export', async (req, res, next) => {
   try {
     const { error, value } = attendanceQuerySchema.validate(req.query);
@@ -154,71 +154,203 @@ router.get('/my/export', async (req, res, next) => {
       || [];
     const records = Array.isArray(raw) ? raw : [];
     
+    // Get employee details for PDF header
+    const employeeService = require('../../services/employeeService');
+    const employee = await employeeService.getEmployeeByApplicantId(req.user.applicant_id);
     
-    const ExcelJS = require('exceljs');
-    const fs = require('fs').promises;
-    const path = require('path');
-    const { sanitizeFileName } = require('../../../../utils/reportExport');
-
-    // Create workbook and worksheet
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Attendance Report');
-
-    // Add headers with styling
-    const headerRow = sheet.addRow(['Date', 'Check-In Time', 'Check-Out Time', 'Status', 'Location', 'IP Address', 'Device']);
-    headerRow.eachCell((cell, colNumber) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF366092' } };
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    // Get applicant personal details for name
+    const ApplicantMaster = require('../../../../models/ApplicantMaster');
+    const applicant = await ApplicantMaster.findOne({
+      where: { applicant_id: req.user.applicant_id },
+      include: [{
+        model: require('../../../../models/ApplicantPersonal'),
+        as: 'personal',
+        attributes: ['full_name'],
+        required: false
+      }]
     });
+    
+    // Enhance user object with employee details
+    const userWithEmployee = {
+      ...req.user,
+      employee_code: employee?.employee_code || 'N/A',
+      name: applicant?.personal?.full_name || employee?.applicant?.personal?.full_name || req.user.name || 'N/A',
+      email: req.user.email || 'N/A'
+    };
+    
+    const htmlToPdf = require('html-pdf-node');
+    
+    // Generate HTML for PDF
+    const html = generateMyAttendancePDF(records, value, userWithEmployee);
+    
+    // PDF options
+    const pdfOptions = {
+      format: 'A4',
+      printBackground: true,
+      margin: { 
+        top: '15mm', 
+        right: '15mm', 
+        bottom: '15mm', 
+        left: '15mm' 
+      },
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    };
 
-    // Set column widths
-    sheet.columns = [
-      { width: 12 }, { width: 12 }, { width: 12 }, { width: 10 },
-      { width: 25 }, { width: 15 }, { width: 10 }
-    ];
-
-    // Add data rows
-    for (let i = 0; i < records.length; i++) {
-      const record = records[i];
-      const location = (record.latitude && record.longitude) 
-        ? `${parseFloat(record.latitude).toFixed(4)} N, ${parseFloat(record.longitude).toFixed(4)} E` 
-        : '';
-      
-      // Add row data
-      const row = sheet.addRow([
-        record.attendance_date || '',
-        record.check_in_time || '',
-        record.check_out_time || '',
-        record.status || '',
-        location,
-        record.ip_address || '',
-        record.device_type || ''
-      ]);
-
-      // Style data rows
-      row.eachCell((cell, colNumber) => {
-        cell.alignment = { vertical: 'middle' };
-        if (i % 2 === 0) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F9FA' } };
-        }
-      });
-    }
+    const pdfBuffer = await htmlToPdf.generatePdf(
+      { content: html },
+      pdfOptions
+    );
 
     // Set response headers
     const month = value.month || (new Date().getMonth() + 1);
     const year = value.year || new Date().getFullYear();
-    const filename = sanitizeFileName(`attendance_${year}_${String(month).padStart(2, '0')}`);
+    const filename = `attendance_${year}_${String(month).padStart(2, '0')}.pdf`;
     
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
     
-    await workbook.xlsx.write(res);
-    res.end();
+    res.send(pdfBuffer);
   } catch (err) {
     next(err);
   }
 });
+
+// Helper function to generate PDF HTML for my attendance
+const generateMyAttendancePDF = (records, filters, user) => {
+  const { month, year } = filters;
+  
+  const escapeHtml = (value) => {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const formatDateForPDF = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString('en-IN', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric',
+      timeZone: 'Asia/Kolkata'
+    });
+  };
+
+  const calculateWorkHours = (checkInTime, checkOutTime) => {
+    if (!checkInTime || !checkOutTime) return '--';
+    
+    try {
+      const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
+      const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
+      
+      const baseDate = new Date();
+      const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
+      const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
+      
+      const diffMs = checkOut - checkIn;
+      
+      if (diffMs <= 0) return '--';
+      
+      const hours = diffMs / (1000 * 60 * 60);
+      return hours.toFixed(2);
+    } catch (error) {
+      return '--';
+    }
+  };
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthName = monthNames[month - 1];
+  
+  const generatedOn = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  let html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>My Attendance Report</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .title { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+        .subtitle { font-size: 12px; color: #666; margin-bottom: 5px; }
+        .employee-info { font-size: 10px; color: #888; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 10px; }
+        th { background-color: #f5f5f5; font-weight: bold; }
+        .footer { text-align: center; font-size: 10px; color: #888; margin-top: 30px; }
+        .no-records { text-align: center; color: #666; margin: 50px 0; }
+        .date-col { width: 80px; }
+        .time-col { width: 70px; }
+        .status-col { width: 60px; }
+        .hours-col { width: 50px; }
+        .location-col { width: 120px; }
+        .device-col { width: 80px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="title">My Attendance Report</div>
+        <div class="subtitle">Month: ${monthName} ${year}</div>
+        <div class="employee-info">
+          Employee: ${escapeHtml(user.name || 'N/A')} (${escapeHtml(user.email || 'N/A')}) | Employee Code: ${escapeHtml(user.employee_code || 'N/A')} | Generated on: ${generatedOn}
+        </div>
+      </div>
+      
+      ${records.length === 0 ? 
+        '<div class="no-records">No attendance records found for the selected month.</div>' :
+        `
+        <table>
+          <thead>
+            <tr>
+              <th class="date-col">Date</th>
+              <th class="time-col">Check-In</th>
+              <th class="time-col">Check-Out</th>
+              <th class="status-col">Status</th>
+              <th class="hours-col">Hours</th>
+              <th class="location-col">Location</th>
+              <th class="device-col">Device</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${records.map(record => {
+              const location = (record.latitude && record.longitude) 
+                ? `${parseFloat(record.latitude).toFixed(4)}, ${parseFloat(record.longitude).toFixed(4)}` 
+                : '--';
+              
+              return `
+              <tr>
+                <td class="date-col">${escapeHtml(formatDateForPDF(record.attendance_date || ''))}</td>
+                <td class="time-col">${escapeHtml(record.check_in_time || '')}</td>
+                <td class="time-col">${escapeHtml(record.check_out_time || '')}</td>
+                <td class="status-col">${escapeHtml(record.status || '')}</td>
+                <td class="hours-col">${escapeHtml(calculateWorkHours(record.check_in_time, record.check_out_time))}</td>
+                <td class="location-col"><small>${escapeHtml(location)}</small></td>
+                <td class="device-col">${escapeHtml(record.device_type || '--')}</td>
+              </tr>
+            `;
+            }).join('')}
+          </tbody>
+        </table>
+        `
+      }
+      
+      <div class="footer">
+        Total Records: ${records.length} | Generated on: ${generatedOn}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return html;
+};
 
 // Simple check-out endpoint using existing attendance structure
 router.post('/check-out', attendanceUpload, async (req, res, next) => {

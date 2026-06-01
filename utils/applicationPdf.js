@@ -255,7 +255,7 @@ const buildApplicationPdfHtml = (req, application, options = {}) => {
 
   const postName = post?.post_name || '-';
   const postCode = post?.post_code || '-';
-  const componentName = post?.component?.component_name || post?.component?.component_name_en || '-';
+  const componentName = post?.scheme?.scheme_name || post?.scheme || '-';
   const openingDate = post?.opening_date ? fmtDate(post.opening_date) : '-';
   const closingDate = post?.closing_date ? fmtDate(post.closing_date) : '-';
 

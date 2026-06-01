@@ -50,23 +50,14 @@ const AdminUser = sequelize.define('AdminUser', {
     },
     comment: 'District assignment for district-level admins'
   },
-  component_id: {
+  scheme_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: 'component',
-      key: 'component_id'
+      model: 'ms_schemes',
+      key: 'scheme_id'
     },
-    comment: 'OSC/Component assignment for OSC-level admins (manages posts under this OSC)'
-  },
-  hub_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: 'hub_master',
-      key: 'hub_id'
-    },
-    comment: 'Hub assignment for Hub-level admins (manages posts under this Hub, similar to OSC)'
+    comment: 'Scheme assignment for scheme-level admins'
   },
   review_batch_start: {
     type: DataTypes.INTEGER,

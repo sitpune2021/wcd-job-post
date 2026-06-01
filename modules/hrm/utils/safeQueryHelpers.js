@@ -154,7 +154,7 @@ const safeEmployeeWithLocation = async (employeeId) => {
   return safeQuery(async () => {
     let employee = await EmployeeMaster.findOne({
       where: { employee_id: employeeId },
-      attributes: ['employee_id', 'employee_code', 'component_id', 'hub_id', 'district_id']
+      attributes: ['employee_id', 'employee_code', 'scheme_id', 'district_id']
     });
     
     if (!employee) {
@@ -163,29 +163,22 @@ const safeEmployeeWithLocation = async (employeeId) => {
     
     const employeeData = employee.toJSON();
     
-    // Try to fetch component separately
-    if (employeeData.component_id) {
+    // Try to fetch scheme separately
+    if (employeeData.scheme_id) {
       try {
-        employeeData.component = await db.Component.findOne({
-          where: { component_id: employeeData.component_id },
-          attributes: ['component_id', 'component_name', 'latitude', 'longitude', 'geofence_radius_meters']
+        employeeData.scheme = await db.Scheme.findOne({
+          where: { scheme_id: employeeData.scheme_id },
+          attributes: ['scheme_id', 'scheme_name', 'latitude', 'longitude', 'geofence_radius_meters', 'scheme_type_id'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         });
       } catch (error) {
-        logger.warn('Component fetch failed:', error.message);
-        employeeData.component = null;
-      }
-    }
-    
-    // Try to fetch hub separately
-    if (employeeData.hub_id) {
-      try {
-        employeeData.hub = await db.Hub.findOne({
-          where: { hub_id: employeeData.hub_id },
-          attributes: ['hub_id', 'hub_name', 'latitude', 'longitude', 'geofence_radius_meters']
-        });
-      } catch (error) {
-        logger.warn('Hub fetch failed:', error.message);
-        employeeData.hub = null;
+        logger.warn('Scheme fetch failed:', error.message);
+        employeeData.scheme = null;
       }
     }
     

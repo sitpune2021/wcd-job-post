@@ -33,8 +33,7 @@ router.get('/applicants/excel-imported',
   try {
     const filters = {
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
-      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
-      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      scheme_id: req.query.scheme_id ? parseInt(req.query.scheme_id) : undefined,
       onboarding_type: 'excel_import', // Filter for Excel imports only
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 50
@@ -83,9 +82,9 @@ router.post('/create-existing',
       }
     }
 
-    // Validate either component_id or hub_id is provided
-    if (!employeeData.component_id && !employeeData.hub_id) {
-      throw ApiError.badRequest('Either OSC or HUB must be provided');
+    // Validate scheme_id is provided
+    if (!employeeData.scheme_id) {
+      throw ApiError.badRequest('Scheme must be provided');
     }
 
     // Validate password if provided
@@ -192,8 +191,8 @@ router.get('/pending-applications',
   try {
     const filters = {
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
-      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
-      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      scheme_id: req.query.scheme_id ? parseInt(req.query.scheme_id) : undefined,
+      scheme_type_id: req.query.scheme_type_id ? parseInt(req.query.scheme_type_id) : undefined,
       search: req.query.search || undefined,
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 50

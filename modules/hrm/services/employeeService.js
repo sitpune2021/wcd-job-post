@@ -42,7 +42,7 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       is_deleted: false
     };
 
-    // Apply HRM hierarchy scope (district/component/hub filtering)
+    // Apply HRM hierarchy scope (district/scheme filtering)
     if (hrmScope) {
       where = buildEmployeeWhereClause(where, hrmScope);
     }
@@ -52,12 +52,12 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       where.district_id = filters.district_id;
     }
 
-    if (filters.component_id) {
-      where.component_id = filters.component_id;
+    if (filters.scheme_id) {
+      where.scheme_id = filters.scheme_id;
     }
 
-    if (filters.hub_id) {
-      where.hub_id = filters.hub_id;
+    if (filters.scheme_type_id) {
+      where['$scheme.scheme_type_id$'] = filters.scheme_type_id;
     }
 
     if (filters.post_id) {
@@ -76,29 +76,25 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       where.is_active = filters.is_active;
     }
 
-    // Handle only_hub and only_osc filters
+    // Handle only_hub and only_osc filters (now scheme_type based)
     if (filters.only_hub) {
-      // When only_hub is true, exclude OSCs (component_id must be null)
-      where.component_id = null;
-      // If specific hub_id provided, filter by it
-      if (filters.hub_id) {
-        where.hub_id = filters.hub_id;
+      // When only_hub is true, filter by scheme_type HUB
+      where['$scheme.schemeType.scheme_code$'] = 'HUB';
+      // If specific scheme_id provided, filter by it
+      if (filters.scheme_id) {
+        where.scheme_id = filters.scheme_id;
       }
     } else if (filters.only_osc) {
-      // When only_osc is true, exclude hubs (hub_id must be null)
-      where.hub_id = null;
-      // If specific component_id provided, filter by it
-      if (filters.component_id) {
-        where.component_id = filters.component_id;
+      // When only_osc is true, filter by scheme_type OSC
+      where['$scheme.schemeType.scheme_code$'] = 'OSC';
+      // If specific scheme_id provided, filter by it
+      if (filters.scheme_id) {
+        where.scheme_id = filters.scheme_id;
       }
     } else {
       // Normal filtering logic
-      if (filters.component_id) {
-        where.component_id = filters.component_id;
-      }
-
-      if (filters.hub_id) {
-        where.hub_id = filters.hub_id;
+      if (filters.scheme_id) {
+        where.scheme_id = filters.scheme_id;
       }
     }
 
@@ -158,16 +154,16 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
           attributes: ['district_id', 'district_name']
         },
         {
-          model: db.Component,
-          as: 'component',
-          required: false,
-          attributes: ['component_id', 'component_name']
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          required: false,
-          attributes: ['hub_id', 'hub_name']
+          model: db.Scheme,
+          as: 'scheme',
+          required: true,
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         }
       ],
       limit,
@@ -207,13 +203,9 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         whereClauses.push('e.district_id = :districtId');
         replacements.districtId = hrmScope.filters.district_id;
       }
-      if (hrmScope.filters.component_id) {
-        whereClauses.push('e.component_id = :componentId');
-        replacements.componentId = hrmScope.filters.component_id;
-      }
-      if (hrmScope.filters.hub_id) {
-        whereClauses.push('e.hub_id = :hubId');
-        replacements.hubId = hrmScope.filters.hub_id;
+      if (hrmScope.filters.scheme_id) {
+        whereClauses.push('e.scheme_id = :schemeId');
+        replacements.schemeId = hrmScope.filters.scheme_id;
       }
     }
 
@@ -224,8 +216,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         e.applicant_id,
         e.post_id,
         e.district_id,
-        e.component_id,
-        e.hub_id,
+        e.scheme_id,
         e.contract_start_date,
         e.contract_end_date,
         e.employment_status,
@@ -246,8 +237,8 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         ap.photo_path,
         pm.post_name,
         dm.district_name,
-        cm.component_name,
-        hm.hub_name,
+        s.scheme_name,
+        st.scheme_code as scheme_type,
         ro.employee_code as reporting_officer_code,
         rap.full_name as reporting_officer_name,
         adu.admin_id as onboarding_email_sent_by,
@@ -257,8 +248,8 @@ async function getEmployeeById(employeeId, hrmScope = null) {
       LEFT JOIN ms_applicant_personal ap ON e.applicant_id = ap.applicant_id
       LEFT JOIN ms_post_master pm ON e.post_id = pm.post_id
       LEFT JOIN ms_district_master dm ON e.district_id = dm.district_id
-      LEFT JOIN ms_components cm ON e.component_id = cm.component_id
-      LEFT JOIN ms_hub_master hm ON e.hub_id = hm.hub_id
+      LEFT JOIN ms_schemes s ON e.scheme_id = s.scheme_id
+      LEFT JOIN ms_scheme_types st ON s.scheme_type_id = st.scheme_type_id
       LEFT JOIN ms_employee_master ro ON e.reporting_officer_id = ro.employee_id
       LEFT JOIN ms_applicant_personal rap ON ro.applicant_id = rap.applicant_id
       LEFT JOIN ms_admin_users adu ON e.onboarding_email_sent_by = adu.admin_id
@@ -385,8 +376,8 @@ async function getEmployeeById(employeeId, hrmScope = null) {
       employment_info: {
         post_name: employee.post_name,
         district_name: employee.district_name,
-        component_name: employee.component_name,
-        hub_name: employee.hub_name,
+        scheme_name: employee.scheme_name,
+        scheme_type: employee.scheme_type,
         employee_pay: employee.employee_pay,
         contract_start_date: employee.contract_start_date,
         contract_end_date: employee.contract_end_date,
@@ -887,8 +878,7 @@ async function getEmployeeProfile(employeeId) {
         e.applicant_id,
         e.post_id,
         e.district_id,
-        e.component_id,
-        e.hub_id,
+        e.scheme_id,
         e.contract_start_date,
         e.contract_end_date,
         e.employment_status,
@@ -908,8 +898,8 @@ async function getEmployeeProfile(employeeId) {
         ap.aadhar_no,
         pm.post_name,
         dm.district_name,
-        cm.component_name,
-        hm.hub_name,
+        s.scheme_name,
+        st.scheme_code as scheme_type,
         ro.employee_code as reporting_officer_code,
         rap.full_name as reporting_officer_name,
         adu.admin_id as onboarding_email_sent_by,
@@ -919,8 +909,8 @@ async function getEmployeeProfile(employeeId) {
       LEFT JOIN ms_applicant_personal ap ON e.applicant_id = ap.applicant_id
       LEFT JOIN ms_post_master pm ON e.post_id = pm.post_id
       LEFT JOIN ms_district_master dm ON e.district_id = dm.district_id
-      LEFT JOIN ms_components cm ON e.component_id = cm.component_id
-      LEFT JOIN ms_hub_master hm ON e.hub_id = hm.hub_id
+      LEFT JOIN ms_schemes s ON e.scheme_id = s.scheme_id
+      LEFT JOIN ms_scheme_types st ON s.scheme_type_id = st.scheme_type_id
       LEFT JOIN ms_employee_master ro ON e.reporting_officer_id = ro.employee_id
       LEFT JOIN ms_applicant_personal rap ON ro.applicant_id = rap.applicant_id
       LEFT JOIN ms_admin_users adu ON e.onboarding_email_sent_by = adu.admin_id
@@ -1047,8 +1037,8 @@ async function getEmployeeProfile(employeeId) {
       employment_info: {
         post_name: employee.post_name,
         district_name: employee.district_name,
-        component_name: employee.component_name,
-        hub_name: employee.hub_name,
+        scheme_name: employee.scheme_name,
+        scheme_type: employee.scheme_type,
         employee_pay: employee.employee_pay,
         contract_start_date: employee.contract_start_date,
         contract_end_date: employee.contract_end_date,
@@ -1109,18 +1099,17 @@ async function getCompleteEmployeeProfile(applicantId) {
           required: false
         },
         {
-          model: db.Component,
-          as: 'component',
-          attributes: ['component_id', 'component_name'],
+          model: db.Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
           where: { is_deleted: false },
-          required: false
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          attributes: ['hub_id', 'hub_name'],
-          where: { is_deleted: false },
-          required: false
+          required: true,
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         },
         {
           model: db.AdminUser,
@@ -1166,12 +1155,10 @@ async function getCompleteEmployeeProfile(applicantId) {
       // District details (handle null joins gracefully)
       district_id: employee.district_id,
       district_name: employee.district?.district_name || null,
-      // Component details (handle null joins gracefully)
-      component_id: employee.component_id,
-      component_name: employee.component?.component_name || null,
-      // Hub details (handle null joins gracefully)
-      hub_id: employee.hub_id,
-      hub_name: employee.hub?.hub_name || null,
+      // Scheme details (handle null joins gracefully)
+      scheme_id: employee.scheme_id,
+      scheme_name: employee.scheme?.scheme_name || null,
+      scheme_type: employee.scheme?.schemeType?.scheme_code || null,
       // Reporting officer details (handle nested null joins gracefully)
       reporting_officer_id: employee.reporting_officer_id,
       reporting_officer_username: employee.reportingOfficer?.username || null,

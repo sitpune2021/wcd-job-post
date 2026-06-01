@@ -35,7 +35,7 @@ class AdminService {
    * @returns {Promise<Object>} - Created user
    */
   async createUser(data, currentUser) {
-    const { username, password, full_name, email, mobile_no, role_id, district_id, component_id, hub_id } = data;
+    const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id } = data;
 
     const transaction = await db.sequelize.transaction();
 
@@ -69,8 +69,7 @@ class AdminService {
         mobile_no,
         role_id,
         district_id,
-        component_id,
-        hub_id,
+        scheme_id,
         created_by: currentUser.id,
         is_active: true
       }, { transaction });
@@ -78,8 +77,8 @@ class AdminService {
       await transaction.commit();
 
       logger.info(`Admin user created: ${username} by ${currentUser.username || currentUser.id}`);
-      if (district_id || component_id || hub_id) {
-        logger.info(`Admin user linked to - District: ${district_id || 'None'}, OSC: ${component_id || 'None'}, Hub: ${hub_id || 'None'}`);
+      if (district_id || scheme_id) {
+        logger.info(`Admin user linked to - District: ${district_id || 'None'}, Scheme: ${scheme_id || 'None'}`);
       }
 
       // Fetch user with role
@@ -196,7 +195,7 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, component_id, hub_id, is_active, password, review_batch_start, review_batch_end } = data;
+    const { full_name, email, mobile_no, role_id, district_id, scheme_id, is_active, password, review_batch_start, review_batch_end } = data;
 
     try {
       const user = await AdminUser.findOne({
@@ -235,8 +234,7 @@ class AdminService {
         mobile_no: mobile_no !== undefined ? mobile_no : user.mobile_no,
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
-        component_id: component_id !== undefined ? component_id : user.component_id,
-        hub_id: hub_id !== undefined ? hub_id : user.hub_id,
+        scheme_id: scheme_id !== undefined ? scheme_id : user.scheme_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };
 

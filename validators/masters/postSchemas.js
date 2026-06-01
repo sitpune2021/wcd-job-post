@@ -8,8 +8,7 @@ const postFields = {
   post_name_mr: Joi.any(),
   post_type: Joi.any(),
 
-  component_id: Joi.any(),
-  hub_id: Joi.any(),
+  scheme_id: Joi.any(),
 
   district_id: Joi.any(),
 

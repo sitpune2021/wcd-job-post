@@ -1,14 +1,16 @@
 const { ApiError } = require('../../../middleware/errorHandler');
 const logger = require('../../../config/logger');
+const db = require('../../../models');
+const Scheme = require('../../../models/Scheme');
 
 /**
  * Middleware to filter HRM data based on admin hierarchy
  * State Level → sees all
  * District Level → sees only their district
- * OSC/Hub Level → sees only their OSC/Hub
+ * Scheme Level → sees only their Scheme
  * Post Level → sees only their specific post
  */
-const applyHRMHierarchyFilter = (req, res, next) => {
+const applyHRMHierarchyFilter = async (req, res, next) => {
   if (!req.user) {
     return next(new ApiError(401, 'Authentication required'));
   }
@@ -48,48 +50,85 @@ const applyHRMHierarchyFilter = (req, res, next) => {
     return next();
   }
 
-  // Hub Admin
-  if (req.user.hub_id) {
-    logger.info('Hub Admin detected', {
-      admin_id: req.user.admin_id,
-      hub_id: req.user.hub_id,
-      district_id: req.user.district_id
-    });
-    
-    req.hrmScope = {
-      level: 'HUB',
-      filters: { 
-        district_id: req.user.district_id,
-        hub_id: req.user.hub_id 
-      }
-    };
-    logger.info('HRM Scope set to HUB', { 
-      admin_id: req.user.admin_id,
-      hrmScope: req.hrmScope 
-    });
-    return next();
-  }
+  // Scheme-only approach: Check for scheme-based admin
+  if (req.user.scheme_id) {
+    try {
+      logger.info('Checking scheme-based admin', {
+        admin_id: req.user.admin_id,
+        scheme_id: req.user.scheme_id,
+        district_id: req.user.district_id
+      });
 
-  // OSC Admin
-  if (req.user.component_id) {
-    logger.info('OSC Admin detected', {
-      admin_id: req.user.admin_id,
-      component_id: req.user.component_id,
-      district_id: req.user.district_id
-    });
-    
-    req.hrmScope = {
-      level: 'OSC',
-      filters: { 
-        district_id: req.user.district_id,
-        component_id: req.user.component_id 
+      const adminUser = await db.AdminUser.findByPk(req.user.admin_id, {
+        include: [
+          {
+            model: Scheme,
+            as: 'scheme',
+            include: [
+              {
+                model: db.SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: false // Make this optional to avoid errors
+              }
+            ],
+            required: false // Make this optional to avoid errors
+          }
+        ]
+      });
+
+      logger.info('Admin user query result', {
+        admin_id: req.user.admin_id,
+        adminUserFound: !!adminUser,
+        schemeFound: !!(adminUser && adminUser.scheme),
+        schemeTypeFound: !!(adminUser && adminUser.scheme && adminUser.scheme.schemeType)
+      });
+
+      if (adminUser && adminUser.scheme && adminUser.scheme.schemeType) {
+        const schemeType = adminUser.scheme.schemeType.scheme_code;
+        
+        logger.info('Scheme type found', {
+          admin_id: req.user.admin_id,
+          scheme_type: schemeType
+        });
+        
+        if (schemeType === 'HUB' || schemeType === 'OSC') {
+          logger.info('Scheme-based Admin detected', {
+            admin_id: req.user.admin_id,
+            scheme_id: req.user.scheme_id,
+            scheme_code: adminUser.scheme.scheme_code,
+            scheme_type: schemeType,
+            district_id: req.user.district_id
+          });
+          
+          req.hrmScope = { 
+            level: 'SCHEME',
+            filters: { 
+              district_id: req.user.district_id,
+              scheme_id: req.user.scheme_id
+            }
+          };
+          logger.info('HRM Scope set to SCHEME', { 
+            admin_id: req.user.admin_id,
+            hrmScope: req.hrmScope 
+          });
+          return next();
+        }
+      } else {
+        logger.info('No valid scheme found for admin, falling back to district level', {
+          admin_id: req.user.admin_id,
+          scheme_id: req.user.scheme_id
+        });
       }
-    };
-    logger.info('HRM Scope set to OSC', { 
-      admin_id: req.user.admin_id,
-      hrmScope: req.hrmScope 
-    });
-    return next();
+    } catch (error) {
+      logger.error('Error checking scheme-based admin', {
+        admin_id: req.user.admin_id,
+        scheme_id: req.user.scheme_id,
+        error: error.message,
+        stack: error.stack
+      });
+      // Don't return error, fall back to district level
+    }
   }
 
   // Default: district-level if district_id is set
@@ -110,13 +149,12 @@ const applyHRMHierarchyFilter = (req, res, next) => {
     return next();
   }
 
-  // If no hierarchy info (no district/OSC/hub), show all employees
+  // If no hierarchy info (no district/scheme), show all employees
   logger.info('Admin user has no hierarchy assignment - showing all employees', {
     admin_id: req.user.admin_id,
     role: userRole,
     district_id: req.user.district_id,
-    component_id: req.user.component_id,
-    hub_id: req.user.hub_id
+    scheme_id: req.user.scheme_id
   });
   
   req.hrmScope = { level: 'ALL', filters: {} };
@@ -142,12 +180,8 @@ const buildEmployeeWhereClause = (baseWhere, hrmScope) => {
     where.district_id = hrmScope.filters.district_id;
   }
   
-  if (hrmScope.filters.component_id) {
-    where.component_id = hrmScope.filters.component_id;
-  }
-  
-  if (hrmScope.filters.hub_id) {
-    where.hub_id = hrmScope.filters.hub_id;
+  if (hrmScope.filters.scheme_id) {
+    where.scheme_id = hrmScope.filters.scheme_id;
   }
 
   return where;
@@ -167,11 +201,7 @@ const canAccessEmployee = (employee, hrmScope) => {
     return false;
   }
 
-  if (filters.component_id && employee.component_id !== filters.component_id) {
-    return false;
-  }
-
-  if (filters.hub_id && employee.hub_id !== filters.hub_id) {
+  if (filters.scheme_id && employee.scheme_id !== filters.scheme_id) {
     return false;
   }
 

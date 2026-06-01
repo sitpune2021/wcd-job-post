@@ -110,12 +110,11 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
       throw new ApiError(409, 'Employee record already exists for this application. This applicant has already been onboarded.');
     }
 
-    // Determine component_id or hub_id from post
-    const componentId = application.post?.component_id;
-    const hubId = application.post?.hub_id;
+    // Determine scheme_id from post
+    const schemeId = application.post?.scheme_id;
 
-    if (!componentId && !hubId) {
-      throw new Error('Post must have either OSC or HUB');
+    if (!schemeId) {
+      throw new Error('Post must have a scheme assigned');
     }
 
     // Create employee record
@@ -126,8 +125,7 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
       application_id: application.application_id,
       post_id: application.post_id,
       district_id: application.district_id,
-      component_id: componentId,
-      hub_id: hubId,
+      scheme_id: schemeId,
       contract_start_date: parseDate(contractData.contract_start_date),
       contract_end_date: parseDate(contractData.contract_end_date) || null,
       onboarding_type: 'CRM_SELECTED',
@@ -184,8 +182,7 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
         },
         { model: db.PostMaster, as: 'post' },
         { model: db.DistrictMaster, as: 'district' },
-        { model: db.Component, as: 'component' },
-        { model: db.Hub, as: 'hub' }
+        { model: db.Scheme, as: 'scheme' }
       ]
     });
 
@@ -222,8 +219,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       full_name,
       post_id,
       district_id,
-      component_id,
-      hub_id,
+      scheme_id,
       contract_start_date,
       contract_end_date,
       employee_pay
@@ -234,8 +230,8 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       throw ApiError.badRequest('Missing required fields: email, full_name, post_id, district_id');
     }
 
-    if (!component_id && !hub_id) {
-      throw ApiError.badRequest('Either OSC or HUB must be provided');
+    if (!scheme_id) {
+      throw ApiError.badRequest('Scheme must be provided');
     }
 
     // Check if email already exists in applicant table
@@ -293,8 +289,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       employee_code, // Use generated employee code
       post_id,
       district_id,
-      component_id: component_id || null,
-      hub_id: hub_id || null,
+      scheme_id: scheme_id || null,
       contract_start_date: parsedStartDate,
       contract_end_date: calculatedEndDate, // Calculate end date from start date + 11 months
       employee_pay: employee_pay || null,
@@ -353,8 +348,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
         },
         { model: db.PostMaster, as: 'post' },
         { model: db.DistrictMaster, as: 'district' },
-        { model: db.Component, as: 'component' },
-        { model: db.Hub, as: 'hub' }
+        { model: db.Scheme, as: 'scheme' }
       ]
     });
 
@@ -413,16 +407,16 @@ async function sendEmployeeOnboardingEmail(employeeId, adminId, ipAddress, force
           required: false
         },
         { 
-          model: db.Component, 
-          as: 'component',
-          attributes: ['component_id', 'component_name'],
-          required: false
-        },
-        { 
-          model: db.Hub, 
-          as: 'hub',
-          attributes: ['hub_id', 'hub_name'],
-          required: false
+          model: db.Scheme, 
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          required: true,
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         }
       ]
     });
@@ -454,7 +448,7 @@ async function sendEmployeeOnboardingEmail(employeeId, adminId, ipAddress, force
       postName: employee.post?.post_name || 'N/A',
       postCode: employee.post?.post_code || 'N/A',
       districtName: employee.district?.district_name || 'N/A',
-      componentName: employee.component?.component_name || employee.hub?.hub_name || 'N/A',
+      schemeName: employee.scheme?.scheme_name || 'N/A',
       contractStartDate: employee.contract_start_date,
       loginUrl: process.env.APPLICANT_FRONTEND_URL + '/login',
       customMessage: customMessage || 'Welcome to the team!'
@@ -552,16 +546,18 @@ async function getPendingSelectedApplicants(filters = {}) {
 
   // Handle location type filtering
   if (filters.only_hub) {
-    // Hub only mode - only show applications with posts that have hubs
-    where['$post.hub_id$'] = { [Op.ne]: null };
+    // Hub only mode - only show applications with posts that have HUB scheme type
+    where['$post.scheme.schemeType.scheme_code$'] = 'HUB';
   } else if (filters.only_osc) {
-    // OSC only mode - only show applications with posts that have components
-    where['$post.component_id$'] = { [Op.ne]: null };
+    // OSC only mode - only show applications with posts that have OSC scheme type
+    where['$post.scheme.schemeType.scheme_code$'] = 'OSC';
   } else {
-    // All mode - apply specific hub/component filters
-    if (filters.component_id || filters.hub_id) {
-      where['$post.component_id$'] = filters.component_id || null;
-      where['$post.hub_id$'] = filters.hub_id || null;
+    // All mode - apply specific scheme filters
+    if (filters.scheme_id) {
+      where['$post.scheme_id$'] = filters.scheme_id;
+    }
+    if (filters.scheme_type_id) {
+      where['$post.scheme.scheme_type_id$'] = filters.scheme_type_id;
     }
   }
 
@@ -602,11 +598,18 @@ async function getPendingSelectedApplicants(filters = {}) {
   const offset = (page - 1) * limit;
 
   // Get total count first - use simpler query without associations for count
-  let countWhere = { ...where };
+  let countWhere = { 
+    status: 'SELECTED',
+    is_deleted: false
+  };
+  
+  // Apply basic filters that don't require associations
+  if (filters.district_id) {
+    countWhere.district_id = filters.district_id;
+  }
   
   // Remove complex associations from count where clause to avoid errors
   if (filters.search) {
-    delete countWhere[Op.or];
     // For count, only search on application_no to avoid association issues
     countWhere.application_no = {
       [Op.iLike]: `%${filters.search.trim()}%`
@@ -636,8 +639,7 @@ async function getPendingSelectedApplicants(filters = {}) {
         as: 'post',
         attributes: { exclude: ['amount'] },
         include: [
-          { model: db.Component, as: 'component' },
-          { model: db.Hub, as: 'hub' }
+          { model: db.Scheme, as: 'scheme' }
         ]
       },
       {
@@ -682,8 +684,7 @@ async function getOnboardedApplicants(filters = {}) {
       onboarding_type,
       email_sent,
       district_id,
-      component_id,
-      hub_id,
+      scheme_id,
       page = 1,
       limit = 50
     } = filters;
@@ -695,8 +696,7 @@ async function getOnboardedApplicants(filters = {}) {
 
     // Apply location filters
     if (district_id) whereClause.district_id = district_id;
-    if (component_id) whereClause.component_id = component_id;
-    if (hub_id) whereClause.hub_id = hub_id;
+    if (scheme_id) whereClause.scheme_id = scheme_id;
 
     // Apply onboarding_type filter if specified
     if (onboarding_type) {
@@ -746,16 +746,16 @@ async function getOnboardedApplicants(filters = {}) {
           required: false // Use LEFT JOIN for district
         },
         {
-          model: db.Component,
-          as: 'component',
-          attributes: ['component_id', 'component_name'],
-          required: false // Use LEFT JOIN for component
-        },
-        {
-          model: db.Hub,
-          as: 'hub',
-          attributes: ['hub_id', 'hub_name'],
-          required: false // Use LEFT JOIN for hub
+          model: db.Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          required: true,
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
         }
       ],
       limit,
@@ -805,8 +805,7 @@ async function getOnboardedApplicants(filters = {}) {
           applicant: employee.applicant,
           post: employee.post,
           district: employee.district,
-          component: employee.component,
-          hub: employee.hub
+          scheme: employee.scheme
         }
       };
     });

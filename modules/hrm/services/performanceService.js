@@ -96,7 +96,7 @@ const getReviewById = async (reviewId, user, isAdmin = false) => {
     where: { review_id: reviewId, is_deleted: false },
     include: [{
       model: EmployeeMaster, as: 'employee',
-      attributes: ['employee_id', 'employee_code', 'district_id', 'component_id']
+      attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id']
     }]
   });
   if (!review) throw new ApiError(404, 'Performance review not found.');
@@ -153,7 +153,7 @@ const getStaffReviews = async (adminUser, query) => {
 const submitAppraiserReview = async (adminUser, reviewId, data) => {
   const review = await PerformanceReview.findOne({
     where: { review_id: reviewId, is_deleted: false },
-    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'component_id', 'hub_id'] }]
+    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'scheme_id'] }]
   });
   if (!review) throw new ApiError(404, 'Performance review not found.');
   if (review.status !== 'SELF_SUBMITTED') {

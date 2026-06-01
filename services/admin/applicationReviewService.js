@@ -21,8 +21,8 @@ const {
   PostMaster,
   DistrictMaster,
   TalukaMaster,
-  Hub,
-  Component,
+  Scheme,
+  SchemeType,
   EligibilityResult,
   ApplicationStatusHistory
 } = db;
@@ -39,7 +39,7 @@ const { calculateMeritScore } = require('../applicationWorkflowService');
 
 /**
  * Get posts with application counts for admin merit page
- * @param {Object} filters - Optional filters { component_id, district_id, search }
+ * @param {Object} filters - Optional filters { scheme_id, district_id, search }
  * @returns {Promise<Array>} - List of posts with counts
  */
 const getActivePostsWithCounts = async (filters = {}) => {
@@ -58,19 +58,15 @@ const getActivePostsWithCounts = async (filters = {}) => {
       is_deleted: false
     };
 
-    if (filters.component_id) {
-      whereClause.component_id = filters.component_id;
+    if (filters.scheme_id) {
+      whereClause.scheme_id = filters.scheme_id;
     }
 
     if (filters.district_id) {
       whereClause.district_id = filters.district_id;
     }
 
-    if (filters.hub_id) {
-      whereClause.hub_id = filters.hub_id;
-    }
-
-    // Text search across post/component/district (en + mr)
+    // Text search across post/scheme/district (en + mr)
     const search = (filters.search || '').trim();
     if (search) {
       const like = { [Op.iLike]: `%${search}%` };
@@ -78,8 +74,8 @@ const getActivePostsWithCounts = async (filters = {}) => {
         { post_name: like },
         { post_name_mr: like },
         { post_code: like },
-        { '$component.component_name$': like },
-        { '$component.component_name_mr$': like },
+        { '$scheme.scheme_name$': like },
+        { '$scheme.scheme_name_mr$': like },
         { '$district.district_name$': like },
         { '$district.district_name_mr$': like }
       ];
@@ -91,17 +87,26 @@ const getActivePostsWithCounts = async (filters = {}) => {
         'post_id',
         'post_name',
         'post_name_mr',
-        'component_id',
-        'hub_id',
+        'scheme_id',
         'district_id',
         'post_code',
         'description',
         'description_mr'
       ],
       include: [
-        { model: Component, as: 'component', required: false, attributes: ['component_id', 'component_code', 'component_name', 'component_name_mr'] },
-        { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] },
-        { model: Hub, as: 'hub', required: false, attributes: ['hub_id', 'hub_name', 'hub_name_mr'] }
+        { 
+          model: Scheme, 
+          as: 'scheme', 
+          required: true,
+          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
+          include: [{
+            model: SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
+        },
+        { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] }
       ],
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']]
     });
@@ -379,7 +384,17 @@ const getApplicationsForPost = async (postId, filters = {}) => {
 
     const postDetails = await PostMaster.findByPk(postId, {
       include: [
-        { model: Component, as: 'component', attributes: ['component_id', 'component_name', 'component_name_mr'] },
+        { 
+          model: Scheme, 
+          as: 'scheme', 
+          attributes: ['scheme_id', 'scheme_name', 'scheme_name_mr'],
+          include: [{
+            model: SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
+        },
         { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] }
       ]
     });
@@ -457,7 +472,10 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       ? {
         post_name: postDetails.post_name,
         post_code: postDetails.post_code,
-        component: postDetails.component ? { component_name: postDetails.component.component_name } : null,
+        scheme: postDetails.scheme ? { 
+          scheme_name: postDetails.scheme.scheme_name,
+          scheme_type: postDetails.scheme.schemeType?.scheme_code
+        } : null,
         district: postDetails.district ? { district_name: postDetails.district.district_name } : null
       }
       : null;
@@ -636,7 +654,25 @@ const getAllApplications = async (filters = {}) => {
       attributes: ['application_id', 'application_no', 'status', 'submitted_at', 'applicant_id', 'post_id', 'district_id'],
       include: [
         ...searchInclude,
-        { model: PostMaster, as: 'post', attributes: ['post_id', 'post_name'], required: false },
+        { 
+          model: PostMaster, 
+          as: 'post', 
+          attributes: ['post_id', 'post_name', 'scheme_id'], 
+          required: false,
+          include: [
+            { 
+              model: Scheme, 
+              as: 'scheme', 
+              attributes: ['scheme_id', 'scheme_name'],
+              include: [{
+                model: SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code'],
+                required: true
+              }]
+            }
+          ]
+        },
         { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name'], required: false }
       ],
       order: [['created_at', 'DESC']],

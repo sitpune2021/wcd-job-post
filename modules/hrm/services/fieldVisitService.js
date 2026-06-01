@@ -72,11 +72,16 @@ const getVisitById = async (visitId, user, isAdmin = false) => {
     where: { visit_id: visitId, is_deleted: false },
     include: [{
       model: EmployeeMaster, as: 'employee',
-      attributes: ['employee_id', 'employee_code', 'district_id', 'component_id'],
+      attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id'],
       include: [
         { association: 'applicant', attributes: ['full_name'] },
         { association: 'district', attributes: ['district_name'] },
-        { association: 'component', attributes: ['component_name'] }
+        { association: 'scheme', attributes: ['scheme_name', 'scheme_type_id'],
+          include: [{
+            association: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name']
+          }]
+        }
       ]
     }]
   });
@@ -137,7 +142,7 @@ const getVisitsForReview = async (adminUser, query) => {
 const reviewVisit = async (adminUser, visitId, data) => {
   const visit = await FieldVisit.findOne({
     where: { visit_id: visitId, is_deleted: false },
-    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'component_id', 'hub_id'] }]
+    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'district_id', 'scheme_id'] }]
   });
   if (!visit) throw new ApiError(404, 'Field visit not found.');
   if (!['SUBMITTED', 'REVIEWED'].includes(visit.status)) {

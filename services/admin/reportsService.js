@@ -8,7 +8,7 @@ const parseOptionalInt = (value) => {
 };
 
 const getPostWiseReport = async (filters = {}) => {
-  const componentId = parseOptionalInt(filters.component_id);
+  const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
   const postId = parseOptionalInt(filters.post_id);
 
@@ -33,13 +33,13 @@ const getPostWiseReport = async (filters = {}) => {
       ON a.post_id = pm.post_id
      AND a.is_deleted = false
     WHERE pm.is_deleted = false
-      AND (:componentId IS NULL OR pm.component_id = :componentId)
+      AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       AND (:postId IS NULL OR pm.post_id = :postId)
     GROUP BY pm.post_id, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
     ORDER BY pm.created_at DESC, pm.post_id DESC
     `,
     {
-      replacements: { componentId, districtId, postId },
+      replacements: { schemeId, districtId, postId },
       type: QueryTypes.SELECT
     }
   );
@@ -48,7 +48,7 @@ const getPostWiseReport = async (filters = {}) => {
 };
 
 const getPostSelectedCandidatesReport = async (filters = {}) => {
-  const componentId = parseOptionalInt(filters.component_id);
+  const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
   const postId = parseOptionalInt(filters.post_id);
 
@@ -56,8 +56,8 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
     `
     SELECT
       pm.post_id,
-      pm.component_id,
-      c.component_name,
+      pm.scheme_id,
+      s.scheme_name,
       pm.post_code,
       pm.post_name,
       pm.post_name_mr,
@@ -69,9 +69,9 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
         '[]'::json
       ) AS selected_candidates
     FROM ms_post_master pm
-    LEFT JOIN ms_components c
-      ON c.component_id = pm.component_id
-     AND c.is_deleted = false
+    LEFT JOIN ms_schemes s
+      ON s.scheme_id = pm.scheme_id
+     AND s.is_deleted = false
     LEFT JOIN ms_applications a
       ON a.post_id = pm.post_id
      AND a.is_deleted = false
@@ -80,13 +80,13 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
       ON ap.applicant_id = a.applicant_id
      AND ap.is_deleted = false
     WHERE pm.is_deleted = false
-      AND (:componentId IS NULL OR pm.component_id = :componentId)
+      AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       AND (:postId IS NULL OR pm.post_id = :postId)
-    GROUP BY pm.post_id, pm.component_id, c.component_name, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
+    GROUP BY pm.post_id, pm.scheme_id, s.scheme_name, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
     ORDER BY pm.created_at DESC, pm.post_id DESC
     `,
     {
-      replacements: { componentId, districtId, postId },
+      replacements: { schemeId, districtId, postId },
       type: QueryTypes.SELECT
     }
   );
@@ -95,7 +95,7 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
 };
 
 const getDistrictWiseReport = async (filters = {}) => {
-  const componentId = parseOptionalInt(filters.component_id);
+  const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
 
   const rows = await db.sequelize.query(
@@ -106,12 +106,12 @@ const getDistrictWiseReport = async (filters = {}) => {
       dm.district_name_mr,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
-          AND (:componentId IS NULL OR pm.component_id = :componentId)
+          AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       )::int AS application_count,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
           AND a.status = 'SELECTED'
-          AND (:componentId IS NULL OR pm.component_id = :componentId)
+          AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       )::int AS selected_count
     FROM ms_district_master dm
     LEFT JOIN ms_applications a
@@ -125,7 +125,7 @@ const getDistrictWiseReport = async (filters = {}) => {
     ORDER BY dm.district_name ASC
     `,
     {
-      replacements: { componentId, districtId },
+      replacements: { schemeId, districtId },
       type: QueryTypes.SELECT
     }
   );
@@ -133,16 +133,19 @@ const getDistrictWiseReport = async (filters = {}) => {
   return rows;
 };
 
-const getComponentWiseReport = async (filters = {}) => {
-  const componentId = parseOptionalInt(filters.component_id);
+const getSchemeWiseReport = async (filters = {}) => {
+  const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
 
   const rows = await db.sequelize.query(
     `
     SELECT
-      c.component_id,
-      c.component_name,
-      c.component_name_mr,
+      s.scheme_id,
+      s.scheme_code,
+      s.scheme_name,
+      s.scheme_name_mr,
+      st.scheme_code as scheme_type_code,
+      st.scheme_name as scheme_type_name,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
           AND (:districtId IS NULL OR a.district_id = :districtId)
@@ -152,20 +155,24 @@ const getComponentWiseReport = async (filters = {}) => {
           AND a.status = 'SELECTED'
           AND (:districtId IS NULL OR a.district_id = :districtId)
       )::int AS selected_count
-    FROM ms_components c
+    FROM ms_schemes s
+    LEFT JOIN ms_scheme_types st
+      ON st.scheme_type_id = s.scheme_type_id
+     AND st.is_deleted = false
     LEFT JOIN ms_post_master pm
-      ON pm.component_id = c.component_id
+      ON pm.scheme_id = s.scheme_id
      AND pm.is_deleted = false
     LEFT JOIN ms_applications a
       ON a.post_id = pm.post_id
      AND a.is_deleted = false
-    WHERE c.is_deleted = false
-      AND (:componentId IS NULL OR c.component_id = :componentId)
-    GROUP BY c.component_id, c.component_name, c.component_name_mr
-    ORDER BY c.component_name ASC
+    WHERE s.is_deleted = false
+      AND (:schemeId IS NULL OR s.scheme_id = :schemeId)
+      AND (:districtId IS NULL OR s.district_id = :districtId)
+    GROUP BY s.scheme_id, s.scheme_code, s.scheme_name, s.scheme_name_mr, st.scheme_code, st.scheme_name
+    ORDER BY s.scheme_name ASC
     `,
     {
-      replacements: { componentId, districtId },
+      replacements: { schemeId, districtId },
       type: QueryTypes.SELECT
     }
   );
@@ -173,50 +180,10 @@ const getComponentWiseReport = async (filters = {}) => {
   return rows;
 };
 
-const getHubWiseReport = async (filters = {}) => {
-  const hubId = parseOptionalInt(filters.hub_id);
-  const districtId = parseOptionalInt(filters.district_id);
-
-  const rows = await db.sequelize.query(
-    `
-    SELECT
-      h.hub_id,
-      h.hub_name,
-      h.hub_name_mr,
-      COUNT(a.application_id) FILTER (
-        WHERE a.application_id IS NOT NULL
-          AND (:districtId IS NULL OR a.district_id = :districtId)
-      )::int AS application_count,
-      COUNT(a.application_id) FILTER (
-        WHERE a.application_id IS NOT NULL
-          AND a.status = 'SELECTED'
-          AND (:districtId IS NULL OR a.district_id = :districtId)
-      )::int AS selected_count
-    FROM ms_hub_master h
-    LEFT JOIN ms_post_master pm
-      ON pm.hub_id = h.hub_id
-     AND pm.is_deleted = false
-    LEFT JOIN ms_applications a
-      ON a.post_id = pm.post_id
-     AND a.is_deleted = false
-    WHERE h.is_deleted = false
-      AND (:hubId IS NULL OR h.hub_id = :hubId)
-    GROUP BY h.hub_id, h.hub_name, h.hub_name_mr
-    ORDER BY h.hub_name ASC
-    `,
-    {
-      replacements: { hubId, districtId },
-      type: QueryTypes.SELECT
-    }
-  );
-
-  return rows;
-};
 
 module.exports = {
   getPostWiseReport,
   getPostSelectedCandidatesReport,
   getDistrictWiseReport,
-  getComponentWiseReport,
-  getHubWiseReport
+  getSchemeWiseReport
 };

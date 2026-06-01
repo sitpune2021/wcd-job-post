@@ -61,8 +61,7 @@ const templateQuerySchema = Joi.object({
   month: Joi.number().integer().min(1).max(12).required(),
   year: Joi.number().integer().min(2020).max(2100).required(),
   district_id: Joi.number().integer().positive().optional(),
-  component_id: Joi.number().integer().positive().optional(),
-  hub_id: Joi.number().integer().positive().optional()
+  scheme_id: Joi.number().integer().positive().optional()
 });
 
 const bulkUploadSchema = Joi.object({

@@ -5,17 +5,70 @@
  */
 const { Op, fn, col, literal } = require('sequelize');
 const { Attendance, AttendanceSession, EmployeeMaster, Holiday, LeaveApplication } = require('../models');
-const Component = require('../../../models/Component');
-const Hub = require('../../../models/Hub');
-const ApplicantMaster = require('../../../models/ApplicantMaster');
-const ApplicantPersonal = require('../../../models/ApplicantPersonal');
-const DistrictMaster = require('../../../models/DistrictMaster');
-const PostMaster = require('../../../models/PostMaster');
+const db = require('../../../models');
 const logger = require('../../../config/logger');
 const { ApiError } = require('../../../middleware/errorHandler');
-const { getEmployeeFromUser, buildHierarchyFilter, getEmployeeIdsUnderAdmin, getWorkingDaysInMonth, getWorkingDaysInRange, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
+const { getEmployeeFromUser, buildHierarchyFilter, getEmployeeIdsUnderAdmin, getWorkingDaysInYear, getWorkingDaysInQuarter, getWorkingDaysInRange, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
+const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
+const { buildEmployeeAttendanceSummary, buildAggregatedSummary, getAttendanceCountAttributes } = require('../utils/attendanceCalculations');
 const { buildQueryOptions, buildResponse, COMMON_FIELDS } = require('../utils/hrmFilterBuilder');
 const { validateGeofence, detectDevice, getAllowedRadius } = require('../utils/geofencing');
+
+/**
+ * Format attendance record for consistent API response
+ * Flattens nested employee data for easier frontend consumption
+ */
+const formatAttendanceRecord = (record) => {
+  try {
+    const data = record?.toJSON ? record.toJSON() : record;
+    const employee = data.employee || {};
+    const applicant = employee.applicant || {};
+    const personal = applicant.personal || {};
+    const district = employee.district || {};
+    const scheme = employee.scheme || {};
+    const latitude = data.latitude;
+    const longitude = data.longitude;
+
+    return {
+      attendance_id: data.attendance_id,
+      employee_id: data.employee_id,
+      attendance_date: data.attendance_date,
+      check_in_time: data.check_in_time,
+      check_out_time: data.check_out_time,
+      status: data.status,
+      latitude,
+      longitude,
+      employee_code: employee.employee_code || '',
+      employee_name: personal.full_name || '',
+      employee_email: applicant.email || '',
+      district_name: district.district_name || '',
+      scheme_name: scheme.scheme_name || '',
+      scheme_type: scheme.schemeType?.scheme_name || scheme.schemeType?.scheme_code || '',
+      location: latitude && longitude
+        ? `${parseFloat(latitude).toFixed(4)}, ${parseFloat(longitude).toFixed(4)}`
+        : '--'
+    };
+  } catch (error) {
+    logger.error('Error formatting attendance record:', error);
+    return {
+      attendance_id: data.attendance_id,
+      employee_id: data.employee_id,
+      attendance_date: data.attendance_date,
+      check_in_time: data.check_in_time,
+      check_out_time: data.check_out_time,
+      status: data.status,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      employee_code: '',
+      employee_name: '',
+      employee_email: '',
+      district_name: '',
+      scheme_name: '',
+      scheme_type: '',
+      location: '--'
+    };
+  }
+};
 
 // Enhanced utilities for precise date/time handling and safe queries
 const { getCurrentDate, getCurrentTime, isWeekend } = require('../utils/dateTimeHelpers');
@@ -84,25 +137,26 @@ const markAttendance = async (user, data, ip) => {
       employeeId: employee.employee_id,
       userLat: data.latitude,
       userLon: data.longitude,
-      hasComponentId: !!employee.component_id,
-      hasHubId: !!employee.hub_id
+      hasSchemeId: !!employee.scheme_id
     });
 
-    // Get employee's post details with OSC/Hub location
+    // Get employee's post details with Scheme location (scheme-only approach)
     const employeeId = employee.employee_id;
     const employeeWithLocation = await EmployeeMaster.findOne({
       where: { employee_id: employeeId },
       include: [
         {
-          model: Component,
-          as: 'component',
-          attributes: ['component_id', 'component_name', 'latitude', 'longitude', 'geofence_radius_meters'],
-          required: false
-        },
-        {
-          model: Hub,
-          as: 'hub',
-          attributes: ['hub_id', 'hub_name', 'latitude', 'longitude', 'geofence_radius_meters'],
+          model: db.Scheme,
+          as: 'scheme',
+          include: [
+            {
+              model: db.SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: false
+            }
+          ],
+          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'latitude', 'longitude', 'geofence_radius_meters'],
           required: false
         }
       ]
@@ -111,126 +165,62 @@ const markAttendance = async (user, data, ip) => {
     
     logger.info('Employee location data retrieved', {
       employeeId: employeeWithLocation.employee_id,
-      hasComponent: !!employeeWithLocation.component,
-      hasHub: !!employeeWithLocation.hub
+      hasScheme: !!employeeWithLocation.scheme
     });
 
-    // Determine employee's actual posting and validate against correct center
+    // Determine employee's actual posting and validate against correct center (scheme-only approach)
     let targetLocation = null;
     let locationType = null;
     let postingCenter = null;
+    let latitude = null;
+    let longitude = null;
+    let geofenceRadius = null;
 
-    // Check employee's actual posting (component_id indicates OSC posting, hub_id indicates Hub posting)
-    if (employeeWithLocation.hub_id && employeeWithLocation.hub) {
-      // Employee is posted to Hub
-      postingCenter = 'Hub';
+    // Scheme-only approach: All employees must have a scheme assignment
+    if (!employeeWithLocation.scheme || !employeeWithLocation.scheme.schemeType) {
+      throw new ApiError(400, 'Employee scheme assignment not configured. Please contact admin.');
+    }
+
+    postingCenter = employeeWithLocation.scheme.schemeType.scheme_code; // 'OSC' or 'HUB'
+    latitude = employeeWithLocation.scheme.latitude;
+    longitude = employeeWithLocation.scheme.longitude;
+    geofenceRadius = employeeWithLocation.scheme.geofence_radius_meters;
+    
+    logger.info('Using Scheme location for geofencing', {
+      employeeId: employeeWithLocation.employee_id,
+      schemeId: employeeWithLocation.scheme.scheme_id,
+      schemeCode: employeeWithLocation.scheme.scheme_code,
+      schemeType: postingCenter
+    });
+
+    // Convert strings to numbers if needed and validate
+    const numLat = latitude ? parseFloat(latitude) : null;
+    const numLon = longitude ? parseFloat(longitude) : null;
+    
+    if (!isNaN(numLat) && !isNaN(numLon) && numLat !== null && numLon !== null && numLat !== 0 && numLon !== 0) {
+      // Create a copy with numeric coordinates
+      targetLocation = {
+        latitude: numLat,
+        longitude: numLon,
+        geofence_radius_meters: geofenceRadius
+      };
+      locationType = postingCenter;
       
-      // Get coordinates (handle string or numeric)
-      const lat = employeeWithLocation.hub?.latitude;
-      const lon = employeeWithLocation.hub?.longitude;
-      
-      logger.info('Using Hub location for geofencing', {
+      logger.info('Employee location validated for geofencing', {
         employeeId: employeeWithLocation.employee_id,
-        hubId: employeeWithLocation.hub_id,
-        hubName: employeeWithLocation.hub.hub_name
+        postingCenter: postingCenter,
+        locationType: locationType,
+        latitude: numLat,
+        longitude: numLon,
+        geofenceRadius: geofenceRadius
       });
-      
-      // Convert strings to numbers if needed and validate
-      const numLat = lat ? parseFloat(lat) : null;
-      const numLon = lon ? parseFloat(lon) : null;
-      
-      if (!isNaN(numLat) && !isNaN(numLon) && numLat !== null && numLon !== null && numLat !== 0 && numLon !== 0) {
-        // Create a copy with numeric coordinates
-        targetLocation = {
-          ...employeeWithLocation.hub,
-          latitude: lat,
-          longitude: lon
-        };
-        locationType = 'Hub';
-        logger.info('Employee posted to Hub - using Hub location for geofencing', {
-          employeeId: employeeWithLocation.employee_id,
-          hubId: employeeWithLocation.hub_id,
-          hubName: employeeWithLocation.hub.hub_name,
-          latitude: lat,
-          longitude: lon
-        });
-      } else {
-        // Hub has no location data
-        throw new ApiError(403, 
-          `Your assigned Hub "${employeeWithLocation.hub.hub_name}" does not have location coordinates configured. ` +
-          `Please contact your administrator to set up the Hub location for attendance marking.`
-        );
-      }
-    } else if (employeeWithLocation.component_id && employeeWithLocation.component) {
-      // Employee is posted to Component (OSC)
-      postingCenter = 'OSC';
-      
-      // Get coordinates (handle string or numeric)
-      const lat = employeeWithLocation.component?.latitude;
-      const lon = employeeWithLocation.component?.longitude;
-      
-      // Convert strings to numbers if needed and validate
-      const numLat = lat ? parseFloat(lat) : null;
-      const numLon = lon ? parseFloat(lon) : null;
-      
-      logger.info('DEBUG: OSC coordinate validation', {
-        employeeId: employeeWithLocation.employee_id,
-        componentId: employeeWithLocation.component_id,
-        componentName: employeeWithLocation.component.component_name,
-        rawLat: lat,
-        rawLon: lon,
-        latType: typeof lat,
-        lonType: typeof lon,
-        numLat: numLat,
-        numLon: numLon,
-        isNaN: isNaN(numLat) || isNaN(numLon),
-        zeroCheck: numLat === 0 || numLon === 0,
-        nullCheck: numLat === null || numLon === null,
-        willPassValidation: (!isNaN(numLat) && !isNaN(numLon) && numLat !== null && numLon !== null && numLat !== 0 && numLon !== 0)
-      });
-      
-      if (!isNaN(numLat) && !isNaN(numLon) && numLat !== null && numLon !== null && numLat !== 0 && numLon !== 0) {
-        // Create a copy with numeric coordinates
-        targetLocation = {
-          ...employeeWithLocation.component,
-          latitude: lat,
-          longitude: lon
-        };
-        locationType = 'OSC';
-        logger.info('Employee posted to Component - using OSC location for geofencing', {
-          employeeId: employeeWithLocation.employee_id,
-          componentId: employeeWithLocation.component_id,
-          componentName: employeeWithLocation.component.component_name,
-          latitude: lat,
-          longitude: lon
-        });
-      } else {
-        // Component has no valid location data
-        logger.error('DEBUG: OSC coordinates validation failed', {
-          employeeId: employeeWithLocation.employee_id,
-          componentId: employeeWithLocation.component_id,
-          componentName: employeeWithLocation.component.component_name,
-          rawLat: lat,
-          rawLon: lon,
-          latType: typeof lat,
-          lonType: typeof lon,
-          numLat: numLat,
-          numLon: numLon,
-          isNaN: isNaN(numLat) || isNaN(numLon),
-          nullCheck: numLat === null || numLon === null,
-          zeroCheck: numLat === 0 || numLon === 0,
-          validationFailed: true
-        });
-        
-        throw new ApiError(403, 
-          `Your assigned OSC "${employeeWithLocation.component.component_name}" does not have location coordinates configured. ` +
-          `Please contact your administrator to set up the OSC location for attendance marking.`
-        );
-      }
     } else {
-      // Employee has no posting information
+      // Location has no valid coordinates
+      const locationName = employeeWithLocation.scheme.scheme_name;
+      
       throw new ApiError(403, 
-        `Your posting information is not configured. Please contact your administrator to set up your Hub or OSC assignment.`
+        `Your assigned ${postingCenter} "${locationName}" does not have valid location coordinates configured. ` +
+        `Please contact your administrator to set up the location for attendance marking.`
       );
     }
 
@@ -250,7 +240,7 @@ const markAttendance = async (user, data, ip) => {
       logger.info('DEBUG: Before geofence validation', {
         employeeId: employee.employee_id,
         locationType,
-        locationName: targetLocation.hub_name || targetLocation.component_name,
+        locationName: targetLocation.scheme_name || 'Unknown Scheme',
         deviceType,
         userLat: data.latitude,
         userLon: data.longitude,
@@ -278,7 +268,7 @@ const markAttendance = async (user, data, ip) => {
       logger.info('DEBUG: Geofencing validation completed', {
         employeeId: employee.employee_id,
         locationType,
-        locationName: targetLocation.hub_name || targetLocation.component_name,
+        locationName: targetLocation.scheme_name || 'Unknown Scheme',
         deviceType,
         distance: validation.distance,
         baseRadius: baseRadius,
@@ -289,28 +279,25 @@ const markAttendance = async (user, data, ip) => {
       });
 
       if (!validation.isWithinRange) {
-        // Extract location name based on location type
-        let locationName = 'Unknown Location';
-        if (locationType === 'Hub') {
-          locationName = targetLocation.hub_name || targetLocation.dataValues?.hub_name || 'Unknown Hub';
-        } else if (locationType === 'OSC') {
-          locationName = targetLocation.component_name || targetLocation.dataValues?.component_name || 'Unknown OSC';
-        }
+        // Get proper scheme name and type from employee data
+        const schemeName = employeeWithLocation.scheme?.scheme_name || 'Unknown Scheme';
+        const schemeTypeName = employeeWithLocation.scheme?.schemeType?.scheme_name || 'Unknown Type';
         
         const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
         
-        // Create detailed error message with all location information
+        // Create detailed error message with proper scheme information
         const errorMessage = 
           `Location Access Denied\n\n` +
-          `You are too far from your assigned ${locationType}: "${locationName}"\n\n` +
+          `You are too far from your assigned Scheme: "${schemeName}" (${schemeTypeName})\n\n` +
           `Distance Details:\n` +
           `• Your current distance: ${validation.distance}m\n` +
           `• Maximum allowed distance: ${validation.allowedRadius}m\n` +
           `• You are ${metersOutOfRange} meters out of range\n\n` +
           `Target Location:\n` +
-          `• ${locationType}: ${locationName}\n` +
+          `• Scheme: ${schemeName}\n` +
+          `• Type: ${schemeTypeName}\n` +
           `• Coordinates: ${targetLocation.latitude}, ${targetLocation.longitude}\n\n` +
-          `Please move closer to your ${locationType} location and try again.`;
+          `Please move closer to your Scheme location and try again.`;
         
         throw new ApiError(403, errorMessage);
       }
@@ -499,12 +486,17 @@ const getAttendanceRecords = async (adminUser, query) => {
 
   if (query.status) where.status = query.status;
 
-  // Date filtering
-  if (query.month && query.year) {
+  // Date filtering - support both month/year and date range
+  if (query.from_date && query.to_date) {
+    // Date range filtering
+    where.attendance_date = { [Op.between]: [query.from_date, query.to_date] };
+  } else if (query.month && query.year) {
+    // Month/year filtering (existing logic)
     const startDate = new Date(query.year, query.month - 1, 1);
     const endDate = new Date(query.year, query.month, 0);
     where.attendance_date = { [Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]] };
   } else if (query.date) {
+    // Single date filtering (existing logic)
     where.attendance_date = query.date;
   }
 
@@ -516,21 +508,45 @@ const getAttendanceRecords = async (adminUser, query) => {
     where.employee_id = parseInt(query.employee_id);
   }
 
-  // Build include options with all necessary associations for search
+  // Add district and scheme filters
+  if (query.district_id) {
+    where['$employee.district_id$'] = parseInt(query.district_id);
+  }
+
+  // Add scheme_type_id filter if provided
+  if (query.scheme_type_id) {
+    where['$employee.scheme.scheme_type_id$'] = parseInt(query.scheme_type_id);
+  }
+
+  // Add scheme_id filter if provided
+  if (query.scheme_id) {
+    where['$employee.scheme_id$'] = parseInt(query.scheme_id);
+  }
+
+  // Handle filter_type for radio button selections (legacy support)
+  if (query.filter_type === 'osc_only') {
+    // Show only records where scheme_type is OSC
+    where['$employee.scheme.schemeType.scheme_code$'] = 'OSC';
+  } else if (query.filter_type === 'hub_only') {
+    // Show only records where scheme_type is HUB
+    where['$employee.scheme.schemeType.scheme_code$'] = 'HUB';
+  }
+
+  // Build include options with only necessary associations
   const includeOptions = [
     {
       model: EmployeeMaster,
       as: 'employee',
-      attributes: ['employee_id', 'employee_code', 'post_id', 'district_id', 'component_id'],
+      attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id'],
       include: [
         {
-          model: ApplicantMaster,
+          model: db.ApplicantMaster,
           as: 'applicant',
-          attributes: ['applicant_id', 'email'],
+          attributes: ['email'],
           required: false,
           include: [
             {
-              model: ApplicantPersonal,
+              model: db.ApplicantPersonal,
               as: 'personal',
               attributes: ['full_name'],
               required: false
@@ -538,15 +554,21 @@ const getAttendanceRecords = async (adminUser, query) => {
           ]
         },
         {
-          model: DistrictMaster,
+          model: db.DistrictMaster,
           as: 'district',
           attributes: ['district_name'],
           required: false
         },
         {
-          model: PostMaster,
-          as: 'post',
-          attributes: ['post_name'],
+          model: db.Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code'],
+            required: false
+          }],
           required: false
         }
       ]
@@ -562,48 +584,14 @@ const getAttendanceRecords = async (adminUser, query) => {
       where.status = query.status;
     }
 
-    const { count, rows } = await Attendance.findAndCountAll({
-      where: {
-        ...where,
-        [Op.and]: [
-          where[Op.and] || [],
-          [
-            {
-              [Op.or]: [
-                { '$employee.employee_code$': { [Op.iLike]: `%${searchTerm}%` } },
-                { '$employee.applicant.email$': { [Op.iLike]: `%${searchTerm}%` } },
-                { '$employee.applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } },
-                { '$employee.district.district_name$': { [Op.iLike]: `%${searchTerm}%` } },
-                { '$employee.post.post_name$': { [Op.iLike]: `%${searchTerm}%` } }
-              ]
-            }
-          ]
-        ]
-      },
-      include: includeOptions,
-      order: [['attendance_date', 'DESC'], ['check_in_time', 'DESC']],
-      limit,
-      offset
-    });
-
-    // Flatten the response to avoid deep nesting
-    const flattenedRows = rows.map(row => {
-      const rowData = row.toJSON();
-      
-      // Extract employee info
-      if (rowData.employee) {
-        rowData.employee_code = rowData.employee.employee_code;
-        rowData.employee_name = rowData.employee.applicant?.personal?.full_name || null;
-        rowData.employee_email = rowData.employee.applicant?.email || null;
-        
-        // Remove nested employee object
-        delete rowData.employee;
-      }
-      
-      return rowData;
-    });
-
-    return paginatedResponse(flattenedRows, count, page, limit);
+    // Add search conditions to where clause
+    where[Op.or] = [
+      { '$employee.employee_code$': { [Op.iLike]: `%${searchTerm}%` } },
+      { '$employee.applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } },
+      { '$employee.district.district_name$': { [Op.iLike]: `%${searchTerm}%` } },
+      { '$employee.scheme.scheme_name$': { [Op.iLike]: `%${searchTerm}%` } },
+      { '$employee.scheme.schemeType.scheme_code$': { [Op.iLike]: `%${searchTerm}%` } }
+    ];
   }
 
   const { count, rows } = await Attendance.findAndCountAll({
@@ -614,24 +602,9 @@ const getAttendanceRecords = async (adminUser, query) => {
     offset
   });
 
-  // Flatten the response to avoid deep nesting
-  const flattenedRows = rows.map(row => {
-    const rowData = row.toJSON();
-    
-    // Extract employee info
-    if (rowData.employee) {
-      rowData.employee_code = rowData.employee.employee_code;
-      rowData.employee_name = rowData.employee.applicant?.personal?.full_name || null;
-      rowData.employee_email = rowData.employee.applicant?.email || null;
-      
-      // Remove nested employee object
-      delete rowData.employee;
-    }
-    
-    return rowData;
-  });
+  const formattedRows = rows.map(formatAttendanceRecord);
 
-  return paginatedResponse(flattenedRows, count, page, limit);
+  return paginatedResponse(formattedRows, count, page, limit);
 };
 
 /**
@@ -646,15 +619,40 @@ const getAttendanceSummary = async (adminUser, query) => {
 
   const now = new Date();
   const month = parseInt(query.month) || (now.getMonth() + 1);
-  const year = parseInt(query.year) || now.getFullYear();
+  let year = parseInt(query.year);
+  
+  // Fix year validation - if year is 0 or invalid, use current year
+  if (!year || year < 2000 || year > 2100) {
+    year = now.getFullYear();
+  }
+  
   const district_id = query.district_id ? parseInt(query.district_id) : null;
   const search = query.search || '';
   const page = parseInt(query.page) || 1;
   const limit = parseInt(query.limit) || 10;
+  const yearly = query.yearly === 'true' || query.yearly === true;
+  const filter_type = query.filter_type || 'all';
   
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
-  const workingDays = await getWorkingDaysInMonth(year, month, Holiday);
+  let startDate, endDate, workingDays;
+  
+  if (yearly) {
+    // Yearly aggregation
+    startDate = new Date(year, 0, 1); // Jan 1st
+    endDate = new Date(year, 11, 31); // Dec 31st
+    try {
+      workingDays = await getWorkingDaysInYear(year, Holiday);
+    } catch (error) {
+      logger.error('Error calculating yearly working days:', error);
+      // Fallback to approximate working days (261 days excluding Sundays)
+      workingDays = 261;
+    }
+  } else {
+    // Monthly aggregation (existing logic)
+    startDate = new Date(year, month - 1, 1);
+    endDate = new Date(year, month, 0);
+    const workingDaysResult = await getWorkingDaysInMonth(month, year);
+    workingDays = workingDaysResult.workingDays;
+  }
 
   // Build employee filter
   const employeeFilter = {
@@ -663,6 +661,25 @@ const getAttendanceSummary = async (adminUser, query) => {
     is_active: true,
     ...(district_id && { district_id })
   };
+
+  // Add scheme_type_id filter if provided
+  if (query.scheme_type_id) {
+    employeeFilter['$scheme.scheme_type_id$'] = parseInt(query.scheme_type_id);
+  }
+
+  // Add scheme_id filter if provided
+  if (query.scheme_id) {
+    employeeFilter['$scheme.scheme_id$'] = parseInt(query.scheme_id);
+  }
+
+  // Handle filter_type for radio button selections (legacy support)
+  if (filter_type === 'osc_only') {
+    // Show only employees where scheme_type is OSC
+    employeeFilter['$scheme.schemeType.scheme_code$'] = 'OSC';
+  } else if (filter_type === 'hub_only') {
+    // Show only employees where scheme_type is HUB
+    employeeFilter['$scheme.schemeType.scheme_code$'] = 'HUB';
+  }
 
   // Add search filter to employee query
   if (search) {
@@ -678,18 +695,24 @@ const getAttendanceSummary = async (adminUser, query) => {
     where: employeeFilter,
     include: [
       {
-        model: ApplicantMaster,
+        model: db.ApplicantMaster,
         as: 'applicant',
         attributes: [],
         required: false,
         include: [
           {
-            model: ApplicantPersonal,
+            model: db.ApplicantPersonal,
             as: 'personal',
             attributes: [],
             required: false
           }
         ]
+      },
+      {
+        model: db.Scheme,
+        as: 'scheme',
+        attributes: [],
+        required: false
       }
     ]
   });
@@ -698,28 +721,40 @@ const getAttendanceSummary = async (adminUser, query) => {
   const { offset } = getPagination({ page, limit });
   const employees = await EmployeeMaster.findAll({
     where: employeeFilter,
-    attributes: ['employee_id', 'employee_code', 'district_id', 'component_id', 'post_id'],
+    attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id', 'post_id'],
     include: [
       {
-        model: DistrictMaster,
+        model: db.DistrictMaster,
         as: 'district',
         attributes: ['district_id', 'district_name'],
         required: false
       },
       {
-        model: PostMaster,
+        model: db.Scheme,
+        as: 'scheme',
+        attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+        include: [{
+          model: db.SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code'],
+          required: false
+        }],
+        required: false
+      },
+      {
+        model: db.PostMaster,
         as: 'post',
         attributes: ['post_id', 'post_name'],
         required: false
       },
       {
-        model: ApplicantMaster,
+        model: db.ApplicantMaster,
         as: 'applicant',
         attributes: ['applicant_id', 'email'],
         required: false,
         include: [
           {
-            model: ApplicantPersonal,
+            model: db.ApplicantPersonal,
             as: 'personal',
             attributes: ['full_name'],
             required: false
@@ -736,20 +771,14 @@ const getAttendanceSummary = async (adminUser, query) => {
     [Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
   };
 
-  // Get attendance counts per employee
+  // Get attendance counts per employee using centralized attributes
   const attendanceCounts = await Attendance.findAll({
     where: {
       employee_id: { [Op.in]: employees.map(e => e.employee_id) },
       attendance_date: dateRange,
       is_deleted: false
     },
-    attributes: [
-      'employee_id',
-      [fn('COUNT', literal("CASE WHEN status = 'PRESENT' THEN 1 END")), 'present_count'],
-      [fn('COUNT', literal("CASE WHEN status = 'ON_LEAVE' THEN 1 END")), 'leave_count'],
-      [fn('COUNT', literal("CASE WHEN status = 'HALF_DAY' THEN 1 END")), 'half_day_count'],
-      [fn('COUNT', literal("CASE WHEN status = 'HOLIDAY' THEN 1 END")), 'holiday_count']
-    ],
+    attributes: getAttendanceCountAttributes(),
     group: ['employee_id']
   });
 
@@ -759,50 +788,30 @@ const getAttendanceSummary = async (adminUser, query) => {
   });
 
   
-  // Build per-employee result
+  // Build per-employee result using centralized function
   const employeeSummaries = employees.map(emp => {
     const counts = countMap[emp.employee_id] || {};
-    const present = parseInt(counts.present_count) || 0;
-    const onLeave = parseInt(counts.leave_count) || 0;
-    const halfDayCount = parseInt(counts.half_day_count) || 0;
-    const halfDayDays = halfDayCount * 0.5;
-    const holiday = parseInt(counts.holiday_count) || 0;
-    const fullName = emp.applicant?.personal?.full_name || '';
     
-    // Calculate absent as working days minus all other statuses
-    const absent = Math.max(0, workingDays - present - onLeave - halfDayDays - holiday);
-    
-    return {
+    // Properly extract employee data from Sequelize object
+    const employeeData = {
       employee_id: emp.employee_id,
-      employee_code: emp.employee_code,
-      name: fullName,
-      district: emp.district?.district_name || '',
-      district_id: emp.district_id,
-      osc: emp.component?.component_name || '',
-      post: emp.post?.post_name || '',
-      working_days: workingDays,
-      present,
-      absent,
-      on_leave: onLeave,
-      half_day: halfDayCount,
-      half_day_days: halfDayDays,
-      holiday,
-      attendance_percentage: workingDays > 0 ? Math.round(((present + halfDayDays) / workingDays) * 100) : 0
+      employee_code: emp.get('employee_code'), // Use get() method for Sequelize
+      district_id: emp.get('district_id'),
+      scheme_id: emp.get('scheme_id'),
+      post_id: emp.get('post_id'),
+      district: emp.district,
+      scheme: emp.scheme,
+      post: emp.post,
+      applicant: emp.applicant,
+      ...counts
     };
+    
+    return buildEmployeeAttendanceSummary(employeeData, workingDays);
   });
 
-  // Single summary object for filtered data
+  // Build aggregated summary using centralized function
   const summary = {
-    total_employees: employeeSummaries.length,
-    total_present: employeeSummaries.reduce((sum, e) => sum + e.present, 0),
-    total_absent: employeeSummaries.reduce((sum, e) => sum + e.absent, 0),
-    total_on_leave: employeeSummaries.reduce((sum, e) => sum + e.on_leave, 0),
-    total_half_day: employeeSummaries.reduce((sum, e) => sum + (e.half_day || 0), 0),
-    total_half_day_days: employeeSummaries.reduce((sum, e) => sum + (e.half_day_days || 0), 0),
-    total_holiday: employeeSummaries.reduce((sum, e) => sum + (e.holiday || 0), 0),
-    total_working: employeeSummaries.length * workingDays,
-    attendance_percentage: employeeSummaries.length > 0 ? 
-      Math.round(((employeeSummaries.reduce((sum, e) => sum + e.present + (e.half_day_days || 0), 0)) / (employeeSummaries.length * workingDays)) * 100) : 0,
+    ...buildAggregatedSummary(employeeSummaries, workingDays),
     month,
     year,
     working_days: workingDays,
@@ -860,7 +869,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
     throw new ApiError(400, 'Half day type is required when status is HALF_DAY.');
   }
   
-  const t = await sequelize.transaction();
+  const t = await db.sequelize.transaction();
   
   try {
     const results = [];
@@ -905,6 +914,10 @@ const markAttendanceByAdmin = async (adminUser, data) => {
         where: { holiday_date: dateStr, is_active: true, is_deleted: false },
         transaction: t
       });
+
+      if (holiday && status !== 'HOLIDAY') {
+        throw new ApiError(400, `Cannot mark attendance on holiday (${holiday.holiday_name}). Please mark as HOLIDAY or choose another date.`);
+      }
       
       // Check if attendance already exists
       const existing = await Attendance.findOne({
@@ -914,43 +927,61 @@ const markAttendanceByAdmin = async (adminUser, data) => {
       
       let attendance;
       if (existing) {
-        // Update existing attendance
+        // Override existing attendance - remarks are mandatory
+        if (!remarks || !remarks.trim()) {
+          throw new ApiError(400, `Remarks are mandatory when overriding existing attendance for employee ${employee.employee_code} on ${dateStr}. Previous status: ${existing.status}`);
+        }
+        
         attendance = existing;
+        const previousStatus = existing.status;
+        attendance.previous_status = previousStatus;
         attendance.status = status;
-        attendance.remarks = remarks || null;
+        attendance.remarks = remarks;
         attendance.half_day_type = (status === 'HALF_DAY') ? half_day_type : null;
+        attendance.status_changed_by = adminUser.admin_id;
+        attendance.status_changed_at = new Date();
+        attendance.status_change_reason = remarks;
         attendance.updated_by = adminUser.admin_id;
         attendance.updated_at = new Date();
         await attendance.save({ transaction: t });
         
-        logger.info(`Attendance updated by admin: employee=${employee.employee_code}, date=${dateStr}, status=${status}, admin=${adminUser.admin_id}`);
+        logger.info(`Attendance OVERRIDDEN by admin: employee=${employee.employee_code}, date=${dateStr}, previousStatus=${previousStatus}, newStatus=${status}, reason="${remarks}", admin=${adminUser.admin_id}`);
       } else {
         // Create new attendance
-        attendance = await Attendance.create({
-          employee_id,
+        const attendanceData = {
+          employee_id: parseInt(employee_id),
           attendance_date: dateStr,
-          status,
-          remarks: remarks || (holiday ? `Holiday: ${holiday.holiday_name}` : null),
+          status: status,
+          remarks: remarks || null,
           half_day_type: (status === 'HALF_DAY') ? half_day_type : null,
           check_in_time: status === 'PRESENT' ? '09:00:00' : null,
           check_out_time: status === 'PRESENT' ? '18:00:00' : null,
           ip_address: '127.0.0.1',
           device_type: 'desktop',
-          is_holiday: !!holiday,
+          is_deleted: false,
           created_by: adminUser.admin_id
-        }, { transaction: t });
+        };
         
-        logger.info(`Attendance marked by admin: employee=${employee.employee_code}, date=${dateStr}, status=${status}, admin=${adminUser.admin_id}`);
+        attendance = await Attendance.create(attendanceData, { transaction: t });
       }
       
-      results.push({
+      const result = {
         employee_id: employee.employee_id,
         employee_code: employee.employee_code,
         employee_name: employee.applicant?.personal?.full_name || 'N/A',
         attendance_date: dateStr,
         status: attendance.status,
         action: existing ? 'updated' : 'created'
-      });
+      };
+      
+      // Include audit trail info when attendance was overridden
+      if (existing) {
+        result.previous_status = attendance.previous_status;
+        result.changed_by = adminUser.admin_id;
+        result.change_reason = remarks;
+      }
+      
+      results.push(result);
     }
     
     await t.commit();
@@ -1034,11 +1065,22 @@ const checkOutSimple = async (user, data, ip) => {
     where: { attendance_id: attendance.attendance_id }
   });
 
+  // Auto-determine status based on total work hours using centralized function
+  const hours = parseFloat(totalHours) || 0;
+  const updatedStatus = calculateAttendanceStatus(attendance.check_in_time, currentTime);
+  logger.info('Auto-calculated attendance status', {
+    employeeId: employee.employee_id,
+    checkInTime: attendance.check_in_time,
+    checkOutTime: currentTime,
+    totalHours: hours,
+    calculatedStatus: updatedStatus
+  });
+
   await attendance.update({
     check_out_time: currentTime,
     check_out_photo_path: data.photoPath || attendance.attendance_image_path,
-    total_work_hours: totalHours || 0,
-    status: 'PRESENT', // Keep showing present while actively marking
+    total_work_hours: hours,
+    status: updatedStatus,
     ip_address: ip,
     latitude: data.latitude || attendance.latitude,
     longitude: data.longitude || attendance.longitude,
@@ -1057,6 +1099,52 @@ const checkOutSimple = async (user, data, ip) => {
     message: 'Check-out successful',
     data: attendance
   };
+};
+
+/**
+ * Calculate attendance status based on check-in and check-out times
+ * Auto-detects half-day based on hours worked
+ * @param {string} checkInTime - Check-in time in HH:MM:SS format
+ * @param {string} checkOutTime - Check-out time in HH:MM:SS format
+ * @returns {string} - 'PRESENT' | 'HALF_DAY' | 'ABSENT'
+ */
+const calculateAttendanceStatus = (checkInTime, checkOutTime) => {
+  // If no check-in time, mark as absent
+  if (!checkInTime) return 'ABSENT';
+  
+  // If check-in exists but no check-out, default to present
+  // User can check-out later to complete hours
+  if (!checkOutTime) return 'PRESENT';
+  
+  try {
+    // Parse times in HH:MM:SS format
+    const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
+    const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
+    
+    // Create date objects for calculation (using same date)
+    const baseDate = new Date();
+    const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
+    const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
+    
+    // Calculate difference in milliseconds
+    const diffMs = checkOut - checkIn;
+    
+    // Handle negative or zero difference
+    if (diffMs <= 0) return 'PRESENT';
+    
+    // Convert to hours
+    const hours = diffMs / (1000 * 60 * 60);
+    
+    // Auto-detect half-day based on hours worked
+    if (hours < 8) {
+      return 'HALF_DAY';
+    } else {
+      return 'PRESENT';
+    }
+  } catch (error) {
+    logger.error('Error calculating attendance status:', error);
+    return 'PRESENT'; // Default to present on error
+  }
 };
 
 /**
@@ -1096,20 +1184,32 @@ const finalizeDailyAttendance = async () => {
   });
 
   for (const attendance of pendingAttendances) {
-    const finalStatus = attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT';
+    // Use centralized calculateAttendanceStatus function
+    const calculatedStatus = calculateAttendanceStatus(attendance.check_in_time, attendance.check_out_time);
+    
+    // For finalization, if no check-out time, check if there's check-in to determine status
+    let finalStatus = calculatedStatus;
+    if (!attendance.check_out_time && attendance.check_in_time) {
+      // If only check-in exists, mark as PRESENT (employee was present)
+      finalStatus = 'PRESENT';
+    } else if (!attendance.check_in_time) {
+      // If no check-in at all, mark as ABSENT
+      finalStatus = 'ABSENT';
+    }
+    
+    const hours = parseFloat(attendance.total_work_hours) || 0;
     
     await attendance.update({
       final_status: finalStatus,
-      // Keep main status as PRESENT during day, only final_status changes
-      status: attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT'
+      status: finalStatus
     });
 
     logger.info('Attendance finalized', {
       employeeId: attendance.employee_id,
       date: today,
-      totalHours: attendance.total_work_hours,
+      totalHours: hours,
       finalStatus: finalStatus,
-      mainStatus: attendance.total_work_hours >= 8.0 ? 'PRESENT' : 'ABSENT'
+      calculatedStatus: calculatedStatus
     });
   }
 
@@ -1119,6 +1219,419 @@ const finalizeDailyAttendance = async () => {
   };
 };
 
+/**
+ * Generate PDF for attendance records with filters using existing HTML-to-PDF utility
+ * Supports both month/year and date range filtering
+ */
+const generateAttendancePDF = async (adminUser, query) => {
+  try {
+    const htmlToPdf = require('html-pdf-node');
+    const { 
+      month, 
+      year, 
+      from_date, 
+      to_date, 
+      district_id, 
+      scheme_id, 
+      employee_id
+    } = query;
+
+    // Validate input - either month/year OR date range
+    if (!month && !from_date) {
+      throw ApiError.badRequest('Either month/year or from_date is required');
+    }
+    if (from_date && !to_date) {
+      throw ApiError.badRequest('to_date is required when from_date is provided');
+    }
+    if (month && (!year || year < 2020 || year > 2100)) {
+      throw ApiError.badRequest('Valid year is required when month is provided');
+    }
+
+    // Get optimized attendance records for PDF - only necessary fields
+    const records = await getAttendanceRecordsForPDF(adminUser, query);
+
+    // Generate HTML for PDF
+    const html = generateAttendanceHTML(records, { 
+      month, 
+      year, 
+      from_date, 
+      to_date, 
+      district_id, 
+      scheme_id, 
+      employee_id
+    });
+
+    // PDF options for compact design
+    const pdfOptions = {
+      format: 'A4',
+      printBackground: true,
+      margin: { 
+        top: '10mm', 
+        right: '8mm', 
+        bottom: '10mm', 
+        left: '8mm' 
+      },
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    };
+
+    const pdfBuffer = await htmlToPdf.generatePdf(
+      { content: html },
+      pdfOptions
+    );
+
+    // Generate appropriate filename
+    let fileName;
+    logger.info('PDF: Generating filename with date range:', { from_date, to_date, month, year });
+    
+    if (from_date && to_date) {
+      // Handle Date objects by converting to YYYY-MM-DD format
+      const fromDateStr = from_date instanceof Date ? from_date.toISOString().split('T')[0] : from_date;
+      const toDateStr = to_date instanceof Date ? to_date.toISOString().split('T')[0] : to_date;
+      fileName = `attendance_${fromDateStr}_to_${toDateStr}.pdf`;
+    } else if (month && year) {
+      fileName = `attendance_${month}_${year}.pdf`;
+    } else {
+      fileName = `attendance_report_${new Date().toISOString().split('T')[0]}.pdf`;
+    }
+    
+    logger.info('PDF: Generated filename:', fileName);
+
+    return {
+      pdfBuffer,
+      fileName
+    };
+  } catch (err) {
+    logger.error('Error generating attendance PDF:', err);
+    throw err;
+  }
+};
+
+/**
+ * Get optimized attendance records for PDF generation
+ * Only fetches necessary fields to improve performance
+ */
+const getAttendanceRecordsForPDF = async (adminUser, query) => {
+  try {
+    const { month, year, from_date, to_date, district_id, scheme_id, employee_id } = query;
+    
+    const employeeIds = await getEmployeeIdsUnderAdmin(adminUser, EmployeeMaster);
+
+    if (employeeIds.length === 0) {
+      return [];
+    }
+
+    const where = {
+      employee_id: { [Op.in]: employeeIds },
+      is_deleted: false
+    };
+
+    // Date filtering - support both month/year and date range
+    if (from_date && to_date) {
+      // Date range filtering
+      where.attendance_date = { [Op.between]: [from_date, to_date] };
+    } else if (month && year) {
+      // Month/year filtering (existing logic)
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0);
+      where.attendance_date = { [Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]] };
+    }
+
+    // Add filters
+    if (district_id) {
+      where['$employee.district_id$'] = parseInt(district_id);
+    }
+
+    // Handle filter_type for radio button selections
+    if (query.filter_type === 'osc_only') {
+      // Show only records where scheme_type is OSC
+      where['$employee.scheme.schemeType.scheme_code$'] = 'OSC';
+    } else if (query.filter_type === 'hub_only') {
+      // Show only records where scheme_type is HUB
+      where['$employee.scheme.schemeType.scheme_code$'] = 'HUB';
+    } else if (query.filter_type === 'all') {
+      // Show all records (no additional filtering)
+      // Still apply specific scheme_id if provided
+      if (scheme_id) {
+        where['$employee.scheme_id$'] = parseInt(scheme_id);
+      }
+    } else {
+      // Legacy behavior - apply specific filters if provided
+      if (scheme_id) {
+        where['$employee.scheme_id$'] = parseInt(scheme_id);
+      }
+    }
+
+    if (employee_id) {
+      if (!employeeIds.includes(parseInt(employee_id))) {
+        throw new ApiError(403, 'You do not have access to this employee.');
+      }
+      where.employee_id = parseInt(employee_id);
+    }
+
+    // Search functionality
+    if (query.search && query.search.trim()) {
+      const searchTerm = query.search.trim();
+      where[Op.and] = [
+        {
+          [Op.or]: [
+            { '$employee.employee_code$': { [Op.iLike]: `%${searchTerm}%` } },
+            { '$employee.applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } }
+          ]
+        }
+      ];
+    }
+
+    const rawRecords = await Attendance.findAll({
+      where,
+      attributes: [
+        'attendance_id', 'attendance_date', 'check_in_time', 'check_out_time', 
+        'status', 'latitude', 'longitude', 'employee_id', 'total_work_hours', 'remarks'
+      ],
+      include: [
+        {
+          model: EmployeeMaster,
+          as: 'employee',
+          attributes: ['employee_code', 'district_id', 'scheme_id'],
+          include: [
+            {
+              model: db.ApplicantMaster,
+              as: 'applicant',
+              attributes: ['email'],
+              include: [
+                {
+                  model: db.ApplicantPersonal,
+                  as: 'personal',
+                  attributes: ['full_name'],
+                  required: false
+                }
+              ],
+              required: false
+            },
+            {
+              model: db.DistrictMaster,
+              as: 'district',
+              attributes: ['district_name'],
+              required: false
+            },
+            {
+              model: db.Scheme,
+              as: 'scheme',
+              attributes: ['scheme_name', 'scheme_type_id'],
+              required: false,
+              include: [{
+                model: db.SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: false
+              }]
+            }
+          ]
+        }
+      ],
+      order: [['attendance_date', 'ASC'], ['employee_id', 'ASC']], // Order for better PDF layout
+      limit: Math.min(query.pdf_limit || 5000, 10000) // Configurable limit with safety cap
+    });
+
+    return rawRecords.map(formatAttendanceRecord);
+  } catch (error) {
+    logger.error('PDF: Error in getAttendanceRecordsForPDF:', error);
+    logger.error('PDF: Error stack:', error.stack);
+    throw new ApiError(500, 'Failed to fetch attendance records for PDF: ' + error.message);
+  }
+};
+
+/**
+ * Generate HTML for attendance records PDF with clean design
+ * Supports both date range and month/year filtering with compact/detailed formats
+ */
+const generateAttendanceHTML = (records, filters) => {
+  const { month, year, from_date, to_date, district_id, scheme_id, employee_id } = filters;
+  
+  const escapeHtml = (value) => {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const formatDateForPDF = (dateStr) => {
+    if (!dateStr) return '';
+    // Handle YYYY-MM-DD format
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr; // Return original if invalid
+    return date.toLocaleDateString('en-IN', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric',
+      timeZone: 'Asia/Kolkata'
+    });
+  };
+
+  const calculateWorkHours = (checkInTime, checkOutTime) => {
+    if (!checkInTime || !checkOutTime) return '--';
+    
+    try {
+      // Parse times in HH:MM:SS format
+      const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
+      const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
+      
+      // Create date objects for calculation (using same date)
+      const baseDate = new Date();
+      const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
+      const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
+      
+      // Calculate difference in milliseconds
+      const diffMs = checkOut - checkIn;
+      
+      // Handle negative or zero difference
+      if (diffMs <= 0) return '--';
+      
+      // Convert to hours
+      const hours = diffMs / (1000 * 60 * 60);
+      
+      // Format to 2 decimal places
+      return hours.toFixed(2);
+    } catch (error) {
+      return '--';
+    }
+  };
+
+  
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  const generatedOn = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  // Determine date range display
+  let dateDisplay;
+  if (from_date && to_date) {
+    // Format dates as DD/MM/YYYY
+    const fromDateFormatted = formatDateForPDF(from_date);
+    const toDateFormatted = formatDateForPDF(to_date);
+    dateDisplay = `Date Range: ${fromDateFormatted} to ${toDateFormatted}`;
+  } else if (month && year) {
+    const monthName = monthNames[month - 1];
+    dateDisplay = `Month: ${monthName} ${year}`;
+  } else {
+    dateDisplay = 'Custom Date Range';
+  }
+
+  const firstRecord = records[0] || {};
+  const filterLabels = [];
+  if (district_id) {
+    filterLabels.push(`District: ${firstRecord.district_name || district_id}`);
+  }
+  if (scheme_id) {
+    filterLabels.push(`Scheme: ${firstRecord.scheme_name || scheme_id}`);
+  }
+  if (employee_id) {
+    filterLabels.push(`Employee: ${firstRecord.employee_name || employee_id}`);
+  }
+
+  // Compact design with all detailed fields
+  const fontSize = '7px';
+  const padding = '2px 4px';
+  const titleSize = '14px';
+  const subtitleSize = '9px';
+  const filterSize = '8px';
+
+  let html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Attendance Records</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 10px; }
+        .header { text-align: center; margin-bottom: 15px; }
+        .title { font-size: ${titleSize}; font-weight: bold; margin-bottom: 5px; }
+        .subtitle { font-size: ${subtitleSize}; color: #666; margin-bottom: 3px; }
+        .filters { font-size: ${filterSize}; color: #888; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        th, td { border: 1px solid #ddd; padding: ${padding}; text-align: left; font-size: ${fontSize}; }
+        th { background-color: #f5f5f5; font-weight: bold; }
+        .footer { text-align: center; font-size: ${filterSize}; color: #888; margin-top: 15px; }
+        .no-records { text-align: center; color: #666; margin: 30px 0; font-size: ${fontSize}; }
+        .date-col { width: 60px; }
+        .code-col { width: 80px; }
+        .name-col { width: 100px; }
+        .district-col { width: 80px; }
+        .scheme-col { width: 80px; }
+        .scheme-type-col { width: 60px; }
+        .status-col { width: 50px; }
+        .time-col { width: 50px; }
+        .hours-col { width: 40px; }
+        .location-col { width: 80px; }
+        .remarks-col { width: 100px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="title">Attendance Records</div>
+        <div class="subtitle">${dateDisplay}</div>
+        <div class="filters">
+          ${filterLabels.length ? filterLabels.join(' | ') : 'All Filters'}
+        </div>
+      </div>
+      
+      ${records.length === 0 ? 
+        '<div class="no-records">No attendance records found for the selected criteria.</div>' :
+        `
+        <table>
+          <thead>
+            <tr>
+              <th class="date-col">Date</th>
+              <th class="code-col">Code</th>
+              <th class="name-col">Name</th>
+              <th class="district-col">District</th>
+              <th class="scheme-col">Scheme</th>
+              <th class="scheme-type-col">Type</th>
+              <th class="status-col">Status</th>
+              <th class="time-col">In</th>
+              <th class="time-col">Out</th>
+              <th class="hours-col">Hours</th>
+              <th class="location-col">Location</th>
+              <th class="remarks-col">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${records.map(record => {
+              return `
+              <tr>
+                <td class="date-col">${escapeHtml(formatDateForPDF(record.attendance_date || ''))}</td>
+                <td class="code-col">${escapeHtml(record.employee_code || '')}</td>
+                <td class="name-col">${escapeHtml(record.employee_name || '')}</td>
+                <td class="district-col">${escapeHtml(record.district_name || '')}</td>
+                <td class="scheme-col">${escapeHtml(record.scheme_name || '')}</td>
+                <td class="scheme-type-col">${escapeHtml(record.scheme_type || '')}</td>
+                <td class="status-col">${escapeHtml(record.status || '')}</td>
+                <td class="time-col">${escapeHtml(record.check_in_time || '')}</td>
+                <td class="time-col">${escapeHtml(record.check_out_time || '')}</td>
+                <td class="hours-col">${escapeHtml(calculateWorkHours(record.check_in_time, record.check_out_time))}</td>
+                <td class="location-col"><small>${escapeHtml(record.latitude && record.longitude ? `${record.latitude},${record.longitude}` : '--')}</small></td>
+                <td class="remarks-col"><small>${escapeHtml(record.remarks || '--')}</small></td>
+              </tr>
+            `;
+            }).join('')}
+          </tbody>
+        </table>
+        `
+      }
+      
+      <div class="footer">
+        Generated on: ${generatedOn} | Total Records: ${records.length}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return html;
+};
+
+
 module.exports = {
   markAttendance,
   markAttendanceByAdmin,
@@ -1127,5 +1640,8 @@ module.exports = {
   getAttendanceSummary,
   enhanceMarkAttendanceWithCheckIn,
   checkOutSimple,
-  finalizeDailyAttendance
+  finalizeDailyAttendance,
+  generateAttendancePDF,
+  getAttendanceRecordsForPDF,
+  calculateAttendanceStatus
 };

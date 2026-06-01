@@ -2,7 +2,8 @@ const db = require('../../../models');
 const { Op } = db.Sequelize;
 const logger = require('../../../config/logger');
 const { Attendance, LeaveApplication, LeaveType, MonthlyReport, PerformanceReview, FieldVisit, EmployeeMaster, Holiday } = require('../models');
-const { getEmployeeFromUser, getEmployeeIdsUnderAdmin, getWorkingDaysInMonth } = require('../utils/hrmHelpers');
+const { getEmployeeFromUser, getEmployeeIdsUnderAdmin } = require('../utils/hrmHelpers');
+const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
 const ApplicantPersonal = db.ApplicantPersonal;
 
 /**
@@ -41,37 +42,37 @@ const getAdminDashboard = async (adminUser) => {
       presentToday = await Attendance.count({
         where: { ...empFilter, attendance_date: today, status: 'PRESENT', is_deleted: false }
       });
-    } catch (e) { console.error('Attendance query failed:', e.message); }
+    } catch (e) { logger.error('Attendance query failed:', e.message); }
     
     try {
       onLeaveToday = await LeaveApplication.count({
         where: { ...empFilter, status: 'APPROVED', from_date: { [Op.lte]: today }, to_date: { [Op.gte]: today }, is_deleted: false }
       });
-    } catch (e) { console.error('LeaveApplication count failed:', e.message); }
+    } catch (e) { logger.error('LeaveApplication count failed:', e.message); }
     
     try {
       contractExpiring = await EmployeeMaster.count({
         where: { ...empFilter, contract_end_date: { [Op.between]: [today, thirtyDaysFromNow] }, is_deleted: false }
       });
-    } catch (e) { console.error('Contract expiring count failed:', e.message); }
+    } catch (e) { logger.error('Contract expiring count failed:', e.message); }
     
     try {
       pendingReports = await MonthlyReport.count({
         where: { ...empFilter, status: 'SUBMITTED', is_deleted: false }
       });
-    } catch (e) { console.error('Pending reports count failed:', e.message); }
+    } catch (e) { logger.error('Pending reports count failed:', e.message); }
     
     try {
       leaveApprovals = await LeaveApplication.count({
         where: { ...empFilter, status: 'PENDING', is_deleted: false }
       });
-    } catch (e) { console.error('Leave approvals count failed:', e.message); }
+    } catch (e) { logger.error('Leave approvals count failed:', e.message); }
     
     try {
       evaluationsDue = await PerformanceReview.count({
         where: { ...empFilter, status: 'SELF_SUBMITTED', is_deleted: false }
       });
-    } catch (e) { console.error('Evaluations count failed:', e.message); }
+    } catch (e) { logger.error('Evaluations count failed:', e.message); }
 
     const monthStart = new Date(currentYear, currentMonth - 1, 1).toISOString().split('T')[0];
     const monthEnd = new Date(currentYear, currentMonth, 0).toISOString().split('T')[0];
@@ -79,7 +80,7 @@ const getAdminDashboard = async (adminUser) => {
       fieldVisitsThisMonth = await FieldVisit.count({
         where: { ...empFilter, visit_date: { [Op.between]: [monthStart, monthEnd] }, is_deleted: false }
       });
-    } catch (e) { console.error('Field visits count failed:', e.message); }
+    } catch (e) { logger.error('Field visits count failed:', e.message); }
 
     // ---- District attendance (plain queries, JS aggregation) ----
     let districtAttendance = [];
@@ -116,7 +117,7 @@ const getAdminDashboard = async (adminUser) => {
         d.attendance_percentage = d.total_employees > 0 ? Math.round((d.present_today / d.total_employees) * 100) : 0;
       });
       districtAttendance = Object.values(districtMap).sort((a, b) => b.present_today - a.present_today);
-    } catch (e) { console.error('District attendance failed:', e.message); }
+    } catch (e) { logger.error('District attendance failed:', e.message); }
 
     // ---- Report status (plain query, JS aggregation) ----
     const reportStatus = { submitted: 0, approved: 0, rejected: 0, pending: 0 };
@@ -131,7 +132,7 @@ const getAdminDashboard = async (adminUser) => {
         if (reportStatus[key] !== undefined) reportStatus[key]++;
       });
       reportStatus.pending = Math.max(0, totalEmployees - reportStatus.submitted - reportStatus.approved - reportStatus.rejected);
-    } catch (e) { console.error('Report status failed:', e.message); }
+    } catch (e) { logger.error('Report status failed:', e.message); }
 
     // ---- Leave usage (plain query, JS aggregation) ----
     let leaveUsageReport = [];
@@ -161,7 +162,7 @@ const getAdminDashboard = async (adminUser) => {
         days_used: days,
         percentage_of_staff: totalEmployees > 0 ? Math.round((days / totalEmployees) * 100) : 0
       }));
-    } catch (e) { console.error('Leave usage failed:', e.message); }
+    } catch (e) { logger.error('Leave usage failed:', e.message); }
 
     // ---- Contract expiry alerts (disabled due to database error) ----
     const contractExpiryAlerts = [];
@@ -181,7 +182,7 @@ const getAdminDashboard = async (adminUser) => {
       leave_usage_report: leaveUsageReport
     };
   } catch (error) {
-    console.error('getAdminDashboard error:', error);
+    logger.error('getAdminDashboard error:', error);
     throw error;
   }
 };
@@ -245,12 +246,13 @@ const getEmployeeDashboard = async (user) => {
           raw: true
         });
       } catch (e) {
-        console.error('Personal info fetch failed:', e.message);
+        logger.error('Personal info fetch failed:', e.message);
       }
     }
 
     // Get attendance rate for current month
-    const workingDays = await getWorkingDaysInMonth(currentYear, currentMonth, Holiday);
+    const workingDaysResult = await getWorkingDaysInMonth(currentMonth, currentYear);
+    const workingDays = workingDaysResult.workingDays;
     const attendanceRecords = await Attendance.findAll({
       where: {
         employee_id: employeeId,

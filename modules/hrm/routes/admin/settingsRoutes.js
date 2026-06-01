@@ -121,7 +121,7 @@ router.put('/payment-distribution/:schemeTypeId', authenticate, requireHRMAdminP
       scheme_name: schemeType.scheme_name,
       center_share_percent: centerShare,
       state_share_percent: stateShare
-    }, created ? 'Payment distribution created' : 'Payment distribution updated');
+    }, existingSetting ? 'Payment distribution updated' : 'Payment distribution created');
   } catch (error) {
     next(error);
   }

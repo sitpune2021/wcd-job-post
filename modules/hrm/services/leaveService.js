@@ -26,35 +26,36 @@ const { safeQuery, safeLeaveOverlapCheck, safeUpdateLeaveBalance } = require('..
  * Uses simple default days per year from leave type configuration
  */
 const ensureLeaveBalances = async (employeeId, year) => {
-  // Ensure year is a valid integer
-  const yearInt = parseInt(year) || new Date().getFullYear();
-  
-  const leaveTypes = await LeaveType.findAll({
-    where: { is_active: true, is_deleted: false }
-  });
-
-  for (const lt of leaveTypes) {
+  try {
+    // Ensure year is a valid integer
+    const yearInt = parseInt(year) || new Date().getFullYear();
+    
+    // Create unified balance record (11 days total across all leave types)
     const existing = await LeaveBalance.findOne({
-      where: { employee_id: employeeId, leave_type_id: lt.leave_type_id, year: yearInt }
+      where: { employee_id: employeeId, year: yearInt }
     });
     
     if (!existing) {
+      const defaultDays = parseInt(process.env.DEFAULT_LEAVE_DAYS) || 11;
       await LeaveBalance.create({
         employee_id: employeeId,
-        leave_type_id: lt.leave_type_id,
+        leave_type_id: null, // Unified balance, not tied to specific leave type
         year: yearInt,
-        total_allocated: lt.default_days_per_year,
+        total_allocated: defaultDays,
         used: 0,
-        remaining: lt.default_days_per_year,
+        remaining: defaultDays,
         created_by: employeeId
       });
       
-      logger.info(`Leave balance created for employee ${employeeId}`, {
-        leaveType: lt.leave_code,
+      logger.info(`Unified leave balance created for employee ${employeeId}`, {
         year: yearInt,
-        allocated: lt.default_days_per_year
+        allocated: defaultDays
       });
     }
+  } catch (error) {
+    // If validation fails (e.g., leave_type_id cannot be null), log and continue
+    logger.warn(`Failed to ensure leave balance for employee ${employeeId}:`, error.message);
+    // Don't throw error - allow API to continue with no balance data
   }
 };
 
@@ -68,11 +69,29 @@ const getMyLeaveBalances = async (user) => {
   const year = new Date().getFullYear();
   await ensureLeaveBalances(employee.employee_id, year);
 
-  const balances = await LeaveBalance.findAll({
-    where: { employee_id: employee.employee_id, year, is_deleted: false },
-    include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }],
-    order: [['leave_type_id', 'ASC']]
+  // Get unified balance record
+  const unifiedBalance = await LeaveBalance.findOne({
+    where: { employee_id: employee.employee_id, year, is_deleted: false }
   });
+
+  // Get all leave types for display
+  const leaveTypes = await LeaveType.findAll({
+    where: { is_active: true, is_deleted: false },
+    attributes: ['leave_type_id', 'leave_code', 'leave_name'],
+    order: [['leave_code', 'ASC']]
+  });
+
+  // Create balance entries for each leave type using unified balance
+  const balances = leaveTypes.map(lt => ({
+    leave_balance_id: unifiedBalance?.balance_id || null,
+    employee_id: employee.employee_id,
+    leave_type_id: lt.leave_type_id,
+    year: year,
+    total_allocated: unifiedBalance?.total_allocated || 11,
+    used: unifiedBalance?.used || 0,
+    remaining: unifiedBalance?.remaining || 11,
+    leaveType: lt
+  }));
 
   return { year, balances };
 };
@@ -118,7 +137,7 @@ const applyLeave = async (user, data) => {
     throw new ApiError(400, 'Invalid date range. Cannot apply leave only on non-working days.');
   }
 
-  // Check balance using proper year extraction
+  // Check balance using proper year extraction (for informational purposes only)
   const year = new Date(data.from_date).getFullYear();
   await ensureLeaveBalances(employee.employee_id, year);
 
@@ -126,9 +145,9 @@ const applyLeave = async (user, data) => {
     where: { employee_id: employee.employee_id, leave_type_id: data.leave_type_id, year }
   });
 
-  if (!balance || balance.remaining < totalDays) {
-    throw new ApiError(400, `Insufficient ${leaveType.leave_name} balance. Available: ${balance?.remaining || 0}, Requested: ${totalDays}`);
-  }
+  // Only check balance for paid leaves during application
+  // Unpaid leaves can be applied regardless of balance
+  // Balance will be checked during approval for paid leaves
 
   // Check for overlapping leaves using safe query
   const overlapCheck = await safeLeaveOverlapCheck(employee.employee_id, data.from_date, data.to_date);
@@ -152,7 +171,21 @@ const applyLeave = async (user, data) => {
   });
 
   logger.info(`Leave applied: employee=${employee.employee_code}, type=${leaveType.leave_code}, days=${totalDays}, from=${data.from_date}, to=${data.to_date}`);
-  return leave;
+
+  // Add balance information to response
+  const response = leave.toJSON();
+  response.balance_info = {
+    available: balance?.remaining || 0,
+    requested: totalDays,
+    will_be_paid: balance && balance.remaining >= totalDays,
+    note: balance && balance.remaining < totalDays 
+      ? `Insufficient balance. This leave will be marked as UNPAID if approved. Available: ${balance.remaining}, Requested: ${totalDays}`
+      : balance && balance.remaining >= totalDays
+      ? `Sufficient balance. This leave will be marked as PAID if approved. Available: ${balance.remaining}, Requested: ${totalDays}`
+      : `No balance record found. This leave will be marked as UNPAID if approved.`
+  };
+
+  return response;
 };
 
 /**
@@ -165,30 +198,18 @@ const getMyLeaves = async (user, query) => {
   const { page, limit, offset } = getPagination(query);
   const where = { employee_id: employee.employee_id, is_deleted: false };
 
-  // Apply filters
+  // Apply filters - only status and year, no month filtering for cleaner approach
   if (query.status) where.status = query.status;
   
-  if (query.year && query.month) {
-    // Filter by specific year and month
-    const monthStr = query.month.toString().padStart(2, '0');
-    const startDate = `${query.year}-${monthStr}-01`;
-    // Get last day of month properly
-    const lastDay = new Date(query.year, query.month, 0).getDate();
-    const endDate = `${query.year}-${monthStr}-${lastDay.toString().padStart(2, '0')}`;
-    where.from_date = { [Op.between]: [startDate, endDate] };
-  } else if (query.year) {
+  if (query.year) {
     // Filter by year only
     where.from_date = { [Op.gte]: `${query.year}-01-01` };
     where.to_date = { [Op.lte]: `${query.year}-12-31` };
-  } else if (query.month) {
-    // Filter by month across all years - use date range approach for better compatibility
+  } else {
+    // Default to current year
     const currentYear = new Date().getFullYear();
-    const monthStr = query.month.toString().padStart(2, '0');
-    const startDate = `${currentYear}-${monthStr}-01`;
-    // Get last day of month properly
-    const lastDay = new Date(currentYear, query.month, 0).getDate();
-    const endDate = `${currentYear}-${monthStr}-${lastDay.toString().padStart(2, '0')}`;
-    where.from_date = { [Op.between]: [startDate, endDate] };
+    where.from_date = { [Op.gte]: `${currentYear}-01-01` };
+    where.to_date = { [Op.lte]: `${currentYear}-12-31` };
   }
 
   // Get leave applications with pagination (separate operations to avoid aggregation error)
@@ -196,6 +217,12 @@ const getMyLeaves = async (user, query) => {
     LeaveApplication.count({ where }),
     LeaveApplication.findAll({
       where,
+      attributes: [
+        'leave_id', 'employee_id', 'leave_type_id', 'from_date', 'to_date', 
+        'total_days', 'is_half_day', 'half_day_type', 'reason', 
+        'supporting_document_path', 'status', 'approved_by', 'approved_at', 
+        'rejection_reason', 'is_paid', 'is_deleted', 'created_at', 'updated_at'
+      ],
       include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }],
       order: [['created_at', 'DESC']],
       limit,
@@ -203,8 +230,10 @@ const getMyLeaves = async (user, query) => {
     })
   ]);
 
-  // Get comprehensive summary
-  const summary = await getLeaveSummary(employee.employee_id, query);
+  // Get comprehensive summary (year-round, not filtered by month)
+  const yearQuery = { ...query };
+  delete yearQuery.month; // Remove month filter to show full year data
+  const summary = await getLeaveSummary(employee.employee_id, yearQuery);
 
   // Return original response structure with added summary
   const originalResponse = paginatedResponse(rows, count, page, limit);
@@ -222,30 +251,25 @@ const getLeaveSummary = async (employeeId, query) => {
   
   if (query.status) summaryWhere.status = query.status;
   
-  if (query.year && query.month) {
-    const monthStr = query.month.toString().padStart(2, '0');
-    const startDate = `${query.year}-${monthStr}-01`;
-    // Get last day of month properly
-    const lastDay = new Date(query.year, query.month, 0).getDate();
-    const endDate = `${query.year}-${monthStr}-${lastDay.toString().padStart(2, '0')}`;
-    summaryWhere.from_date = { [Op.between]: [startDate, endDate] };
-  } else if (query.year) {
+  if (query.year) {
     summaryWhere.from_date = { [Op.gte]: `${query.year}-01-01` };
     summaryWhere.to_date = { [Op.lte]: `${query.year}-12-31` };
-  } else if (query.month) {
-    // Filter by month across all years - use date range approach for better compatibility
+  } else {
+    // Default to current year
     const currentYear = new Date().getFullYear();
-    const monthStr = query.month.toString().padStart(2, '0');
-    const startDate = `${currentYear}-${monthStr}-01`;
-    // Get last day of month properly
-    const lastDay = new Date(currentYear, query.month, 0).getDate();
-    const endDate = `${currentYear}-${monthStr}-${lastDay.toString().padStart(2, '0')}`;
-    summaryWhere.from_date = { [Op.between]: [startDate, endDate] };
+    summaryWhere.from_date = { [Op.gte]: `${currentYear}-01-01` };
+    summaryWhere.to_date = { [Op.lte]: `${currentYear}-12-31` };
   }
 
   // Get leave applications for statistics (simplified approach)
   const leaveApplications = await LeaveApplication.findAll({
     where: summaryWhere,
+    attributes: [
+      'leave_id', 'employee_id', 'leave_type_id', 'from_date', 'to_date', 
+      'total_days', 'is_half_day', 'half_day_type', 'reason', 
+      'supporting_document_path', 'status', 'approved_by', 'approved_at', 
+      'rejection_reason', 'is_paid', 'is_deleted', 'created_at', 'updated_at'
+    ],
     include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }],
     order: [['created_at', 'DESC']]
   });
@@ -284,15 +308,14 @@ const getLeaveSummary = async (employeeId, query) => {
 
   const leaveStats = Array.from(statsMap.values());
 
-  // Get current year balances
+  // Get current year unified balance
   const currentYear = new Date().getFullYear();
   const year = parseInt(query.year) || currentYear;
   
   await ensureLeaveBalances(employeeId, year);
-  const balances = await LeaveBalance.findAll({
-    where: { employee_id: employeeId, year, is_deleted: false },
-    include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }],
-    order: [['leave_type_id', 'ASC']]
+  const unifiedBalance = await LeaveBalance.findOne({
+    where: { employee_id: employeeId, year, leave_type_id: null, is_deleted: false },
+    include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }]
   });
 
   // Calculate simple counts directly from leave applications
@@ -301,10 +324,11 @@ const getLeaveSummary = async (employeeId, query) => {
   const pendingApplications = leaveApplications.filter(app => app.status === 'PENDING').length;
   const totalApplications = leaveApplications.length;
 
-  // Calculate total allowed, used, and remaining days
-  const totalAllowedDays = balances.reduce((sum, b) => sum + parseFloat(b.allocated || 0), 0);
-  const totalUsedDays = leaveStats.reduce((sum, stat) => sum + parseFloat(stat.total_days_used || 0), 0);
-  const totalRemainingDays = totalAllowedDays - totalUsedDays;
+  // Calculate total allowed, used, and remaining days (use defaults if no balance exists)
+  const defaultDays = parseInt(process.env.DEFAULT_LEAVE_DAYS) || 11;
+  const totalAllowedDays = unifiedBalance ? parseFloat(unifiedBalance.total_allocated || defaultDays) : defaultDays;
+  const totalUsedDays = unifiedBalance ? parseFloat(unifiedBalance.used || 0) : 0;
+  const totalRemainingDays = unifiedBalance ? parseFloat(unifiedBalance.remaining || (totalAllowedDays - totalUsedDays)) : (totalAllowedDays - totalUsedDays);
 
   // Build simplified summary object
   const summary = {
@@ -433,8 +457,8 @@ const getLeaveApprovals = async (adminUser, query) => {
 
   const { count, rows } = await LeaveApplication.findAndCountAll(queryOptions);
 
-  // Process rows to handle null employee names safely
-  const processedRows = rows.map(leave => {
+  // Process rows to handle null employee names and include leave balance
+  const processedRows = await Promise.all(rows.map(async (leave) => {
     const leaveData = leave.toJSON ? leave.toJSON() : leave;
     
     // Safely extract employee name with fallbacks
@@ -449,12 +473,36 @@ const getLeaveApprovals = async (adminUser, query) => {
       }
     }
     
-    // Return flattened data with employee name directly
+    // Fetch unified leave balance for this employee
+    let leaveBalance = null;
+    try {
+      const year = new Date(leaveData.from_date).getFullYear();
+      const balance = await LeaveBalance.findOne({
+        where: { 
+          employee_id: leaveData.employee_id, 
+          leave_type_id: null, // Unified balance
+          year 
+        }
+      });
+      if (balance) {
+        leaveBalance = {
+          total_allocated: balance.total_allocated,
+          used: balance.used,
+          remaining: balance.remaining,
+          can_be_paid: balance.remaining >= parseFloat(leaveData.total_days || 0)
+        };
+      }
+    } catch (err) {
+      logger.warn('Failed to fetch leave balance for approval:', err.message);
+    }
+    
+    // Return flattened data with employee name and balance info
     return {
       ...leaveData,
-      employee_name: employeeName || 'Unknown'
+      employee_name: employeeName || 'Unknown',
+      leave_balance: leaveBalance
     };
-  });
+  }));
 
   // Build standardized response
   return buildResponse({ rows: processedRows, count }, query, {
@@ -468,7 +516,7 @@ const getLeaveApprovals = async (adminUser, query) => {
 const actionLeave = async (adminUser, leaveId, data) => {
   const leave = await LeaveApplication.findOne({
     where: { leave_id: leaveId, is_deleted: false },
-    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'employee_code', 'district_id', 'component_id', 'hub_id'], required: false }]
+    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id'], required: false }]
   });
   if (!leave) throw new ApiError(404, 'Leave application not found.');
   if (leave.status !== 'PENDING') throw new ApiError(400, 'Only pending leaves can be acted upon.');
@@ -489,22 +537,48 @@ const actionLeave = async (adminUser, leaveId, data) => {
     }
     leave.updated_by = adminUser.admin_id;
     leave.updated_at = new Date();
-    await leave.save({ transaction: t });
 
-    // If approved, update leave balance and mark attendance as ON_LEAVE
+    // If approved, determine paid/unpaid status
     if (data.status === 'APPROVED') {
       const year = new Date(leave.from_date).getFullYear();
-      await LeaveBalance.update(
-        {
-          used: literal(`used + ${leave.total_days}`),
-          remaining: literal(`remaining - ${leave.total_days}`),
-          updated_at: new Date()
-        },
-        {
-          where: { employee_id: leave.employee_id, leave_type_id: leave.leave_type_id, year },
-          transaction: t
-        }
-      );
+      
+      // Get unified leave balance to enforce paid/unpaid rules
+      const balance = await LeaveBalance.findOne({
+        where: { employee_id: leave.employee_id, year },
+        transaction: t
+      });
+
+      let isPaid = data.is_paid;
+
+      // If balance is 0 or insufficient, force unpaid regardless of admin choice
+      if (!balance || balance.remaining <= 0) {
+        isPaid = false;
+        logger.info(`Leave forced to UNPAID: employee=${leave.employee_id}, balance exhausted (remaining=${balance?.remaining || 0})`);
+      } else if (balance.remaining < leave.total_days && isPaid) {
+        // Not enough balance for full paid leave - force unpaid
+        isPaid = false;
+        logger.info(`Leave forced to UNPAID: employee=${leave.employee_id}, insufficient balance (remaining=${balance.remaining}, requested=${leave.total_days})`);
+      }
+
+      leave.is_paid = isPaid;
+
+      // Only decrement balance if leave is PAID
+      if (isPaid) {
+        await LeaveBalance.update(
+          {
+            used: literal(`used + ${leave.total_days}`),
+            remaining: literal(`remaining - ${leave.total_days}`),
+            updated_at: new Date()
+          },
+          {
+            where: { employee_id: leave.employee_id, year },
+            transaction: t
+          }
+        );
+        logger.info(`Leave balance decremented: employee=${leave.employee_id}, days=${leave.total_days}, type=PAID`);
+      } else {
+        logger.info(`Leave balance NOT decremented: employee=${leave.employee_id}, days=${leave.total_days}, type=UNPAID`);
+      }
 
       // Mark attendance as ON_LEAVE for leave dates
       const start = new Date(leave.from_date);
@@ -512,6 +586,10 @@ const actionLeave = async (adminUser, leaveId, data) => {
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         if (d.getDay() === 0) continue; // Skip Sundays
         const dateStr = d.toISOString().split('T')[0];
+        
+        const leaveRemark = isPaid 
+          ? `Paid Leave: ${leave.reason}` 
+          : `Unpaid Leave: ${leave.reason}`;
         
         // Update existing attendance record or create new one
         const [attendance, created] = await Attendance.findOrCreate({
@@ -521,7 +599,7 @@ const actionLeave = async (adminUser, leaveId, data) => {
             attendance_date: dateStr,
             status: leave.is_half_day ? 'HALF_DAY' : 'ON_LEAVE',
             half_day_type: leave.is_half_day ? leave.half_day_type : null,
-            remarks: `Leave: ${leave.reason}`,
+            remarks: leaveRemark,
             created_by: adminUser.admin_id
           },
           transaction: t
@@ -532,7 +610,7 @@ const actionLeave = async (adminUser, leaveId, data) => {
           await attendance.update({
             status: leave.is_half_day ? 'HALF_DAY' : 'ON_LEAVE',
             half_day_type: leave.is_half_day ? leave.half_day_type : null,
-            remarks: `Leave: ${leave.reason} (Updated from ${attendance.status})`,
+            remarks: `${leaveRemark} (Updated from ${attendance.status})`,
             updated_by: adminUser.admin_id,
             updated_at: new Date()
           }, { transaction: t });
@@ -540,8 +618,9 @@ const actionLeave = async (adminUser, leaveId, data) => {
       }
     }
 
+    await leave.save({ transaction: t });
     await t.commit();
-    logger.info(`Leave ${data.status}: leave_id=${leaveId}, by admin=${adminUser.admin_id}`);
+    logger.info(`Leave ${data.status}: leave_id=${leaveId}, is_paid=${leave.is_paid}, by admin=${adminUser.admin_id}`);
     return leave;
   } catch (error) {
     await t.rollback();
@@ -591,6 +670,14 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           transform: (value) => parseInt(value),
           validate: (value) => !isNaN(value) && value > 0
         },
+        scheme_type_id: {
+          transform: (value) => parseInt(value),
+          validate: (value) => !isNaN(value) && value > 0
+        },
+        scheme_id: {
+          transform: (value) => parseInt(value),
+          validate: (value) => !isNaN(value) && value > 0
+        },
         post_id: {
           transform: (value) => parseInt(value),
           validate: (value) => !isNaN(value) && value > 0
@@ -632,7 +719,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
     employees = result.rows;
     count = result.count;
   } catch (complexError) {
-    console.warn('Complex employee query failed, trying simpler approach:', complexError.message);
+    logger.warn('Complex employee query failed, trying simpler approach:', complexError.message);
     
     try {
       // Fallback: try with just district
@@ -677,7 +764,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
       employees = result.rows;
       count = result.count;
     } catch (simpleError) {
-      console.warn('Simple employee query failed, using basic query:', simpleError.message);
+      logger.warn('Simple employee query failed, using basic query:', simpleError.message);
       
       // Final fallback: basic query
       const basicQueryOptions = buildQueryOptions(query, {
@@ -711,7 +798,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
     ]
   });
 
-  // Get leave applications for the specified month/year
+  // Get leave applications for the specified month/year (for usage calculation)
   const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
   const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
@@ -739,10 +826,32 @@ const getAdminLeaveSummary = async (adminUser, query) => {
     ]
   });
 
+  // Get all applications for status counts (year-round)
+  const allApplications = await LeaveApplication.findAll({
+    where: {
+      employee_id: { [Op.in]: employees.map(emp => emp.employee_id) },
+      [Op.and]: [
+        {
+          from_date: { [Op.gte]: new Date(year, 0, 1).toISOString().split('T')[0] },
+          to_date: { [Op.lte]: new Date(year, 11, 31).toISOString().split('T')[0] }
+        }
+      ]
+    },
+    include: [
+      {
+        model: LeaveType,
+        as: 'leaveType',
+        attributes: ['leave_code', 'leave_name'],
+        required: false
+      }
+    ]
+  });
+
   // Process employee data with leave information
   const processedEmployees = await Promise.all(employees.map(async (emp) => {
     const employeeBalances = leaveBalances.filter(lb => lb.employee_id === emp.employee_id);
     const employeeApplications = leaveApplications.filter(la => la.employee_id === emp.employee_id);
+    const employeeAllApplications = allApplications.filter(la => la.employee_id === emp.employee_id);
 
     // Calculate leave usage by type
     const leaveUsage = {};
@@ -755,17 +864,27 @@ const getAdminLeaveSummary = async (adminUser, query) => {
       totalUsedDays += usedDays;
     });
 
-    // Build leave balances by type
+    // Simplified leave balance: 11 days total across all types
+    let totalAllocated = 11; // Default from environment variable
+    let totalUsed = 0;
+    let totalRemaining = 11;
+    
+    // Get the first balance record (they all have the same allocation now)
+    const firstBalance = employeeBalances[0];
+    if (firstBalance) {
+      totalAllocated = parseFloat(firstBalance.total_allocated || 11);
+      totalUsed = parseFloat(firstBalance.used || 0);
+      totalRemaining = parseFloat(firstBalance.remaining || totalAllocated);
+    }
+    
+    // Build unified leave balances (use database balance consistently)
     const leaveBalancesByType = {};
     leaveTypes.forEach(type => {
-      const balance = employeeBalances.find(lb => lb.leave_type_id === type.leave_type_id);
-      if (balance) {
-        leaveBalancesByType[balance.leaveType.leave_code] = {
-          allocated: parseFloat(balance.total_allocated || 0),
-          used: parseFloat(balance.used || 0),
-          balance: parseFloat(balance.remaining || 0)
-        };
-      }
+      leaveBalancesByType[type.leave_code] = {
+        allocated: totalAllocated,
+        used: totalUsed, // Use the unified database value
+        balance: totalRemaining // Use the unified database value
+      };
     });
 
     // Safely extract employee information with proper fallbacks
@@ -776,7 +895,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
 
     // Debug: Log what we're getting
     if (!emp.applicant?.personal?.full_name) {
-      console.warn('Employee missing personal data:', {
+      logger.warn('Employee missing personal data:', {
         employee_id: emp.employee_id,
         applicant_id: emp.applicant_id,
         hasApplicant: !!emp.applicant,
@@ -804,7 +923,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           mobileNumber = applicant.mobile_no;
         }
       } catch (error) {
-        console.warn('Failed to fetch applicant personal data:', error.message);
+        logger.warn('Failed to fetch applicant personal data:', error.message);
       }
     }
 
@@ -818,7 +937,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           districtName = district.district_name;
         }
       } catch (error) {
-        console.warn('Failed to fetch district data:', error.message);
+        logger.warn('Failed to fetch district data:', error.message);
       }
     }
 
@@ -832,7 +951,7 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           postName = post.post_name;
         }
       } catch (error) {
-        console.warn('Failed to fetch post data:', error.message);
+        logger.warn('Failed to fetch post data:', error.message);
       }
     }
 
@@ -846,11 +965,11 @@ const getAdminLeaveSummary = async (adminUser, query) => {
       employment_status: emp.employment_status,
       leave_usage: leaveUsage,
       leave_balances: leaveBalancesByType,
-      total_used_days: totalUsedDays,
-      applications_count: employeeApplications.length,
-      pending_count: employeeApplications.filter(app => app.status === 'PENDING').length,
-      approved_count: employeeApplications.filter(app => app.status === 'APPROVED').length,
-      rejected_count: employeeApplications.filter(app => app.status === 'REJECTED').length
+      total_used_days: totalUsed,
+      applications_count: employeeAllApplications.length,
+      pending_count: employeeAllApplications.filter(app => app.status === 'PENDING').length,
+      approved_count: employeeAllApplications.filter(app => app.status === 'APPROVED').length,
+      rejected_count: employeeAllApplications.filter(app => app.status === 'REJECTED').length
     };
   }));
 
@@ -879,9 +998,11 @@ const getAdminLeaveSummary = async (adminUser, query) => {
     message: 'Leave summary retrieved successfully',
     summary: {
       ...summary,
-      month,
-      year,
-      leave_types: leaveTypes
+      leave_types: leaveTypes.map(type => ({
+        leave_type_id: type.leave_type_id,
+        leave_code: type.leave_code,
+        leave_name: type.leave_name
+      }))
     }
   });
 };

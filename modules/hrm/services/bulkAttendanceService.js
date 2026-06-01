@@ -23,7 +23,7 @@ class BulkAttendanceService {
    */
   async downloadTemplate(adminUser, query) {
     try {
-      const { month, year, district_id, component_id, hub_id } = query;
+      const { month, year, district_id, scheme_id } = query;
       
       // Validate month and year
       if (!month || !year) {
@@ -47,8 +47,7 @@ class BulkAttendanceService {
       // Build additional filter conditions
       const additionalFilters = {};
       if (district_id) additionalFilters.district_id = parseInt(district_id);
-      if (component_id) additionalFilters.component_id = parseInt(component_id);
-      if (hub_id) additionalFilters.hub_id = parseInt(hub_id);
+      if (scheme_id) additionalFilters.scheme_id = parseInt(scheme_id);
 
       // Get employee details with filters
       const employeeWhere = {
@@ -57,13 +56,19 @@ class BulkAttendanceService {
         is_deleted: false,
         is_active: true
       };
-      const employees = await EmployeeMaster.findAll({
+      let employees = await EmployeeMaster.findAll({
         where: employeeWhere,
         include: [
           { model: db.PostMaster, as: 'post', attributes: ['post_name'], where: { is_deleted: false }, required: false },
           { model: db.DistrictMaster, as: 'district', attributes: ['district_name'], where: { is_deleted: false }, required: false },
-          { model: db.Component, as: 'component', attributes: ['component_name'], where: { is_deleted: false }, required: false },
-          { model: db.Hub, as: 'hub', attributes: ['hub_name'], where: { is_deleted: false }, required: false },
+          { model: db.Scheme, as: 'scheme', attributes: ['scheme_name', 'scheme_type_id'], where: { is_deleted: false }, required: true,
+            include: [{
+              model: db.SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: true
+            }]
+          },
           {
             model: db.ApplicantMaster,
             as: 'applicant',
@@ -85,7 +90,13 @@ class BulkAttendanceService {
       });
 
       if (employees.length === 0) {
-        throw ApiError.notFound('No employees found with the specified filters');
+        logger.warn('No employees found with specified filters, returning empty template', {
+          month: monthNum,
+          year: yearNum,
+          filters: { district_id, scheme_id }
+        });
+        // Return empty template instead of throwing error
+        employees = [];
       }
 
       // Create Excel workbook
@@ -97,7 +108,7 @@ class BulkAttendanceService {
       
       // Create header row
       const headers = [
-        'Employee Code', 'Employee Name', 'Post', 'District', 'OSC/Component', 'Hub'
+        'Employee Code', 'Employee Name', 'Post', 'District', 'Scheme', 'Scheme Type'
       ];
       
       // Add date columns for each day of the month
@@ -125,8 +136,8 @@ class BulkAttendanceService {
       worksheet.getColumn(2).width = 25; // Employee Name
       worksheet.getColumn(3).width = 20; // Post
       worksheet.getColumn(4).width = 15; // District
-      worksheet.getColumn(5).width = 20; // OSC/Component
-      worksheet.getColumn(6).width = 15; // Hub
+      worksheet.getColumn(5).width = 20; // Scheme
+      worksheet.getColumn(6).width = 15; // Scheme Type
       worksheet.getColumn(headers.length).width = 30; // Remarks
 
       // Add dropdown validation for status cells
@@ -145,8 +156,8 @@ class BulkAttendanceService {
         row.push(employee.applicant?.personal?.full_name || '');
         row.push(employee.post?.post_name || '');
         row.push(employee.district?.district_name || '');
-        row.push(employee.component?.component_name || '');
-        row.push(employee.hub?.hub_name || '');
+        row.push(employee.scheme?.scheme_name || '');
+        row.push(employee.scheme?.schemeType?.scheme_name || employee.scheme?.schemeType?.scheme_code || '');
         
         // Attendance columns for each day
         for (let day = 1; day <= daysInMonth; day++) {
@@ -238,8 +249,7 @@ class BulkAttendanceService {
       instructionSheet.addRow(['Generated for:']);
       instructionSheet.addRow([`Month: ${month}/${year}`]);
       if (district_id) instructionSheet.addRow([`District: ${employees[0]?.district?.district_name || 'All'}`]);
-      if (component_id) instructionSheet.addRow([`OSC: ${employees[0]?.component?.component_name || 'All'}`]);
-      if (hub_id) instructionSheet.addRow([`Hub: ${employees[0]?.hub?.hub_name || 'All'}`]);
+      if (scheme_id) instructionSheet.addRow([`Scheme: ${employees[0]?.scheme?.scheme_name || 'All'}`]);
       instructionSheet.addRow([`Total Employees: ${employees.length}`]);
       instructionSheet.addRow(['6. Save the file and upload it through the system']);
 
@@ -373,6 +383,7 @@ class BulkAttendanceService {
 
       // Create attendance records with bulk_id and pending status
       const records = [];
+      const conflicts = [];
       for (const recordData of attendanceRecords) {
         // Find employee
         const employee = await EmployeeMaster.findOne({
@@ -399,10 +410,7 @@ class BulkAttendanceService {
         if (hierarchyFilter.district_id && employee.district_id !== hierarchyFilter.district_id) {
           throw new Error(`Employee ${recordData.employee_code} is not under your jurisdiction`);
         }
-        if (hierarchyFilter.component_id && employee.component_id !== hierarchyFilter.component_id) {
-          throw new Error(`Employee ${recordData.employee_code} is not under your jurisdiction`);
-        }
-        if (hierarchyFilter.hub_id && employee.hub_id !== hierarchyFilter.hub_id) {
+        if (hierarchyFilter.scheme_id && employee.scheme_id !== hierarchyFilter.scheme_id) {
           throw new Error(`Employee ${recordData.employee_code} is not under your jurisdiction`);
         }
 
@@ -410,19 +418,26 @@ class BulkAttendanceService {
         const existingRecord = await Attendance.findOne({
           where: {
             employee_id: employee.employee_id,
-            attendance_date: recordData.attendance_date,
+            attendance_date: new Date(recordData.attendance_date),
             is_deleted: false
           },
           transaction
         });
 
         if (existingRecord) {
-          throw new Error(`Attendance already exists for employee ${recordData.employee_code} on ${recordData.attendance_date.toISOString().split('T')[0]}`);
+          const attendanceDate = new Date(recordData.attendance_date);
+          const formattedDate = attendanceDate.toISOString().split('T')[0];
+          conflicts.push({
+            employee_code: recordData.employee_code,
+            date: formattedDate,
+            reason: 'Attendance already exists'
+          });
+          continue; // Skip this record and continue with others
         }
 
         const record = await Attendance.create({
           employee_id: employee.employee_id,
-          attendance_date: recordData.attendance_date,
+          attendance_date: new Date(recordData.attendance_date),
           status: recordData.status,
           half_day_type: recordData.half_day_type || null,
           remarks: recordData.remarks || null,
@@ -434,11 +449,21 @@ class BulkAttendanceService {
         records.push(record);
       }
 
+      // Update bulk record with actual counts
+      await bulk.update({
+        total_records: attendanceRecords.length,
+        pending_records: records.length,
+        approved_records: 0,
+        rejected_records: conflicts.length
+      }, { transaction });
+
       logger.info(`Bulk attendance uploaded successfully`, {
         bulkId: bulk.bulk_id,
         bulkNo: bulk.bulk_no,
         uploadedBy: adminUser.admin_id,
-        totalRecords: attendanceRecords.length
+        totalRecords: attendanceRecords.length,
+        processedRecords: records.length,
+        conflicts: conflicts.length
       });
 
       // Commit transaction
@@ -447,7 +472,10 @@ class BulkAttendanceService {
       return {
         bulk,
         records,
-        totalRecords: attendanceRecords.length
+        totalRecords: attendanceRecords.length,
+        processedRecords: records.length,
+        conflicts,
+        conflictCount: conflicts.length
       };
     } catch (error) {
       // Rollback transaction on error
@@ -564,7 +592,7 @@ class BulkAttendanceService {
             attributes: ['admin_id', 'username', 'full_name']
           }
         ],
-        order: [['created_at', 'DESC']],
+        order: [['bulk_id', 'DESC'], ['created_at', 'DESC']],
         limit: parseInt(limit),
         offset
       });

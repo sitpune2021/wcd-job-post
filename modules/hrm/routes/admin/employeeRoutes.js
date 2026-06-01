@@ -43,8 +43,8 @@ router.get('/', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), asyn
   try {
     const filters = {
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
-      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
-      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      scheme_id: req.query.scheme_id ? parseInt(req.query.scheme_id) : undefined,
+      scheme_type_id: req.query.scheme_type_id ? parseInt(req.query.scheme_type_id) : undefined,
       post_id: req.query.post_id ? parseInt(req.query.post_id) : undefined,
       onboarding_status: req.query.onboarding_status,
       onboarding_type: req.query.onboarding_type,
@@ -92,8 +92,8 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*'])
 
     const filters = {
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
-      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
-      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined,
+      scheme_id: req.query.scheme_id ? parseInt(req.query.scheme_id) : undefined,
+      scheme_type_id: req.query.scheme_type_id ? parseInt(req.query.scheme_type_id) : undefined,
       post_id: req.query.post_id ? parseInt(req.query.post_id) : undefined,
       onboarding_status: req.query.onboarding_status,
       onboarding_type: req.query.onboarding_type,
@@ -125,8 +125,8 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*'])
         mobile_no: emp.applicant?.mobile_no || '-',
         post_name: emp.post?.post_name || '-',
         district_name: emp.district?.district_name || '-',
-        location_name: emp.component?.component_name || emp.hub?.hub_name || '-',
-        location_type: emp.component_id ? 'OSC' : emp.hub_id ? 'Hub' : '-',
+        location_name: emp.scheme?.scheme_name || '-',
+        location_type: emp.scheme?.schemeType?.scheme_code || '-',
         contract_start_date: emp.contract_start_date,
         contract_end_date: emp.contract_end_date,
         status: status,
@@ -171,8 +171,8 @@ router.get('/statistics', requireHRMAdminPermission(['hrm.employees.view', 'hrm.
   try {
     const filters = {
       district_id: req.query.district_id ? parseInt(req.query.district_id) : undefined,
-      component_id: req.query.component_id ? parseInt(req.query.component_id) : undefined,
-      hub_id: req.query.hub_id ? parseInt(req.query.hub_id) : undefined
+      scheme_id: req.query.scheme_id ? parseInt(req.query.scheme_id) : undefined,
+      scheme_type_id: req.query.scheme_type_id ? parseInt(req.query.scheme_type_id) : undefined
     };
 
     // Apply HRM scope filters
@@ -214,7 +214,7 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
         employee.attendance_summary = updatedAttendanceSummary;
       }
     } catch (attendanceError) {
-      console.error('Attendance summary error:', attendanceError);
+      logger.error('Attendance summary error:', attendanceError);
       // Keep original attendance summary if service fails
     }
     
@@ -224,14 +224,13 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
       const EmployeeMaster = require('../../../../models').EmployeeMaster;
       const originalEmployee = await EmployeeMaster.findOne({
         where: { employee_id: parseInt(employeeId) },
-        attributes: ['post_id', 'district_id', 'component_id', 'hub_id']
+        attributes: ['post_id', 'district_id', 'scheme_id']
       });
       
       if (originalEmployee) {
         employee.employment_info.post_id = originalEmployee.post_id;
         employee.employment_info.district_id = originalEmployee.district_id;
-        employee.employment_info.component_id = originalEmployee.component_id;
-        employee.employment_info.hub_id = originalEmployee.hub_id;
+        employee.employment_info.scheme_id = originalEmployee.scheme_id;
       }
     }
     
@@ -275,7 +274,7 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
 
     // Allowed fields for update
     const allowedFields = [
-      'post_id', 'district_id', 'component_id', 'hub_id',
+      'post_id', 'district_id', 'scheme_id',
       'contract_start_date', 'contract_end_date', 'employee_pay',
       'is_active', 'employment_status', 'reporting_officer_id'
     ];

@@ -8,7 +8,7 @@
 // ============================================================================
 
 const sequelize = require('../config/db');
-const { Sequelize } = require('sequelize');
+const { Sequelize, DataTypes } = require('sequelize');
 const logger = require('../config/logger');
 const { applyAuditHooks } = require('../utils/auditContext');
 
@@ -30,8 +30,6 @@ db.Application = require('./Application');
 db.EligibilityResult = require('./EligibilityResult');
 db.MeritList = require('./MeritList');
 db.ApplicationStatusHistory = require('./ApplicationStatusHistory');
-db.Component = require('./Component');
-db.Hub = require('./Hub');
 db.Department = require('./Department');
 db.DistrictMaster = require('./DistrictMaster');
 db.SkillMaster = require('./SkillMaster');
@@ -73,6 +71,7 @@ db.Payment = require('./Payment');
 
 // Scheme Type and Payment Distribution
 db.SchemeType = require('./SchemeType');
+db.Scheme = require('./Scheme')(sequelize, DataTypes);
 db.PaymentDistributionSetting = require('./PaymentDistributionSetting');
 
 // HRM Module Models
@@ -159,22 +158,6 @@ db.Application.hasMany(db.ApplicationStatusHistory, { foreignKey: 'application_i
 db.ApplicationStatusHistory.belongsTo(db.Application, { foreignKey: 'application_id', as: 'application' });
 db.ApplicationStatusHistory.belongsTo(db.AdminUser, { foreignKey: 'changed_by', as: 'changedByUser' });
 
-// Component -> District
-db.Component.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
-db.DistrictMaster.hasMany(db.Component, { foreignKey: 'district_id', as: 'components' });
-
-// Hub -> District
-db.Hub.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
-db.DistrictMaster.hasMany(db.Hub, { foreignKey: 'district_id', as: 'hubs' });
-
-// PostMaster -> Component
-db.PostMaster.belongsTo(db.Component, { foreignKey: 'component_id', as: 'component' });
-db.PostMaster.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
-db.Component.hasMany(db.PostMaster, { foreignKey: 'component_id', as: 'posts' });
-
-// PostMaster -> Hub
-db.PostMaster.belongsTo(db.Hub, { foreignKey: 'hub_id', as: 'hub' });
-db.Hub.hasMany(db.PostMaster, { foreignKey: 'hub_id', as: 'posts' });
 
 // PostMaster -> EducationLevel (min education requirement)
 db.PostMaster.belongsTo(db.EducationLevel, { foreignKey: 'min_education_level_id', as: 'minEducationLevel' });
@@ -297,22 +280,34 @@ db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'exited_by', as
 // SchemeType -> PaymentDistributionSetting
 db.SchemeType.hasOne(db.PaymentDistributionSetting, { foreignKey: 'scheme_type_id', as: 'paymentSetting' });
 db.PaymentDistributionSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
-// uncomment here for new scheme chnage
 // EmployeeMaster -> SchemeType (TODO: Add scheme_type_id column to ms_employee_master when implementing migration)
 // db.EmployeeMaster.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // db.SchemeType.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_type_id', as: 'employees' });
 
+// ==================== SCHEME UNIFICATION ASSOCIATIONS ====================
+// Unified scheme associations (scheme-only approach)
+db.Scheme.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+db.Scheme.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
+db.SchemeType.hasMany(db.Scheme, { foreignKey: 'scheme_type_id', as: 'schemes' });
+db.DistrictMaster.hasMany(db.Scheme, { foreignKey: 'district_id', as: 'schemes' });
+
+// Associations for posts, admins, employees with schemes
+db.PostMaster.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
+db.Scheme.hasMany(db.PostMaster, { foreignKey: 'scheme_id', as: 'posts' });
+
+// PostMaster -> DistrictMaster
+db.PostMaster.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
+db.DistrictMaster.hasMany(db.PostMaster, { foreignKey: 'district_id', as: 'posts' });
+
+db.AdminUser.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
+db.Scheme.hasMany(db.AdminUser, { foreignKey: 'scheme_id', as: 'admins' });
+
+db.EmployeeMaster.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
+db.Scheme.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_id', as: 'employees' });
+
 // ==================== HRM MODULE ASSOCIATIONS ====================
 // Set up associations for HRM models
 hrmModels.setupAssociations(db);
-
-// AdminUser -> Component (for OSC-level admins)
-db.AdminUser.belongsTo(db.Component, { foreignKey: 'component_id', as: 'component' });
-db.Component.hasMany(db.AdminUser, { foreignKey: 'component_id', as: 'admins' });
-
-// AdminUser -> Hub (for Hub-level admins)
-db.AdminUser.belongsTo(db.Hub, { foreignKey: 'hub_id', as: 'hub' });
-db.Hub.hasMany(db.AdminUser, { foreignKey: 'hub_id', as: 'admins' });
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
@@ -326,7 +321,7 @@ const modelsWithAudit = [
   'ApplicantMaster', 'ApplicantPersonal', 'ApplicantAddress',
   'ApplicantEducation', 'ApplicantExperience', 'ApplicantDocument',
   'Application', 'EligibilityResult', 'MeritList',
-  'Component', 'DistrictMaster', 'TalukaMaster', 'PostMaster',
+  'DistrictMaster', 'TalukaMaster', 'PostMaster',
   'SkillMaster',
   'DocumentType', 'EducationLevel', 'CategoryMaster', 'PostCategory',
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
@@ -346,5 +341,10 @@ modelsWithAudit.forEach(modelName => {
     applyAuditHooks(db[modelName]);
   }
 });
+
+// Add Scheme model to audit list
+if (db.Scheme) {
+  applyAuditHooks(db.Scheme);
+}
 
 module.exports = db;

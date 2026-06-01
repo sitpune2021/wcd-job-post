@@ -26,7 +26,7 @@ const getEmployeeFromUser = async (user, EmployeeMaster) => {
       applicant_id: applicantId,
       is_deleted: false
     },
-    attributes: ['employee_id', 'employee_code', 'applicant_id', 'post_id', 'district_id', 'component_id', 'hub_id', 'onboarding_status', 'employment_status', 'reporting_officer_id', 'contract_start_date', 'contract_end_date', 'is_active']
+    attributes: ['employee_id', 'employee_code', 'applicant_id', 'post_id', 'district_id', 'scheme_id', 'onboarding_status', 'employment_status', 'reporting_officer_id', 'contract_start_date', 'contract_end_date', 'is_active']
   });
   
   return employee;
@@ -45,28 +45,20 @@ const buildHierarchyFilter = (adminUser) => {
     return where;
   }
 
-  // If admin has no district/OSC/hub assignment, show all employees
-  if (!adminUser.district_id && !adminUser.component_id && !adminUser.hub_id) {
+  // If admin has no district/scheme assignment, show all employees
+  if (!adminUser.district_id && !adminUser.scheme_id) {
     return where; // No filters = show all
   }
 
-  // District-level filtering (applies to District, OSC, and Hub admins)
+  // District-level filtering (applies to District and Scheme admins)
   if (adminUser.district_id) {
     where.district_id = adminUser.district_id;
   }
 
-  // Component (OSC) level filtering - for OSC admins
-  if (adminUser.component_id && !adminUser.hub_id) {
-    where.component_id = adminUser.component_id;
+  // Scheme level filtering - for Scheme admins
+  if (adminUser.scheme_id) {
+    where.scheme_id = adminUser.scheme_id;
   }
-
-  // Hub level filtering - for Hub admins (similar to OSC admins)
-  if (adminUser.hub_id && !adminUser.component_id) {
-    where.hub_id = adminUser.hub_id;
-  }
-
-  // Note: Admin should not have both component_id and hub_id
-  // They manage either an OSC OR a Hub, not both
 
   return where;
 };
@@ -88,15 +80,18 @@ const getEmployeeIdsUnderAdmin = async (adminUser, EmployeeMaster) => {
   return employees.map(e => e.employee_id);
 };
 
+// getWorkingDaysInMonth moved to workingDayHelpers.js for consolidation
+// Import from workingDayHelpers instead: const { getWorkingDaysInMonth } = require('./workingDayHelpers');
+
 /**
- * Calculate working days in a month (excluding Sundays and holidays)
+ * Calculate working days in a year (excluding Sundays and holidays)
  */
-const getWorkingDaysInMonth = async (year, month, Holiday) => {
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
+const getWorkingDaysInYear = async (year, Holiday) => {
+  const startDate = new Date(year, 0, 1); // Jan 1st
+  const endDate = new Date(year, 11, 31); // Dec 31st
   let workingDays = 0;
 
-  // Get holidays for the month
+  // Get holidays for the entire year
   const holidays = await Holiday.findAll({
     where: {
       holiday_date: { [Op.between]: [startDate, endDate] },
@@ -247,11 +242,31 @@ const paginatedResponse = (rows, count, page, limit) => ({
   }
 });
 
+/**
+ * Calculate working days in a quarter (excluding Sundays and holidays)
+ */
+const getWorkingDaysInQuarter = async (year, startMonth, endMonth, Holiday) => {
+  let totalWorkingDays = 0;
+  
+  // Import the consolidated function
+  const { getWorkingDaysInMonth } = require('./workingDayHelpers');
+  
+  // Calculate working days for each month in the quarter
+  for (let month = startMonth; month <= endMonth; month++) {
+    const monthResult = await getWorkingDaysInMonth(month, year);
+    totalWorkingDays += monthResult.workingDays;
+  }
+  
+  return totalWorkingDays;
+};
+
 module.exports = {
   getEmployeeFromUser,
   buildHierarchyFilter,
   getEmployeeIdsUnderAdmin,
-  getWorkingDaysInMonth,
+  // getWorkingDaysInMonth moved to workingDayHelpers.js for consolidation
+  getWorkingDaysInYear,
+  getWorkingDaysInQuarter,
   getWorkingDaysInRange,
   isWorkingDay,
   calculateLeaveDays,
