@@ -299,7 +299,7 @@ const markAttendance = async (user, data, ip) => {
           `• Coordinates: ${targetLocation.latitude}, ${targetLocation.longitude}\n\n` +
           `Please move closer to your Scheme location and try again.`;
         
-        throw new ApiError(403, errorMessage);
+        throw new ApiError(422, errorMessage);
       }
     }
   }
