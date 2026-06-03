@@ -10,6 +10,11 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const logger = require('../../config/logger');
 const { getBcryptRounds } = require('../../config/security');
+const {
+  fetchLinkedEmployeeDetails,
+  ensureAdminUsernameAvailable,
+  buildLinkedAdminFields
+} = require('../admin/adminUserLinkHelper');
 
 // ==================== USER CRUD OPERATIONS ====================
 
@@ -135,38 +140,67 @@ const getUserById = async (userId) => {
  */
 const createUser = async (data, createdBy) => {
   try {
-    // Generate temporary password
-    const tempPassword = crypto.randomBytes(8).toString('hex');
-    const passwordHash = await bcrypt.hash(tempPassword, getBcryptRounds());
+    const isLinked = !!data.linked_employee_id;
+    let tempPassword = null;
+    let passwordHash;
+
+    let username = data.username;
+    let email = data.email;
+    let fullName = data.full_name;
+    let mobile = data.mobile_no || null;
+    let roleId = data.role_id || null;
+    let districtId = data.district_id || null;
+    let schemeId = data.scheme_id || null;
+
+    if (isLinked) {
+      const employee = await fetchLinkedEmployeeDetails(data.linked_employee_id);
+      await ensureAdminUsernameAvailable(employee.email);
+      const linkedFields = buildLinkedAdminFields(employee, fullName);
+      username = linkedFields.username;
+      email = linkedFields.email;
+      fullName = linkedFields.full_name;
+      passwordHash = linkedFields.password_hash;
+      districtId = linkedFields.district_id;
+      schemeId = linkedFields.scheme_id;
+    } else {
+      await ensureAdminUsernameAvailable(username);
+      tempPassword = data.password && data.password.trim() ? data.password.trim() : crypto.randomBytes(8).toString('hex');
+      passwordHash = await bcrypt.hash(tempPassword, getBcryptRounds());
+    }
 
     const [result] = await sequelize.query(
       `INSERT INTO ms_admin_users (
         username, email, full_name, mobile_no, password_hash, role_id,
+        district_id, scheme_id, linked_employee_id,
         is_active, created_by, created_at, updated_at
       )
       VALUES (
         :username, :email, :full_name, :mobile_no, :password_hash, :role_id,
+        :district_id, :scheme_id, :linked_employee_id,
         true, :created_by, NOW(), NOW()
       )
-      RETURNING admin_id, username, email, full_name, mobile_no, role_id, is_active`,
+      RETURNING admin_id, username, email, full_name, mobile_no, role_id, district_id, scheme_id, linked_employee_id, is_active`,
       {
         replacements: {
-          username: data.username,
-          email: data.email,
-          full_name: data.full_name,
-          mobile_no: data.mobile_no || null,
+          username,
+          email,
+          full_name: fullName,
+          mobile_no: mobile,
           password_hash: passwordHash,
-          role_id: data.role_id || null,
+          role_id: roleId,
+          district_id: districtId,
+          scheme_id: schemeId,
+          linked_employee_id: data.linked_employee_id || null,
           created_by: createdBy
         }
       }
     );
 
-    logger.info(`User created: ${result[0].admin_id} by ${createdBy}`);
+    logger.info(`User created: ${result[0].admin_id} by ${createdBy}${isLinked ? ' (linked to employee)' : ''}`);
     
     return {
       user: result[0],
-      tempPassword // Return temp password to send via email
+      tempPassword: isLinked ? null : tempPassword
     };
   } catch (error) {
     logger.error('Error creating user:', error);
@@ -183,39 +217,75 @@ const createUser = async (data, createdBy) => {
  */
 const updateUser = async (userId, data, updatedBy) => {
   try {
+    logger.info(`Updating user ${userId} with data:`, JSON.stringify(data, null, 2));
+    
+    let username = data.username;
+    let passwordHash = null;
+
+    if (data.linked_employee_id) {
+      const employee = await fetchLinkedEmployeeDetails(data.linked_employee_id);
+      await ensureAdminUsernameAvailable(employee.email, userId);
+      const linkedFields = buildLinkedAdminFields(employee, data.full_name);
+      username = linkedFields.username;
+      data.email = linkedFields.email;
+      data.full_name = linkedFields.full_name;
+      passwordHash = linkedFields.password_hash; // Use employee's password hash directly
+      data.district_id = linkedFields.district_id;
+      data.scheme_id = linkedFields.scheme_id;
+    } else if (username) {
+      await ensureAdminUsernameAvailable(username, userId);
+    }
+
+    // Only hash password if it's provided and not linking to employee
+    if (data.password && data.password.trim() && !data.linked_employee_id) {
+      passwordHash = await bcrypt.hash(data.password.trim(), getBcryptRounds());
+    }
+
     const [result] = await sequelize.query(
       `UPDATE ms_admin_users 
-       SET email = COALESCE(:email, email),
+       SET username = COALESCE(:username, username),
+           email = COALESCE(:email, email),
            full_name = COALESCE(:full_name, full_name),
            mobile_no = COALESCE(:mobile_no, mobile_no),
            role_id = COALESCE(:role_id, role_id),
+           district_id = COALESCE(:district_id, district_id),
+           scheme_id = COALESCE(:scheme_id, scheme_id),
+           linked_employee_id = :linked_employee_id,
            is_active = COALESCE(:is_active, is_active),
            review_batch_start = :review_batch_start,
            review_batch_end = :review_batch_end,
+           password_hash = COALESCE(:password_hash, password_hash),
            updated_by = :updated_by,
            updated_at = NOW()
        WHERE admin_id = :userId AND is_deleted = false
-       RETURNING admin_id, username, email, full_name, mobile_no, role_id, is_active, review_batch_start, review_batch_end`,
+       RETURNING admin_id, username, email, full_name, mobile_no, role_id, district_id, scheme_id, linked_employee_id, is_active, review_batch_start, review_batch_end`,
       {
         replacements: {
           userId,
+          username: username || null,
           email: data.email !== undefined ? data.email : null,
           full_name: data.full_name !== undefined ? data.full_name : null,
           mobile_no: data.mobile_no !== undefined ? data.mobile_no : null,
           role_id: data.role_id !== undefined ? data.role_id : null,
+          district_id: data.district_id !== undefined ? data.district_id : null,
+          scheme_id: data.scheme_id !== undefined ? data.scheme_id : null,
+          linked_employee_id: data.linked_employee_id !== undefined ? data.linked_employee_id : null,
           review_batch_start: data.review_batch_start !== undefined ? data.review_batch_start : null,
           review_batch_end: data.review_batch_end !== undefined ? data.review_batch_end : null,
           is_active: data.is_active !== undefined ? data.is_active : null,
+          password_hash: passwordHash !== null ? passwordHash : undefined,
           updated_by: updatedBy
         }
       }
     );
+    
+    logger.info(`SQL replacements for user ${userId}:`, JSON.stringify(replacements, null, 2));
 
     if (result.length === 0) {
       return null;
     }
 
-    logger.info(`User updated: ${userId} by ${updatedBy}`);
+    logger.info(`User updated: ${userId} by ${updatedBy}${data.linked_employee_id ? ' (linked to employee)' : ''}`);
     return result[0];
   } catch (error) {
     logger.error('Error updating user:', error);

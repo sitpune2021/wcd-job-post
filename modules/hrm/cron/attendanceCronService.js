@@ -7,6 +7,7 @@ const db = require('../../../models');
 const { EmployeeMaster, Attendance } = require('../models');
 const { finalizeDailyAttendance } = require('../services/attendanceService');
 const logger = require('../../../config/logger');
+const { processPendingCheckOuts } = require('../../../services/admin/attendanceReminderHelper');
 
 /**
  * Mark absent employees who don't have attendance records for a given date
@@ -14,7 +15,10 @@ const logger = require('../../../config/logger');
  */
 async function markAbsentEmployees(date = null) {
   try {
-    const attendanceDate = date || new Date().toISOString().split('T')[0]; // Today's date in YYYY-MM-DD format
+    // Process yesterday's attendance (not today)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const attendanceDate = date || yesterday.toISOString().split('T')[0];
     
     logger.info(`CRON: Marking absent employees for date: ${attendanceDate}`);
     
@@ -54,26 +58,57 @@ async function markAbsentEmployees(date = null) {
       return { markedAbsent: 0, date: attendanceDate };
     }
     
-    // Mark absent employees
+    // Check for open sessions before marking absent
+    // This handles night shift workers who might still be working
+    const AttendanceSession = require('../models/AttendanceSession');
+    const employeesWithOpenSessions = await AttendanceSession.findAll({
+      where: {
+        employee_id: { [db.Sequelize.Op.in]: absentEmployeeIds },
+        check_out_time: null,
+        created_at: {
+          [db.Sequelize.Op.gte]: new Date(yesterday.setHours(0, 0, 0, 0))
+        }
+      },
+      attributes: ['employee_id']
+    });
+    
+    const openSessionEmployeeIds = employeesWithOpenSessions.map(s => s.employee_id);
+    const finalAbsentEmployeeIds = absentEmployeeIds.filter(id => !openSessionEmployeeIds.includes(id));
+    
+    if (finalAbsentEmployeeIds.length === 0) {
+      logger.info(`CRON: No employees to mark absent for ${attendanceDate} (all have open sessions)`);
+      return { 
+        markedAbsent: 0, 
+        date: attendanceDate,
+        skippedDueToOpenSessions: openSessionEmployeeIds.length
+      };
+    }
+    
+    // Mark absent employees with proper audit trail
     const absentRecords = await Promise.all(
-      absentEmployeeIds.map(employeeId => 
+      finalAbsentEmployeeIds.map(employeeId => 
         Attendance.create({
           employee_id: employeeId,
           attendance_date: attendanceDate,
           status: 'ABSENT',
-          remarks: 'Auto-marked as absent (no attendance record found)',
-          created_by: null, // System generated
+          final_status: 'ABSENT',
+          remarks: 'Auto-marked ABSENT by system (no sessions recorded)',
+          status_change_reason: 'Auto-marked ABSENT by system (no sessions recorded)',
+          status_changed_by: null, // System generated
+          status_changed_at: new Date(),
+          created_by: null,
           created_at: new Date()
         })
       )
     );
     
-    logger.info(`CRON: Marked ${absentEmployeeIds.length} employees as absent for ${attendanceDate}`);
+    logger.info(`CRON: Marked ${finalAbsentEmployeeIds.length} employees as absent for ${attendanceDate} (checked for open sessions)`);
     
     return {
-      markedAbsent: absentEmployeeIds.length,
+      markedAbsent: finalAbsentEmployeeIds.length,
       date: attendanceDate,
-      employeeIds: absentEmployeeIds
+      employeeIds: finalAbsentEmployeeIds,
+      skippedDueToOpenSessions: openSessionEmployeeIds.length
     };
     
   } catch (error) {
@@ -179,6 +214,30 @@ async function generateAttendanceSummary(date = null) {
 }
 
 /**
+ * Send attendance reminder emails to OSC admins
+ * This runs every 5 minutes to check for employees who haven't checked out after 8 hours
+ */
+async function sendAttendanceReminders() {
+  try {
+    logger.info('CRON: Running attendance reminder check...');
+    
+    const reminderResult = await processPendingCheckOuts();
+    
+    logger.info('CRON: Attendance reminder check completed', {
+      processed: reminderResult.processed,
+      remindersSent: reminderResult.remindersSent,
+      errors: reminderResult.errors.length
+    });
+    
+    return reminderResult;
+    
+  } catch (error) {
+    logger.error('CRON: Error sending attendance reminders:', error);
+    throw error;
+  }
+}
+
+/**
  * Run all attendance cron tasks
  * This is the main function called by the scheduler
  */
@@ -198,11 +257,15 @@ async function runAttendanceCronTasks() {
     // Task 4: Generate attendance summary
     const summaryResult = await generateAttendanceSummary();
     
+    // Task 5: Send attendance reminder emails
+    const reminderResult = await sendAttendanceReminders();
+    
     logger.info('CRON: Attendance cron tasks completed', {
       absent: absentResult.markedAbsent,
       cleanup: cleanupResult.deleted,
       finalization: finalizationResult.processed,
-      summary: summaryResult.summary
+      summary: summaryResult.summary,
+      reminders: reminderResult.remindersSent
     });
     
     return {
@@ -211,7 +274,8 @@ async function runAttendanceCronTasks() {
         markAbsent: absentResult,
         cleanup: cleanupResult,
         finalization: finalizationResult,
-        summary: summaryResult
+        summary: summaryResult,
+        reminders: reminderResult
       }
     };
     
@@ -225,5 +289,6 @@ module.exports = {
   markAbsentEmployees,
   cleanupOldPendingBulkRecords,
   generateAttendanceSummary,
+  sendAttendanceReminders,
   runAttendanceCronTasks
 };

@@ -195,7 +195,7 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, scheme_id, is_active, password, review_batch_start, review_batch_end } = data;
+    const { full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
 
     try {
       const user = await AdminUser.findOne({
@@ -235,6 +235,7 @@ class AdminService {
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
         scheme_id: scheme_id !== undefined ? scheme_id : user.scheme_id,
+        linked_employee_id: linked_employee_id !== undefined ? linked_employee_id : user.linked_employee_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };
 
@@ -246,10 +247,50 @@ class AdminService {
         updateData.review_batch_end = review_batch_end;
       }
 
-      // Handle password update if provided and not empty (model will hash it in beforeUpdate hook)
-      if (password && password.trim() !== '') {
-        updateData.password_hash = password; // Model will hash this in beforeUpdate hook
-        logger.info(`Password updated for user: ${user.username} by ${currentUser.username || currentUser.id}`);
+      // Handle employee linking
+      if (linked_employee_id) {
+        try {
+          // Import the helper functions
+          const { fetchLinkedEmployeeDetails, buildLinkedAdminFields } = require('./admin/adminUserLinkHelper');
+          
+          const employee = await fetchLinkedEmployeeDetails(linked_employee_id);
+          const linkedFields = buildLinkedAdminFields(employee, full_name || user.full_name);
+          
+          // Check if username already exists (exclude current user)
+          const existingUser = await AdminUser.findOne({
+            where: { 
+              username: linkedFields.username, 
+              admin_id: { [Op.ne]: userId } // Exclude current user
+            }
+          });
+          
+          if (existingUser) {
+            if (existingUser.is_deleted) {
+              // Permanently delete the soft-deleted user to free up the username
+              logger.info(`Permanently deleting soft-deleted user ${existingUser.admin_id} with username ${existingUser.username}`);
+              await existingUser.destroy({ force: true });
+            } else {
+              throw new ApiError(409, `Username ${linkedFields.username} already exists. Please choose a different employee or delete the existing user.`);
+            }
+          }
+          
+          // Override fields with employee data
+          updateData.username = linkedFields.username;
+          updateData.email = linkedFields.email;
+          updateData.full_name = linkedFields.full_name;
+          updateData.password_hash = linkedFields.password_hash; // Use employee's password
+          
+          logger.info(`Admin user ${user.username} linked to employee ${linked_employee_id}`);
+        } catch (error) {
+          logger.error('Error linking employee:', error);
+          throw new ApiError(400, 'Failed to link employee: ' + error.message);
+        }
+      } else {
+        // Handle password update if provided and not empty (model will hash it in beforeUpdate hook)
+        if (password && password.trim() !== '') {
+          updateData.password_hash = password; // Model will hash this in beforeUpdate hook
+          logger.info(`Password updated for user: ${user.username} by ${currentUser.username || currentUser.id}`);
+        }
       }
 
       // Update user

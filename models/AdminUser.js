@@ -59,6 +59,15 @@ const AdminUser = sequelize.define('AdminUser', {
     },
     comment: 'Scheme assignment for scheme-level admins'
   },
+  linked_employee_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_employee_master',
+      key: 'employee_id'
+    },
+    comment: 'Linked employee for attendance reminders and password sync'
+  },
   review_batch_start: {
     type: DataTypes.INTEGER,
     allowNull: true,

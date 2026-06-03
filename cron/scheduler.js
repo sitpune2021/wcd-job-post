@@ -8,6 +8,7 @@ const cron = require('node-cron');
 const cronService = require('../services/cronService');
 const allotmentEmailService = require('../services/admin/allotmentEmailService');
 const { runAttendanceCronTasks } = require('../modules/hrm/cron/attendanceCronService');
+const { processPendingCheckOuts } = require('../services/admin/attendanceReminderHelper');
 const logger = require('../config/logger');
 
 const DEFAULT_EMAIL_CRON = '*/5 * * * *';
@@ -105,10 +106,30 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
   
+  // Run every hour to check for employees who haven't checked out after 8+ hours
+  // This sends reminder emails to scheme/hub admins
+  cron.schedule('0 * * * *', async () => {
+    logger.info('CRON: Checking for attendance check-out reminders...');
+    try {
+      const result = await processPendingCheckOuts();
+      if (result.disabled) {
+        logger.info('CRON: Attendance reminders disabled');
+      } else {
+        logger.info(`CRON: Attendance reminders processed - Employees: ${result.processed}, Reminders sent: ${result.remindersSent}, Errors: ${result.errors.length}`);
+      }
+    } catch (error) {
+      logger.error('CRON: Attendance reminder check failed:', error);
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  });
+  
   logger.info('CRON: Scheduled jobs initialized');
   logger.info(`CRON: - Post auto-close: ${postCloseCron} (IST)`);
   logger.info(`CRON: - Email processing: ${resolvedAllotmentCron} (IST)`);
   logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
+  logger.info('CRON: - Attendance reminders: 0 * * * * (Every hour, IST)');
 }
 
 /**
@@ -118,7 +139,27 @@ async function runManually() {
   return await cronService.runScheduledTasks();
 }
 
+/**
+ * Manually trigger attendance reminder check (for testing)
+ */
+async function runAttendanceReminders() {
+  logger.info('MANUAL: Running attendance reminder check...');
+  try {
+    const result = await processPendingCheckOuts();
+    if (result.disabled) {
+      logger.info('MANUAL: Attendance reminders disabled');
+    } else {
+      logger.info(`MANUAL: Attendance reminders processed - Employees: ${result.processed}, Reminders sent: ${result.remindersSent}, Errors: ${result.errors.length}`);
+    }
+    return result;
+  } catch (error) {
+    logger.error('MANUAL: Attendance reminder check failed:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initCronJobs,
-  runManually
+  runManually,
+  runAttendanceReminders
 };

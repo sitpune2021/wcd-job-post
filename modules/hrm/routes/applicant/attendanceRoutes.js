@@ -183,16 +183,17 @@ router.get('/my/export', async (req, res, next) => {
     // Generate HTML for PDF
     const html = generateMyAttendancePDF(records, value, userWithEmployee);
     
-    // PDF options
+    // PDF options - optimized for 31 rows per page
     const pdfOptions = {
       format: 'A4',
       printBackground: true,
       margin: { 
-        top: '15mm', 
-        right: '15mm', 
-        bottom: '15mm', 
-        left: '15mm' 
+        top: '10mm', 
+        right: '10mm', 
+        bottom: '10mm', 
+        left: '10mm' 
       },
+      displayHeaderFooter: false,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
     };
 
@@ -277,22 +278,22 @@ const generateMyAttendancePDF = (records, filters, user) => {
       <meta charset="utf-8">
       <title>My Attendance Report</title>
       <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .title { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
-        .subtitle { font-size: 12px; color: #666; margin-bottom: 5px; }
-        .employee-info { font-size: 10px; color: #888; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 10px; }
+        body { font-family: Arial, sans-serif; margin: 5px; font-size: 9px; }
+        .header { text-align: center; margin-bottom: 15px; }
+        .title { font-size: 14px; font-weight: bold; margin-bottom: 5px; }
+        .subtitle { font-size: 10px; color: #666; margin-bottom: 3px; }
+        .employee-info { font-size: 8px; color: #888; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        th, td { border: 1px solid #ddd; padding: 3px; text-align: left; font-size: 8px; }
         th { background-color: #f5f5f5; font-weight: bold; }
-        .footer { text-align: center; font-size: 10px; color: #888; margin-top: 30px; }
-        .no-records { text-align: center; color: #666; margin: 50px 0; }
-        .date-col { width: 80px; }
-        .time-col { width: 70px; }
-        .status-col { width: 60px; }
-        .hours-col { width: 50px; }
-        .location-col { width: 120px; }
-        .device-col { width: 80px; }
+        .footer { text-align: center; font-size: 8px; color: #888; margin-top: 10px; }
+        .no-records { text-align: center; color: #666; margin: 20px 0; }
+        .date-col { width: 70px; }
+        .time-col { width: 60px; }
+        .status-col { width: 50px; }
+        .hours-col { width: 40px; }
+        .location-col { width: 100px; }
+        .device-col { width: 60px; }
       </style>
     </head>
     <body>
@@ -351,6 +352,16 @@ const generateMyAttendancePDF = (records, filters, user) => {
 
   return html;
 };
+
+// Get today's attendance status (live session tally)
+router.get('/today-status', async (req, res, next) => {
+  try {
+    const result = await attendanceService.getTodaySessionStatus(req.user);
+    return ApiResponse.success(res, result, 'Today\'s attendance status retrieved');
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Simple check-out endpoint using existing attendance structure
 router.post('/check-out', attendanceUpload, async (req, res, next) => {

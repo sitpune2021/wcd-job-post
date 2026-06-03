@@ -34,10 +34,15 @@ router.get('/dashboard', auditLog('ADMIN_VIEW_DASHBOARD'), async (req, res, next
  */
 router.post('/users', requirePermission(['users.create']), auditLog('CREATE_USER'), async (req, res, next) => {
   try {
-    const { username, password, full_name, email, mobile_no, role_id } = req.body;
+    const { username, password, full_name, email, mobile_no, role_id, linked_employee_id } = req.body;
 
-    if (!username || !password || !full_name || !role_id) {
-      throw ApiError.badRequest('Username, password, full name, and role are required');
+    // Password is required unless linking to employee
+    if (!username || !full_name || !role_id) {
+      throw ApiError.badRequest('Username, full name, and role are required');
+    }
+    
+    if (!linked_employee_id && !password) {
+      throw ApiError.badRequest('Password is required when not linking to employee');
     }
 
     const user = await adminService.createUser(req.body, req.user);
@@ -82,6 +87,7 @@ router.get('/users/:id', requirePermission(['users.view']), async (req, res, nex
  */
 router.put('/users/:id', requirePermission(['users.edit']), auditLog('UPDATE_USER'), async (req, res, next) => {
   try {
+    console.log(`LEGACY Update user ${req.params.id} with data:`, JSON.stringify(req.body, null, 2));
     const user = await adminService.updateUser(req.params.id, req.body, req.user);
     return ApiResponse.success(res, user, 'User updated successfully');
   } catch (error) {

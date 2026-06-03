@@ -2,6 +2,7 @@ const { sequelize } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const logger = require('../config/logger');
 const { generateToken, getBcryptRounds } = require('../config/security');
+const { afterApplicantPasswordChange } = require('./admin/adminPasswordSyncHelper');
 const {
   createLockUntilDate,
   getMaxLoginAttempts,
@@ -484,6 +485,17 @@ const resetPassword = async (email, otp, newPassword) => {
     }
 
     logger.info(`Password reset for applicant: ${result[0].applicant_id}`);
+
+    // Sync password to linked admin accounts
+    try {
+      const syncResult = await afterApplicantPasswordChange(result[0].applicant_id, passwordHash);
+      if (syncResult.synced > 0) {
+        logger.info(`Password synced to ${syncResult.synced} linked admin accounts after reset`);
+      }
+    } catch (syncError) {
+      logger.error('Failed to sync password to linked admin accounts after reset:', syncError);
+    }
+
     return { success: true, message: 'Password reset successfully' };
   } catch (error) {
     logger.error('Error resetting password:', error);
@@ -584,7 +596,17 @@ const changePassword = async (applicantId, currentPassword, newPassword) => {
     } else {
       logger.info(`Password changed for applicant: ${applicantId}`);
     }
-    
+
+    // Sync password to linked admin accounts
+    try {
+      const syncResult = await afterApplicantPasswordChange(applicantId, passwordHash);
+      if (syncResult.synced > 0) {
+        logger.info(`Password synced to ${syncResult.synced} linked admin accounts after change`);
+      }
+    } catch (syncError) {
+      logger.error('Failed to sync password to linked admin accounts after change:', syncError);
+    }
+
     return { success: true, message: 'Password changed successfully' };
   } catch (error) {
     logger.error('Error changing password:', error);

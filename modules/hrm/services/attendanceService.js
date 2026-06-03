@@ -35,6 +35,7 @@ const formatAttendanceRecord = (record) => {
       attendance_date: data.attendance_date,
       check_in_time: data.check_in_time,
       check_out_time: data.check_out_time,
+      total_work_hours: data.total_work_hours,
       status: data.status,
       latitude,
       longitude,
@@ -56,6 +57,7 @@ const formatAttendanceRecord = (record) => {
       attendance_date: data.attendance_date,
       check_in_time: data.check_in_time,
       check_out_time: data.check_out_time,
+      total_work_hours: data.total_work_hours,
       status: data.status,
       latitude: data.latitude,
       longitude: data.longitude,
@@ -104,16 +106,9 @@ const markAttendance = async (user, data, ip) => {
     }
   }
 
-  // Check if Sunday using standardized date check
-  if (isWeekend(today)) {
-    throw new ApiError(400, 'Cannot mark attendance on Sunday.');
-  }
-
-  // Check if today is a holiday using safe query
-  const holiday = await safeHolidayCheck(today);
-  if (holiday) {
-    throw new ApiError(400, `Today is a holiday: ${holiday.holiday_name}`);
-  }
+  // Sunday and Holiday restrictions removed
+  // Employees can now mark attendance on any day
+  // Status will be determined based on work hours and holiday rules
 
   // Check if on approved leave using safe query
   const approvedLeave = await safeLeaveCheck(employee.employee_id, today);
@@ -372,6 +367,130 @@ const markAttendance = async (user, data, ip) => {
 };
 
 /**
+ * Generate complete attendance records including all days (Sundays, Holidays, Absent)
+ */
+const generateCompleteAttendanceRecords = async (employee, attendanceRecords, query) => {
+  // Debug Holiday model
+  logger.info('Holiday model available:', !!Holiday);
+  logger.info('Holiday model type:', typeof Holiday);
+  
+  // Determine date range
+  let startDate, endDate;
+  if (query.from_date && query.to_date) {
+    startDate = new Date(query.from_date);
+    endDate = new Date(query.to_date);
+  } else {
+    const now = new Date();
+    const month = parseInt(query.month) || (now.getMonth() + 1);
+    const year = parseInt(query.year) || now.getFullYear();
+    startDate = new Date(year, month - 1, 1);
+    endDate = new Date(year, month, 0);
+  }
+
+  // Get holidays for the date range
+  let holidays = [];
+  try {
+    holidays = await Holiday.findAll({
+      where: {
+        holiday_date: {
+          [Op.between]: [
+            startDate.toISOString().split('T')[0],
+            endDate.toISOString().split('T')[0]
+          ]
+        },
+        is_active: true,
+        is_deleted: false
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching holidays:', error);
+    // Continue without holidays if there's an error
+  }
+
+  const holidayMap = new Map();
+  holidays.forEach(holiday => {
+    holidayMap.set(holiday.holiday_date, holiday);
+  });
+
+  // Create attendance record map for quick lookup
+  const attendanceMap = new Map();
+  attendanceRecords.forEach(record => {
+    attendanceMap.set(record.attendance_date, record);
+  });
+
+  const completeRecords = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Generate records for each day in the range
+  for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+    const dateStr = date.toISOString().split('T')[0];
+    const dayOfWeek = date.getDay();
+    
+    let record = attendanceMap.get(dateStr);
+    
+    if (record) {
+      // Use existing attendance record
+      completeRecords.push(record);
+    } else if (date < today) {
+      // Only generate past records, not future ones
+      let status = 'NOT_MARKED';
+      let remarks = null;
+      
+      if (holidayMap.has(dateStr)) {
+        status = 'HOLIDAY';
+        const holiday = holidayMap.get(dateStr);
+        remarks = holiday.holiday_name;
+      } else if (dayOfWeek === 0) {
+        status = 'SUNDAY';
+        remarks = 'Sunday';
+      } else if (isWithinContractPeriod(date, employee)) {
+        status = 'ABSENT';
+        remarks = 'Absent';
+      }
+
+      // Create a complete record structure
+      completeRecords.push({
+        attendance_id: null,
+        attendance_date: dateStr,
+        check_in_time: null,
+        check_out_time: null,
+        status: status,
+        half_day_type: null,
+        ip_address: null,
+        latitude: null,
+        longitude: null,
+        geo_address: null,
+        attendance_image_path: null,
+        attendance_image_name: null,
+        attendance_image_size: null,
+        device_type: null,
+        remarks: remarks,
+        total_work_hours: null,
+        has_active_session: false,
+        active_session_id: null,
+        active_check_in_time: null
+      });
+    }
+  }
+
+  // Sort by date descending (newest first)
+  completeRecords.sort((a, b) => new Date(b.attendance_date) - new Date(a.attendance_date));
+
+  return completeRecords;
+};
+
+/**
+ * Check if date is within employee contract period
+ */
+const isWithinContractPeriod = (date, employee) => {
+  const dateStr = date.toISOString().split('T')[0];
+  const isWithinContract = (!employee.contract_start_date || dateStr >= employee.contract_start_date) &&
+                           (!employee.contract_end_date || dateStr <= employee.contract_end_date);
+  return isWithinContract;
+};
+
+/**
  * Get my attendance records (for the logged-in employee)
  */
 const getMyAttendance = async (user, query) => {
@@ -428,12 +547,16 @@ const getMyAttendance = async (user, query) => {
       attendance_image_size: record.attendance_image_size,
       device_type: record.device_type,
       remarks: record.remarks,
+      total_work_hours: record.total_work_hours,
       // Add session information for state detection
       has_active_session: !!activeSession,
       active_session_id: activeSession?.session_id || null,
       active_check_in_time: activeSession?.check_in_time || null
     };
   }));
+
+  // Generate complete day records including Sundays, Holidays, and Absent days
+  const completeRecords = await generateCompleteAttendanceRecords(employee, filteredRecords, query);
 
   let summaryData;
   
@@ -461,7 +584,7 @@ const getMyAttendance = async (user, query) => {
   }
 
   // Build standardized response
-  return buildResponse({ records: filteredRecords }, query, {
+  return buildResponse({ records: completeRecords }, query, {
     message: 'Attendance retrieved successfully',
     summary: summaryData
   });
@@ -1023,30 +1146,69 @@ const checkOutSimple = async (user, data, ip) => {
 
   const today = getCurrentDate();
   const currentTime = getCurrentTime();
-
-  // Find today's attendance record
-  const attendance = await Attendance.findOne({
+  
+  // Get yesterday's date for cross-midnight session detection
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
+  // Find the latest incomplete session across today and yesterday
+  let attendance = null;
+  let latestSession = null;
+  
+  // First check today's attendance
+  const todayAttendance = await Attendance.findOne({
     where: {
       employee_id: employee.employee_id,
       attendance_date: today,
       is_deleted: false
     }
   });
-
-  if (!attendance) {
-    throw new ApiError(400, 'No attendance record found for today. Please mark attendance first.');
+  
+  if (todayAttendance) {
+    latestSession = await AttendanceSession.findOne({
+      where: {
+        attendance_id: todayAttendance.attendance_id,
+        check_out_time: null
+      },
+      order: [['created_at', 'DESC']]
+    });
+    if (latestSession) {
+      attendance = todayAttendance;
+    }
+  }
+  
+  // If no active session today, check yesterday's attendance (cross-midnight)
+  if (!latestSession) {
+    const yesterdayAttendance = await Attendance.findOne({
+      where: {
+        employee_id: employee.employee_id,
+        attendance_date: yesterdayStr,
+        is_deleted: false
+      }
+    });
+    
+    if (yesterdayAttendance) {
+      latestSession = await AttendanceSession.findOne({
+        where: {
+          attendance_id: yesterdayAttendance.attendance_id,
+          check_out_time: null
+        },
+        order: [['created_at', 'DESC']]
+      });
+      if (latestSession) {
+        attendance = yesterdayAttendance;
+        logger.info('Cross-midnight checkout detected', {
+          employeeId: employee.employee_id,
+          sessionId: latestSession.session_id,
+          attendanceDate: yesterdayStr,
+          checkInTime: latestSession.check_in_time
+        });
+      }
+    }
   }
 
-  // Find the latest incomplete session
-  const latestSession = await AttendanceSession.findOne({
-    where: {
-      attendance_id: attendance.attendance_id,
-      check_out_time: null
-    },
-    order: [['created_at', 'DESC']]
-  });
-
-  if (!latestSession) {
+  if (!attendance || !latestSession) {
     throw new ApiError(400, 'No active check-in session found. Please check-in first.');
   }
 
@@ -1065,22 +1227,40 @@ const checkOutSimple = async (user, data, ip) => {
     where: { attendance_id: attendance.attendance_id }
   });
 
-  // Auto-determine status based on total work hours using centralized function
+  // Check if today is a holiday for status calculation
+  const holiday = await safeHolidayCheck(today);
+  const isHoliday = !!holiday;
+  
+  // Auto-determine status based on total work hours using new function
   const hours = parseFloat(totalHours) || 0;
-  const updatedStatus = calculateAttendanceStatus(attendance.check_in_time, currentTime);
+  const updatedStatus = calculateAttendanceStatus(hours, isHoliday);
   logger.info('Auto-calculated attendance status', {
     employeeId: employee.employee_id,
     checkInTime: attendance.check_in_time,
     checkOutTime: currentTime,
     totalHours: hours,
+    isHoliday: isHoliday,
     calculatedStatus: updatedStatus
   });
+
+  // Check for double shift and flag in remarks
+  const config = require('../config/attendanceConfig');
+  let remarks = attendance.remarks;
+  if (hours >= config.DOUBLE_SHIFT_HOURS) {
+    remarks = remarks ? `${remarks}; DOUBLE_SHIFT (${hours}h)` : `DOUBLE_SHIFT (${hours}h)`;
+    logger.info('Double shift detected', {
+      employeeId: employee.employee_id,
+      totalHours: hours,
+      threshold: config.DOUBLE_SHIFT_HOURS
+    });
+  }
 
   await attendance.update({
     check_out_time: currentTime,
     check_out_photo_path: data.photoPath || attendance.attendance_image_path,
     total_work_hours: hours,
     status: updatedStatus,
+    remarks: remarks,
     ip_address: ip,
     latitude: data.latitude || attendance.latitude,
     longitude: data.longitude || attendance.longitude,
@@ -1102,53 +1282,34 @@ const checkOutSimple = async (user, data, ip) => {
 };
 
 /**
- * Calculate attendance status based on check-in and check-out times
- * Auto-detects half-day based on hours worked
- * @param {string} checkInTime - Check-in time in HH:MM:SS format
- * @param {string} checkOutTime - Check-out time in HH:MM:SS format
- * @returns {string} - 'PRESENT' | 'HALF_DAY' | 'ABSENT'
+ * Calculate attendance status based on total work hours
+ * Uses new threshold logic: 0-4h = HALF_DAY, >=4h = PRESENT
+ * @param {number} totalWorkHours - Total work hours from all sessions
+ * @param {boolean} isHoliday - Whether this is a holiday
+ * @returns {string|null} - 'PRESENT' | 'HALF_DAY' | null (for cron to handle)
  */
-const calculateAttendanceStatus = (checkInTime, checkOutTime) => {
-  // If no check-in time, mark as absent
-  if (!checkInTime) return 'ABSENT';
+const calculateAttendanceStatus = (totalWorkHours, isHoliday = false) => {
+  const config = require('../config/attendanceConfig');
+  const hours = parseFloat(totalWorkHours) || 0;
   
-  // If check-in exists but no check-out, default to present
-  // User can check-out later to complete hours
-  if (!checkOutTime) return 'PRESENT';
+  // Holiday special case: any work = PRESENT
+  if (isHoliday && hours > 0) {
+    return 'PRESENT';
+  }
   
-  try {
-    // Parse times in HH:MM:SS format
-    const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
-    const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
-    
-    // Create date objects for calculation (using same date)
-    const baseDate = new Date();
-    const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
-    const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
-    
-    // Calculate difference in milliseconds
-    const diffMs = checkOut - checkIn;
-    
-    // Handle negative or zero difference
-    if (diffMs <= 0) return 'PRESENT';
-    
-    // Convert to hours
-    const hours = diffMs / (1000 * 60 * 60);
-    
-    // Auto-detect half-day based on hours worked
-    if (hours < 8) {
-      return 'HALF_DAY';
-    } else {
-      return 'PRESENT';
-    }
-  } catch (error) {
-    logger.error('Error calculating attendance status:', error);
-    return 'PRESENT'; // Default to present on error
+  // New threshold logic: 0-4h = HALF_DAY, 4h+ = PRESENT
+  if (hours >= config.HALF_DAY_MIN_HOURS) {
+    return 'PRESENT'; // 4h and above = PRESENT
+  } else if (hours > 0) {
+    return 'HALF_DAY'; // 0-4h with any sessions = HALF_DAY
+  } else {
+    return null; // No sessions, let cron handle
   }
 };
 
 /**
  * Calculate duration between check-in and check-out times
+ * Handles cross-midnight sessions (e.g., 23:00 to 05:00)
  */
 const calculateDuration = (checkInTime, checkOutTime) => {
   if (!checkInTime || !checkOutTime) return 0;
@@ -1156,13 +1317,19 @@ const calculateDuration = (checkInTime, checkOutTime) => {
   const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
   const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
   
-  const inDate = new Date();
-  inDate.setHours(inHours, inMinutes, inSeconds || 0);
+  // Create date objects for calculation
+  const baseDate = new Date();
+  const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
+  const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
   
-  const outDate = new Date();
-  outDate.setHours(outHours, outMinutes, outSeconds || 0);
+  // Calculate difference in milliseconds
+  let diffMs = checkOut - checkIn;
   
-  const diffMs = outDate - inDate;
+  // Handle cross-midnight: if checkout is before checkin, add 24 hours
+  if (diffMs < 0) {
+    diffMs += 24 * 60 * 60 * 1000; // Add 24 hours in milliseconds
+  }
+  
   const diffHours = diffMs / (1000 * 60 * 60);
   
   return Math.round(diffHours * 100) / 100; // Round to 2 decimal places
@@ -1170,52 +1337,250 @@ const calculateDuration = (checkInTime, checkOutTime) => {
 
 /**
  * Finalize daily attendance status based on total work hours
- * Should be run by cron job at end of day
+ * Should be run by cron job for yesterday (not today)
  */
 const finalizeDailyAttendance = async () => {
-  const today = getCurrentDate();
+  // Process yesterday's attendance (not today)
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
   
-  // Find all attendance records for today with PENDING final status
+  // Find all attendance records for yesterday with PENDING final status
   const pendingAttendances = await Attendance.findAll({
     where: {
-      attendance_date: today,
+      attendance_date: yesterdayStr,
       final_status: 'PENDING'
-    }
+    },
+    include: [{
+      model: require('../models').AttendanceSession,
+      as: 'sessions',
+      where: { check_out_time: null },
+      required: false // LEFT JOIN to check for open sessions
+    }]
   });
 
+  let processed = 0;
+  
   for (const attendance of pendingAttendances) {
-    // Use centralized calculateAttendanceStatus function
-    const calculatedStatus = calculateAttendanceStatus(attendance.check_in_time, attendance.check_out_time);
+    // Skip if employee has open sessions (still working)
+    if (attendance.sessions && attendance.sessions.length > 0) {
+      logger.info('Skipping finalization - employee has open sessions', {
+        employeeId: attendance.employee_id,
+        date: yesterdayStr,
+        openSessions: attendance.sessions.length
+      });
+      continue;
+    }
     
-    // For finalization, if no check-out time, check if there's check-in to determine status
+    // Check if yesterday was a holiday
+    const holiday = await safeHolidayCheck(yesterdayStr);
+    const isHoliday = !!holiday;
+    
+    // Use new calculateAttendanceStatus with total_work_hours
+    const hours = parseFloat(attendance.total_work_hours) || 0;
+    const calculatedStatus = calculateAttendanceStatus(hours, isHoliday);
+    
+    // Determine final status
     let finalStatus = calculatedStatus;
-    if (!attendance.check_out_time && attendance.check_in_time) {
-      // If only check-in exists, mark as PRESENT (employee was present)
-      finalStatus = 'PRESENT';
-    } else if (!attendance.check_in_time) {
-      // If no check-in at all, mark as ABSENT
+    if (finalStatus === null) {
+      // No sessions worked, mark as ABSENT
       finalStatus = 'ABSENT';
     }
     
-    const hours = parseFloat(attendance.total_work_hours) || 0;
+    // Check for double shift and flag in remarks
+    const config = require('../config/attendanceConfig');
+    let remarks = attendance.remarks;
+    if (hours >= config.DOUBLE_SHIFT_HOURS) {
+      remarks = remarks ? `${remarks}; DOUBLE_SHIFT (${hours}h)` : `DOUBLE_SHIFT (${hours}h)`;
+      logger.info('Double shift detected during finalization', {
+        employeeId: attendance.employee_id,
+        date: yesterdayStr,
+        totalHours: hours,
+        threshold: config.DOUBLE_SHIFT_HOURS
+      });
+    }
     
     await attendance.update({
       final_status: finalStatus,
-      status: finalStatus
+      status: finalStatus,
+      remarks: remarks,
+      status_change_reason: 'Finalized by cron',
+      status_changed_by: null,
+      status_changed_at: new Date()
     });
 
     logger.info('Attendance finalized', {
       employeeId: attendance.employee_id,
-      date: today,
+      date: yesterdayStr,
       totalHours: hours,
-      finalStatus: finalStatus,
-      calculatedStatus: calculatedStatus
+      isHoliday: isHoliday,
+      finalStatus: finalStatus
     });
+    
+    processed++;
   }
 
   return {
-    processed: pendingAttendances.length,
-    date: today
+    processed,
+    date: yesterdayStr
+  };
+};
+
+/**
+ * Get today's attendance session status for employee
+ * Shows live tally of sessions, hours worked, and projected status
+ */
+const getTodaySessionStatus = async (user) => {
+  const employee = await getEmployeeFromUser(user, EmployeeMaster);
+  if (!employee) {
+    throw new ApiError(404, 'Employee record not found.');
+  }
+
+  const today = getCurrentDate();
+  const config = require('../config/attendanceConfig');
+  
+  // Get yesterday's date for cross-midnight session detection
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
+  // Get attendance records for today and yesterday (for cross-midnight sessions)
+  const [todayAttendance, yesterdayAttendance] = await Promise.all([
+    Attendance.findOne({
+      where: {
+        employee_id: employee.employee_id,
+        attendance_date: today,
+        is_deleted: false
+      },
+      include: [{
+        model: require('../models').AttendanceSession,
+        as: 'sessions',
+        order: [['created_at', 'ASC']]
+      }]
+    }),
+    Attendance.findOne({
+      where: {
+        employee_id: employee.employee_id,
+        attendance_date: yesterdayStr,
+        is_deleted: false
+      },
+      include: [{
+        model: require('../models').AttendanceSession,
+        as: 'sessions',
+        order: [['created_at', 'ASC']]
+      }]
+    })
+  ]);
+
+  // Check for active sessions from yesterday (cross-midnight shifts)
+  let attendance = todayAttendance;
+  let sessions = [];
+  let totalCompletedHours = 0;
+  let activeSession = null;
+  
+  logger.info('Cross-midnight session check', {
+    employeeId: employee.employee_id,
+    today: today,
+    yesterday: yesterdayStr,
+    todayAttendance: !!todayAttendance,
+    yesterdayAttendance: !!yesterdayAttendance,
+    yesterdaySessions: yesterdayAttendance?.sessions?.length || 0
+  });
+  
+  if (yesterdayAttendance && yesterdayAttendance.sessions) {
+    const yesterdayActiveSession = yesterdayAttendance.sessions.find(s => !s.check_out_time);
+    logger.info('Yesterday active session check', {
+      found: !!yesterdayActiveSession,
+      sessionId: yesterdayActiveSession?.session_id,
+      checkIn: yesterdayActiveSession?.check_in_time
+    });
+    
+    if (yesterdayActiveSession) {
+      // Found active session from yesterday
+      activeSession = yesterdayActiveSession;
+      sessions = yesterdayAttendance.sessions || [];
+      totalCompletedHours = parseFloat(yesterdayAttendance.total_work_hours) || 0;
+      attendance = yesterdayAttendance;
+      logger.info('Using yesterday active session', {
+        sessionId: activeSession.session_id,
+        totalSessions: sessions.length,
+        totalHours: totalCompletedHours
+      });
+    }
+  }
+  
+  // If no active session from yesterday, use today's attendance
+  if (!activeSession && todayAttendance) {
+    sessions = todayAttendance.sessions || [];
+    totalCompletedHours = parseFloat(todayAttendance.total_work_hours) || 0;
+    attendance = todayAttendance;
+    activeSession = sessions.find(s => !s.check_out_time);
+    logger.info('Using today attendance', {
+      totalSessions: sessions.length,
+      activeSessionFound: !!activeSession,
+      totalHours: totalCompletedHours
+    });
+  }
+  
+  // If still no attendance found, return empty state
+  if (!attendance) {
+    return {
+      attendance_date: today,
+      sessions: [],
+      total_completed_hours: 0,
+      current_session_running: false,
+      projected_status: null,
+      hours_needed_for_present: config.HALF_DAY_MIN_HOURS,
+      message: 'No attendance marked today'
+    };
+  }
+
+  // Check if today is a holiday
+  const holiday = await safeHolidayCheck(today);
+  const isHoliday = !!holiday;
+
+  // Sessions already processed above for cross-midnight detection
+  // No need to re-process here
+  
+  // Calculate projected status
+  const statusInfo = config.getStatusMessage(totalCompletedHours, isHoliday);
+  
+  // Calculate live duration for active session
+  const currentTime = getCurrentTime();
+  const sessionsWithLiveDuration = sessions.map(s => {
+    let hours = s.duration_hours || null;
+    if (!s.check_out_time && s.check_in_time) {
+      // Calculate live duration for active session
+      hours = calculateDuration(s.check_in_time, currentTime);
+    }
+    return {
+      session_id: s.session_id,
+      check_in: s.check_in_time,
+      check_out: s.check_out_time,
+      hours: hours,
+      active: !s.check_out_time
+    };
+  });
+  
+  // Calculate projected total including active session
+  let projectedTotal = totalCompletedHours;
+  if (activeSession && !activeSession.duration_hours) {
+    projectedTotal += calculateDuration(activeSession.check_in_time, currentTime);
+  }
+  
+  // Recalculate projected status with live duration
+  const projectedStatusInfo = config.getStatusMessage(projectedTotal, isHoliday);
+
+  return {
+    attendance_date: today,
+    sessions: sessionsWithLiveDuration,
+    total_completed_hours: totalCompletedHours,
+    projected_total_hours: Math.round(projectedTotal * 100) / 100,
+    current_session_running: !!activeSession,
+    projected_status: projectedStatusInfo.status,
+    hours_needed_for_present: projectedStatusInfo.status === 'PRESENT' ? 0 : config.HALF_DAY_MIN_HOURS - projectedTotal,
+    message: statusInfo.message,
+    is_holiday: isHoliday
   };
 };
 
@@ -1643,5 +2008,6 @@ module.exports = {
   finalizeDailyAttendance,
   generateAttendancePDF,
   getAttendanceRecordsForPDF,
-  calculateAttendanceStatus
+  calculateAttendanceStatus,
+  getTodaySessionStatus
 };

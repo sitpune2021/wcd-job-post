@@ -53,6 +53,7 @@ router.post('/users', authenticate, requirePermission(['users.create']), async (
 // Update user
 router.put('/users/:id', authenticate, requirePermission(['users.edit']), async (req, res, next) => {
   try {
+    logger.info(`RBAC Update user ${req.params.id} with data:`, JSON.stringify(req.body, null, 2));
     const user = await rbacService.updateUser(req.params.id, req.body, req.user.admin_id);
     if (!user) {
       return next(ApiError.notFound('User not found'));
