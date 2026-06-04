@@ -6,8 +6,8 @@ const logger = require('../../../config/logger');
  * New Format: MSCE-27MH-0001, MSCE-27MH-0002, etc.
  * Backward Compatible: Still supports existing EMPxxxx codes
  */
-async function generateEmployeeCode() {
-  const transaction = await db.sequelize.transaction();
+async function generateEmployeeCode(transaction = null) {
+  const useTransaction = transaction || await db.sequelize.transaction();
   
   try {
     // Find the highest existing MSCE code
@@ -20,7 +20,7 @@ async function generateEmployeeCode() {
       },
       order: [['employee_code', 'DESC']],
       limit: 1,
-      transaction,
+      transaction: useTransaction,
       lock: true
     });
 
@@ -48,11 +48,17 @@ async function generateEmployeeCode() {
       format: 'MSCE-27MH-XXXX'
     });
     
-    await transaction.commit();
+    // Only commit if we created our own transaction
+    if (!transaction) {
+      await useTransaction.commit();
+    }
     return employeeCode;
     
   } catch (error) {
-    await transaction.rollback();
+    // Only rollback if we created our own transaction
+    if (!transaction) {
+      await useTransaction.rollback();
+    }
     logger.error('Error generating employee code:', error);
     throw error;
   }

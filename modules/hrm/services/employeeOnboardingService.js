@@ -130,7 +130,7 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
     }
 
     // Create employee record
-    const employeeCode = await generateEmployeeCode();
+    const employeeCode = await generateEmployeeCode(transaction);
     const employee = await EmployeeMaster.create({
       employee_code: employeeCode,
       applicant_id: application.applicant_id,
@@ -287,8 +287,8 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       created_by: adminId
     }, { transaction });
 
-    // Generate employee code
-    const employee_code = await generateEmployeeCode();
+    // Generate employee code using the same transaction
+    const employee_code = await generateEmployeeCode(transaction);
 
     // Parse and calculate dates
     const parsedStartDate = parseDate(contract_start_date);
