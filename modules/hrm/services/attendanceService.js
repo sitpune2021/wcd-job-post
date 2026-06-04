@@ -807,9 +807,9 @@ const getAttendanceSummary = async (adminUser, query) => {
   // Add search filter to employee query
   if (search) {
     employeeFilter[Op.or] = [
-      { employee_code: { [Op.like]: `%${search}%` } },
-      { '$applicant.email$': { [Op.like]: `%${search}%` } },
-      { '$applicant.personal.full_name$': { [Op.like]: `%${search}%` } }
+      { employee_code: { [Op.iLike]: `%${search}%` } },
+      { '$applicant.email$': { [Op.iLike]: `%${search}%` } },
+      { '$applicant.personal.full_name$': { [Op.iLike]: `%${search}%` } }
     ];
   }
 

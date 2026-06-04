@@ -23,7 +23,7 @@ class BulkAttendanceService {
    */
   async downloadTemplate(adminUser, query) {
     try {
-      const { month, year, district_id, scheme_id } = query;
+      const { month, year, district_id, scheme_type_id, scheme_id } = query;
       
       // Validate month and year
       if (!month || !year) {
@@ -47,6 +47,7 @@ class BulkAttendanceService {
       // Build additional filter conditions
       const additionalFilters = {};
       if (district_id) additionalFilters.district_id = parseInt(district_id);
+      if (scheme_type_id) additionalFilters['$scheme.scheme_type_id$'] = parseInt(scheme_type_id);
       if (scheme_id) additionalFilters.scheme_id = parseInt(scheme_id);
 
       // Get employee details with filters
@@ -249,6 +250,7 @@ class BulkAttendanceService {
       instructionSheet.addRow(['Generated for:']);
       instructionSheet.addRow([`Month: ${month}/${year}`]);
       if (district_id) instructionSheet.addRow([`District: ${employees[0]?.district?.district_name || 'All'}`]);
+      if (scheme_type_id) instructionSheet.addRow([`Scheme Type: ${employees[0]?.scheme?.schemeType?.scheme_name || employees[0]?.scheme?.schemeType?.scheme_code || 'All'}`]);
       if (scheme_id) instructionSheet.addRow([`Scheme: ${employees[0]?.scheme?.scheme_name || 'All'}`]);
       instructionSheet.addRow([`Total Employees: ${employees.length}`]);
       instructionSheet.addRow(['6. Save the file and upload it through the system']);
