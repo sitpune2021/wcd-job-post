@@ -15,6 +15,11 @@ const { ApiError } = require('../../../middleware/errorHandler');
 function parseDate(dateStr) {
   if (!dateStr) return null;
   
+  // If already a Date object, convert to YYYY-MM-DD
+  if (dateStr instanceof Date) {
+    return isNaN(dateStr) ? null : dateStr.toISOString().split('T')[0];
+  }
+  
   // Handle DD/MM/YYYY format
   if (typeof dateStr === 'string' && dateStr.includes('/')) {
     const parts = dateStr.split('/');
@@ -25,7 +30,14 @@ function parseDate(dateStr) {
     }
   }
   
-  return dateStr;
+  // Handle YYYY-MM-DD format or any other valid date string
+  const date = new Date(dateStr);
+  if (!isNaN(date)) {
+    return date.toISOString().split('T')[0];
+  }
+  
+  // If all else fails, return null instead of invalid string
+  return null;
 }
 
 /**
@@ -282,6 +294,24 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     const parsedStartDate = parseDate(contract_start_date);
     const calculatedEndDate = calculateEndDate(parsedStartDate);
     
+    // Validate dates before creating employee
+    if (!parsedStartDate) {
+      throw new Error(`Invalid contract_start_date format: ${contract_start_date}`);
+    }
+    if (!calculatedEndDate) {
+      throw new Error(`Failed to calculate end date from start date: ${parsedStartDate}`);
+    }
+
+    logger.info('Creating employee record', {
+      applicantId,
+      employeeCode: employee_code,
+      post_id,
+      district_id,
+      scheme_id,
+      contract_start_date: parsedStartDate,
+      contract_end_date: calculatedEndDate
+    });
+
     // Create employee record (only for new applicants)
     const employee = await EmployeeMaster.create({
       applicant_id: applicantId,
