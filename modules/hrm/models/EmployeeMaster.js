@@ -56,6 +56,24 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
     },
     comment: 'Scheme assignment (required)'
   },
+  component_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_components',
+      key: 'component_id'
+    },
+    comment: 'Component assignment (legacy - for chk_component_or_hub constraint)'
+  },
+  hub_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_hub_master',
+      key: 'hub_id'
+    },
+    comment: 'Hub assignment (legacy - for chk_component_or_hub constraint)'
+  },
   contract_start_date: {
     type: DataTypes.DATEONLY,
     allowNull: false,

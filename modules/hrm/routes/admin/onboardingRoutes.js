@@ -170,7 +170,29 @@ router.post('/import-excel',
     if (createdCount > 0) message += ` (${createdCount} created`;
     if (updatedCount > 0) message += `${createdCount > 0 ? ', ' : '('}${updatedCount} updated`;
     if (createdCount > 0 || updatedCount > 0) message += ')';
-    if (result.failed.length > 0) message += ` (${result.failed.length} failed)`;
+    
+    // Enhanced message for failed entries
+    if (result.failed.length > 0) {
+      message += ` (${result.failed.length} failed)`;
+      
+      // Add details about failed entries in the response
+      const failedDetails = result.failed.map(failed => ({
+        email: failed.email,
+        error: failed.error
+      }));
+      
+      return ApiResponse.success(res, {
+        ...result,
+        failedDetails,
+        summary: {
+          total: result.success.length + result.failed.length,
+          created: createdCount,
+          updated: updatedCount,
+          failed: result.failed.length,
+          successRate: Math.round((result.success.length / (result.success.length + result.failed.length)) * 100)
+        }
+      }, message);
+    }
 
     return ApiResponse.success(res, result, message);
   } catch (error) {

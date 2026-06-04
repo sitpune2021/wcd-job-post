@@ -278,14 +278,33 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     applicantId = applicant.applicant_id;
 
     // Create applicant personal record with provided values
-    await db.ApplicantPersonal.create({
-      applicant_id: applicantId,
-      full_name,
-      dob: parseDate(employeeData.dob) || '1990-01-01', // Parse date or use default
-      gender: employeeData.gender || 'Other', // Use provided gender or default
-      domicile_maharashtra: true, // Default to true (not required from user)
-      created_by: adminId
-    }, { transaction });
+    try {
+      logger.info('Creating applicant personal record', {
+        applicant_id: applicantId,
+        full_name,
+        dob: parseDate(employeeData.dob) || '1990-01-01',
+        gender: employeeData.gender || 'Other',
+        created_by: adminId
+      });
+      
+      const personalRecord = await db.ApplicantPersonal.create({
+        applicant_id: applicantId,
+        full_name,
+        dob: parseDate(employeeData.dob) || '1990-01-01', // Parse date or use default
+        gender: employeeData.gender || 'Other', // Use provided gender or default
+        domicile_maharashtra: true, // Default to true (not required from user)
+        created_by: adminId
+      }, { transaction });
+      
+      logger.info('Applicant personal record created successfully');
+    } catch (personalError) {
+      logger.error('Applicant personal creation failed', {
+        error: personalError.message,
+        applicantId,
+        full_name
+      });
+      throw personalError;
+    }
 
     // Generate employee code using the same transaction
     const employee_code = await generateEmployeeCode(transaction);
@@ -302,35 +321,54 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       throw new Error(`Failed to calculate end date from start date: ${parsedStartDate}`);
     }
 
-    logger.info('Creating employee record', {
-      applicantId,
-      employeeCode: employee_code,
-      post_id,
-      district_id,
-      scheme_id,
-      contract_start_date: parsedStartDate,
-      contract_end_date: calculatedEndDate
-    });
-
     // Create employee record (only for new applicants)
-    const employee = await EmployeeMaster.create({
-      applicant_id: applicantId,
-      application_id: null,                // No Application record for imported employees
-      employee_code, // Use generated employee code
-      post_id,
-      district_id,
-      scheme_id: scheme_id || null,
-      contract_start_date: parsedStartDate,
-      contract_end_date: calculatedEndDate, // Calculate end date from start date + 11 months
-      employee_pay: employee_pay || null,
-      onboarding_type: 'EXISTING_IMPORT',
-      onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
-      employment_status: 'ACTIVE',        // Set employment status to ACTIVE as well
-      temp_password_hash: passwordHash,
-      password_change_required: true,
-      is_active: true,                     // EXISTING_IMPORT employees should be active immediately
-      created_by: adminId
-    }, { transaction });
+    let employee;
+    try {
+      employee = await EmployeeMaster.create({
+        applicant_id: applicantId,
+        application_id: null,                // No Application record for imported employees
+        employee_code, // Use generated employee code
+        post_id,
+        district_id,
+        scheme_id: scheme_id || null,
+        component_id: null,                  // Legacy field - no longer needed with scheme-based approach
+        hub_id: null,                        // Legacy field - no longer needed with scheme-based approach
+        contract_start_date: parsedStartDate,
+        contract_end_date: calculatedEndDate, // Calculate end date from start date + 11 months
+        employee_pay: employee_pay || null,
+        onboarding_type: 'EXISTING_IMPORT',
+        onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
+        employment_status: 'ACTIVE',        // Set employment status to ACTIVE as well
+        temp_password_hash: passwordHash,
+        password_change_required: true,
+        is_active: true,                     // EXISTING_IMPORT employees should be active immediately
+        created_by: adminId
+      }, { transaction });
+      
+      logger.info('Employee created successfully', {
+        employeeId: employee.employee_id,
+        employeeCode: employee.employee_code
+      });
+    } catch (createError) {
+      logger.error('Employee creation failed', {
+        error: createError.message,
+        name: createError.name,
+        employeeCode: employee_code,
+        applicantId
+      });
+      
+      // Handle specific database errors with clear messages
+      if (createError.name === 'SequelizeUniqueConstraintError') {
+        throw new Error(`Employee code ${employee_code} already exists. Please try again.`);
+      }
+      
+      if (createError.message.includes('current transaction is aborted')) {
+        throw new Error('Database transaction failed. Please check that post, district, and scheme records exist.');
+      }
+      
+      // Generic error
+      throw new Error(`Error creating employee: ${createError.message}`);
+    }
 
     // Update applicant master to mark as employee
     await db.ApplicantMaster.update(

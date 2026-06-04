@@ -7,58 +7,21 @@ const logger = require('../../../config/logger');
  * Backward Compatible: Still supports existing EMPxxxx codes
  */
 async function generateEmployeeCode(transaction = null) {
-  const useTransaction = transaction || await db.sequelize.transaction();
-  
   try {
-    // Find the highest existing MSCE code
-    const lastMSCEEmployee = await db.EmployeeMaster.findOne({
-      attributes: ['employee_code'],
-      where: {
-        employee_code: {
-          [db.Sequelize.Op.like]: 'MSCE-27MH-%'
-        }
-      },
-      order: [['employee_code', 'DESC']],
-      limit: 1,
-      transaction: useTransaction,
-      lock: true
-    });
-
-    let nextSequence = 1;
+    // Get current timestamp to create a unique sequence
+    const timestamp = Date.now();
+    const timeSequence = timestamp % 9000 + 1000; // Generate between 1000-9999
     
-    if (lastMSCEEmployee && lastMSCEEmployee.employee_code) {
-      // Extract numeric part from MSCE-27MH-0001 format
-      const parts = lastMSCEEmployee.employee_code.split('-');
-      if (parts.length === 3) {
-        const numericPart = parts[2];
-        const lastSequence = parseInt(numericPart, 10);
-        
-        if (!isNaN(lastSequence)) {
-          nextSequence = lastSequence + 1;
-        }
-      }
-    }
+    const employeeCode = `MSCE-27MH-${String(timeSequence).padStart(4, '0')}`;
     
-    // Format as MSCE-27MH-0001, MSCE-27MH-0002, etc. (4 digits with leading zeros)
-    const employeeCode = `MSCE-27MH-${String(nextSequence).padStart(4, '0')}`;
-    
-    logger.info('Generated employee code', { 
-      employeeCode, 
-      sequence: nextSequence,
-      format: 'MSCE-27MH-XXXX'
+    logger.info('Generated employee code using timestamp approach', {
+      employeeCode,
+      sequence: timeSequence
     });
     
-    // Only commit if we created our own transaction
-    if (!transaction) {
-      await useTransaction.commit();
-    }
     return employeeCode;
     
   } catch (error) {
-    // Only rollback if we created our own transaction
-    if (!transaction) {
-      await useTransaction.rollback();
-    }
     logger.error('Error generating employee code:', error);
     throw error;
   }

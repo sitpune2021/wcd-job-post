@@ -133,8 +133,8 @@ async function generateTemplate(res) {
       ws.getCell(`B${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [schemeRange] };
       ws.getCell(`C${i}`).dataValidation = { type: 'list', allowBlank: false, formulae: [postRange] };
       
-      // Gender dropdown (moved to column K)
-      ws.getCell(`K${i}`).dataValidation = { 
+      // Gender dropdown (column J to match parsing logic)
+      ws.getCell(`J${i}`).dataValidation = { 
         type: 'list', 
         allowBlank: false, 
         formulae: ['"Male,Female,Other"'] 
