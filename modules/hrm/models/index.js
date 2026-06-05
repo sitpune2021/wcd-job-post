@@ -11,6 +11,7 @@ const MonthlyReport = require('./MonthlyReport');
 const FieldVisit = require('./FieldVisit');
 const PerformanceReview = require('./PerformanceReview');
 const Holiday = require('./Holiday');
+const WeeklyOffClaim = require('./WeeklyOffClaim');
 
 // Import database models for associations
 const db = require('../../../config/db');
@@ -219,6 +220,32 @@ const setupAssociations = (db) => {
     foreignKey: 'attendance_id',
     as: 'sessions'
   });
+
+  // ==================== Weekly Off Claims ====================
+  WeeklyOffClaim.belongsTo(EmployeeMaster, {
+    foreignKey: 'employee_id',
+    as: 'employee'
+  });
+
+  WeeklyOffClaim.belongsTo(db.AdminUser, {
+    foreignKey: 'approved_by',
+    as: 'approver'
+  });
+
+  WeeklyOffClaim.belongsTo(Attendance, {
+    foreignKey: 'attendance_id',
+    as: 'attendanceRecord'
+  });
+
+  EmployeeMaster.hasMany(WeeklyOffClaim, {
+    foreignKey: 'employee_id',
+    as: 'weeklyOffClaims'
+  });
+
+  Attendance.hasOne(WeeklyOffClaim, {
+    foreignKey: 'attendance_id',
+    as: 'weeklyOffClaim'
+  });
 };
 
 module.exports = {
@@ -235,5 +262,6 @@ module.exports = {
   FieldVisit,
   PerformanceReview,
   Holiday,
+  WeeklyOffClaim,
   setupAssociations
 };

@@ -91,6 +91,8 @@ db.HrmHoliday = hrmModels.Holiday;
 // Payroll Models (Simplified)
 db.HrmPayrollCycle = hrmModels.PayrollCycle;
 db.HrmPayslip = hrmModels.Payslip;
+// Weekly Off Claims
+db.HrmWeeklyOffClaim = hrmModels.WeeklyOffClaim;
 
 // Set up associations
 // Role <-> Permission (Many-to-Many)

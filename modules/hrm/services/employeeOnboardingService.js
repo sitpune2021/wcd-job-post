@@ -74,8 +74,8 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
     const application = await db.Application.findOne({
       where: {
         applicant_id: applicantId,
-        is_deleted: false
-        // status: 'SELECTED' // Temporarily removed for debugging
+        is_deleted: false,
+        status: 'SELECTED'
       },
       include: [
         {

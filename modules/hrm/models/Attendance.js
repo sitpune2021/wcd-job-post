@@ -39,7 +39,7 @@ const Attendance = sequelize.define('HrmAttendance', {
     allowNull: false,
     defaultValue: 'PRESENT',
     validate: {
-      isIn: [['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY']]
+      isIn: [['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY', 'WEEKLY_OFF']]
     }
   },
   half_day_type: {

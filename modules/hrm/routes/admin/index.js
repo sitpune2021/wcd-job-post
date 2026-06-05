@@ -20,6 +20,7 @@ const dashboardRoutes = require('./dashboardRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const payrollViewRoutes = require('./payrollViewRoutes');
 const settingsRoutes = require('./settingsRoutes');
+const weeklyOffClaimRoutes = require('./weeklyOffClaimRoutes');
 // const leaveDaysRoutes = require('./leaveDaysRoutes');
 
 // Mount routes
@@ -34,6 +35,7 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/holidays', holidayRoutes);
 router.use('/payroll-view', payrollViewRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/weekly', weeklyOffClaimRoutes);
 // router.use('/leave-days', leaveDaysRoutes);
 
 module.exports = router;

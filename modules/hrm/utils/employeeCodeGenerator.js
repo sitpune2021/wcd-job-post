@@ -8,15 +8,34 @@ const logger = require('../../../config/logger');
  */
 async function generateEmployeeCode(transaction = null) {
   try {
-    // Get current timestamp to create a unique sequence
-    const timestamp = Date.now();
-    const timeSequence = timestamp % 9000 + 1000; // Generate between 1000-9999
+    const EmployeeMaster = db.EmployeeMaster;
     
-    const employeeCode = `MSCE-27MH-${String(timeSequence).padStart(4, '0')}`;
+    // Find the highest sequence number from existing MSCE-27MH- codes
+    const lastEmployee = await EmployeeMaster.max('employee_code', {
+      where: {
+        employee_code: {
+          [db.Sequelize.Op.like]: 'MSCE-27MH-%'
+        }
+      },
+      transaction
+    });
     
-    logger.info('Generated employee code using timestamp approach', {
+    let nextSequence = 1;
+    
+    if (lastEmployee) {
+      // Extract sequence number from last code (e.g., MSCE-27MH-0001 -> 1)
+      const lastSequence = parseInt(lastEmployee.split('-')[2]);
+      if (!isNaN(lastSequence)) {
+        nextSequence = lastSequence + 1;
+      }
+    }
+    
+    const employeeCode = `MSCE-27MH-${String(nextSequence).padStart(4, '0')}`;
+    
+    logger.info('Generated employee code using sequential approach', {
       employeeCode,
-      sequence: timeSequence
+      sequence: nextSequence,
+      lastEmployeeCode: lastEmployee
     });
     
     return employeeCode;

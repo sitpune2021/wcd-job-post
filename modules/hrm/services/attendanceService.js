@@ -809,7 +809,8 @@ const getAttendanceSummary = async (adminUser, query) => {
     employeeFilter[Op.or] = [
       { employee_code: { [Op.iLike]: `%${search}%` } },
       { '$applicant.email$': { [Op.iLike]: `%${search}%` } },
-      { '$applicant.personal.full_name$': { [Op.iLike]: `%${search}%` } }
+      { '$applicant.personal.full_name$': { [Op.iLike]: `%${search}%` } },
+      { '$scheme.scheme_name$': { [Op.iLike]: `%${search}%` } }
     ];
   }
 
@@ -1837,26 +1838,31 @@ const generateAttendanceHTML = (records, filters) => {
 
   const calculateWorkHours = (checkInTime, checkOutTime) => {
     if (!checkInTime || !checkOutTime) return '--';
-    
+
     try {
       // Parse times in HH:MM:SS format
       const [inHours, inMinutes, inSeconds] = checkInTime.split(':').map(Number);
       const [outHours, outMinutes, outSeconds] = checkOutTime.split(':').map(Number);
-      
+
       // Create date objects for calculation (using same date)
       const baseDate = new Date();
       const checkIn = new Date(baseDate.setHours(inHours, inMinutes, inSeconds || 0, 0));
       const checkOut = new Date(baseDate.setHours(outHours, outMinutes, outSeconds || 0, 0));
-      
+
       // Calculate difference in milliseconds
-      const diffMs = checkOut - checkIn;
-      
-      // Handle negative or zero difference
-      if (diffMs <= 0) return '--';
-      
+      let diffMs = checkOut - checkIn;
+
+      // Handle cross-midnight: if checkout is before checkin, add 24 hours
+      if (diffMs < 0) {
+        diffMs += 24 * 60 * 60 * 1000; // Add 24 hours in milliseconds
+      }
+
+      // Handle zero difference (same time in and out)
+      if (diffMs === 0) return '--';
+
       // Convert to hours
       const hours = diffMs / (1000 * 60 * 60);
-      
+
       // Format to 2 decimal places
       return hours.toFixed(2);
     } catch (error) {

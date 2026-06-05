@@ -17,6 +17,7 @@ const reportRoutes = require('./reportRoutes');
 const performanceRoutes = require('./performanceRoutes');
 const calendarRoutes = require('./calendarRoutes');
 const payrollViewRoutes = require('./payrollViewRoutes');
+const weeklyOffRoutes = require('./weeklyOffRoutes');
 
 // Mount routes
 router.use('/profile', profileRoutes);
@@ -27,5 +28,6 @@ router.use('/performance', performanceRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/calendar', calendarRoutes);
 router.use('/payroll-view', payrollViewRoutes);
+router.use('/weekly-off', weeklyOffRoutes);
 
 module.exports = router;

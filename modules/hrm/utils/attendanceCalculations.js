@@ -94,7 +94,7 @@ const buildEmployeeAttendanceSummary = (employee, workingDays) => {
     name: employee.applicant?.personal?.full_name || '',
     district: employee.district?.district_name || '',
     district_id: employee.district_id,
-    osc: employee.component?.component_name || '',
+    scheme_name: employee.scheme?.scheme_name || '',
     post: employee.post?.post_name || '',
     working_days: workingDays,
     present,

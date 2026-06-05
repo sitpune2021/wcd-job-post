@@ -798,6 +798,21 @@ registerPermission({
   module: 'hrm'
 });
 
+// HRM Weekly Off Claims
+registerPermission({
+  code: 'hrm.weekly_off.view',
+  name: 'View Weekly Off Claims',
+  description: 'View employee weekly off claims and history',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.weekly_off.manage',
+  name: 'Manage Weekly Off Claims',
+  description: 'Approve employee weekly off claims',
+  module: 'hrm'
+});
+
 // HRM Wildcard (for full HRM access)
 registerPermission({
   code: 'hrm.*',

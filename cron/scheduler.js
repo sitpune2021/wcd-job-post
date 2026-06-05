@@ -9,6 +9,11 @@ const cronService = require('../services/cronService');
 const allotmentEmailService = require('../services/admin/allotmentEmailService');
 const { runAttendanceCronTasks } = require('../modules/hrm/cron/attendanceCronService');
 const { processPendingCheckOuts } = require('../services/admin/attendanceReminderHelper');
+const {
+  generateWeeklyEntitlementsJob,
+  autoApproveWeeklyOffClaimsJob,
+  expireMonthlyWeeklyOffClaimsJob
+} = require('../modules/hrm/cron/weeklyOffClaimCron');
 const logger = require('../config/logger');
 
 const DEFAULT_EMAIL_CRON = '*/5 * * * *';
@@ -125,11 +130,53 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
   
+  // Run daily at 12:01 AM IST to generate rolling weekly off entitlements
+  cron.schedule('1 0 * * *', async () => {
+    logger.info('CRON: Generating rolling weekly off entitlements...');
+    try {
+      await generateWeeklyEntitlementsJob();
+    } catch (error) {
+      logger.error('CRON: Weekly off entitlement generation failed:', error);
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  });
+
+  // Run every hour to auto-approve weekly off claims pending for 24+ hours
+  cron.schedule('0 * * * *', async () => {
+    logger.info('CRON: Auto-approving pending weekly off claims...');
+    try {
+      await autoApproveWeeklyOffClaimsJob();
+    } catch (error) {
+      logger.error('CRON: Weekly off auto-approval failed:', error);
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  });
+
+  // Run daily at 12:05 AM IST to expire unclaimed weekly off entitlements from previous month
+  cron.schedule('5 0 * * *', async () => {
+    logger.info('CRON: Expiring monthly weekly off claims...');
+    try {
+      await expireMonthlyWeeklyOffClaimsJob();
+    } catch (error) {
+      logger.error('CRON: Monthly weekly off expiry failed:', error);
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  });
+
   logger.info('CRON: Scheduled jobs initialized');
   logger.info(`CRON: - Post auto-close: ${postCloseCron} (IST)`);
   logger.info(`CRON: - Email processing: ${resolvedAllotmentCron} (IST)`);
   logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
   logger.info('CRON: - Attendance reminders: 0 * * * * (Every hour, IST)');
+  logger.info('CRON: - Weekly off entitlements: 1 0 * * * (Daily 12:01 AM IST)');
+  logger.info('CRON: - Weekly off auto-approval: 0 * * * * (Every hour, IST)');
+  logger.info('CRON: - Weekly off monthly expiry: 5 0 * * * (Daily 12:05 AM IST)');
 }
 
 /**
