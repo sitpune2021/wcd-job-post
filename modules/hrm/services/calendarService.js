@@ -179,9 +179,8 @@ const getEmployeeCalendar = async (user, query) => {
   let holidayCount = 0;
   let sundayCount = 0;
 
-  // Get today's date at midnight for accurate comparison
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Use IST date for today to avoid UTC offset causing wrong day in is_past comparison
+  const today = new Date(getCurrentDate());
 
   for (let day = 1; day <= totalDays; day++) {
     const currentDate = new Date(currentYear, currentMonth - 1, day);
@@ -255,7 +254,7 @@ const getEmployeeCalendar = async (user, query) => {
       status: dayStatus,
       is_working_day: isWorkingDay,
       is_past: currentDate < today,
-      is_today: dateStr === new Date().toISOString().split('T')[0],
+      is_today: dateStr === getCurrentDate(),
       details: details
     });
   }

@@ -14,7 +14,21 @@ const getCurrentDate = () => {
   const now = new Date();
   // Convert to IST (UTC+5:30)
   const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-  const istTime = new Date(now.getTime() + istOffset + now.getTimezoneOffset() * 60 * 1000);
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  return istTime.toISOString().split('T')[0];
+};
+
+/**
+ * Get current date in IST for cross-midnight session detection
+ * Uses consistent date calculation without timezone offset issues
+ * @returns {string} Date in YYYY-MM-DD format
+ */
+const getCurrentDateForSessions = () => {
+  const now = new Date();
+  // Convert to IST (UTC+5:30) without additional timezone offset
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  const istTime = new Date(now.getTime() + istOffset);
   
   return istTime.toISOString().split('T')[0];
 };
@@ -27,7 +41,21 @@ const getCurrentTime = () => {
   const now = new Date();
   // Convert to IST
   const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset + now.getTimezoneOffset() * 60 * 1000);
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  return istTime.toTimeString().split(' ')[0];
+};
+
+/**
+ * Get current time in IST for cross-midnight session detection
+ * Uses consistent time calculation without timezone offset issues
+ * @returns {string} Time in HH:MM:SS format
+ */
+const getCurrentTimeForSessions = () => {
+  const now = new Date();
+  // Convert to IST without additional timezone offset
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
   
   return istTime.toTimeString().split(' ')[0];
 };
@@ -388,6 +416,8 @@ const getMonthYear = (dateString) => {
 module.exports = {
   getCurrentDate,
   getCurrentTime,
+  getCurrentDateForSessions,
+  getCurrentTimeForSessions,
   validateAndNormalizeDate,
   validateAndNormalizeTime,
   getCurrentFinancialYear,

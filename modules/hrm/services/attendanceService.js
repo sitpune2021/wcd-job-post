@@ -419,8 +419,9 @@ const generateCompleteAttendanceRecords = async (employee, attendanceRecords, qu
   });
 
   const completeRecords = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Use IST date for today to avoid UTC offset causing wrong day comparison
+  const todayStr = getCurrentDate();
+  const today = new Date(todayStr);
 
   // Generate records for each day in the range
   for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
@@ -792,7 +793,7 @@ const getAttendanceSummary = async (adminUser, query) => {
 
   // Add scheme_id filter if provided
   if (query.scheme_id) {
-    employeeFilter['$scheme.scheme_id$'] = parseInt(query.scheme_id);
+    employeeFilter.scheme_id = parseInt(query.scheme_id);
   }
 
   // Handle filter_type for radio button selections (legacy support)
@@ -836,9 +837,16 @@ const getAttendanceSummary = async (adminUser, query) => {
         model: db.Scheme,
         as: 'scheme',
         attributes: [],
-        required: false
+        required: false,
+        include: [{
+          model: db.SchemeType,
+          as: 'schemeType',
+          attributes: [],
+          required: false
+        }]
       }
-    ]
+    ],
+    distinct: true
   });
 
   // Get paginated employees with related data
@@ -888,6 +896,7 @@ const getAttendanceSummary = async (adminUser, query) => {
     ],
     limit,
     offset,
+    subQuery: false,
     order: [['employee_id', 'DESC']]
   });
 
@@ -1149,7 +1158,7 @@ const checkOutSimple = async (user, data, ip) => {
   const currentTime = getCurrentTime();
   
   // Get yesterday's date for cross-midnight session detection
-  const yesterday = new Date();
+  const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().split('T')[0];
   
@@ -1441,7 +1450,7 @@ const getTodaySessionStatus = async (user) => {
   const config = require('../config/attendanceConfig');
   
   // Get yesterday's date for cross-midnight session detection
-  const yesterday = new Date();
+  const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().split('T')[0];
   
@@ -1573,7 +1582,7 @@ const getTodaySessionStatus = async (user) => {
   const projectedStatusInfo = config.getStatusMessage(projectedTotal, isHoliday);
 
   return {
-    attendance_date: today,
+    attendance_date: attendance ? attendance.attendance_date : today,
     sessions: sessionsWithLiveDuration,
     total_completed_hours: totalCompletedHours,
     projected_total_hours: Math.round(projectedTotal * 100) / 100,
@@ -1707,24 +1716,21 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
       where['$employee.district_id$'] = parseInt(district_id);
     }
 
+    // Always apply scheme_id filter if provided
+    if (scheme_id) {
+      where['$employee.scheme_id$'] = parseInt(scheme_id);
+    }
+
+    // Always apply scheme_type_id filter if provided
+    if (query.scheme_type_id) {
+      where['$employee.scheme.scheme_type_id$'] = parseInt(query.scheme_type_id);
+    }
+
     // Handle filter_type for radio button selections
     if (query.filter_type === 'osc_only') {
-      // Show only records where scheme_type is OSC
       where['$employee.scheme.schemeType.scheme_code$'] = 'OSC';
     } else if (query.filter_type === 'hub_only') {
-      // Show only records where scheme_type is HUB
       where['$employee.scheme.schemeType.scheme_code$'] = 'HUB';
-    } else if (query.filter_type === 'all') {
-      // Show all records (no additional filtering)
-      // Still apply specific scheme_id if provided
-      if (scheme_id) {
-        where['$employee.scheme_id$'] = parseInt(scheme_id);
-      }
-    } else {
-      // Legacy behavior - apply specific filters if provided
-      if (scheme_id) {
-        where['$employee.scheme_id$'] = parseInt(scheme_id);
-      }
     }
 
     if (employee_id) {
