@@ -45,14 +45,7 @@ const { calculateMeritScore } = require('../applicationWorkflowService');
 const getActivePostsWithCounts = async (filters = {}) => {
   try {
     // Create cache key
-    const cacheKey = `active_posts_counts:${JSON.stringify(filters)}`;
-
-    // Try cache first
-    const cachedResult = await cache.get(cacheKey);
-    if (cachedResult) {
-      logger.info('Active posts with counts retrieved from cache');
-      return cachedResult;
-    }
+    // Cache removed - always query fresh
 
     const whereClause = {
       is_deleted: false
@@ -153,9 +146,8 @@ const getActivePostsWithCounts = async (filters = {}) => {
       return postJson;
     });
 
-    // Cache for 2 minutes
-    await cache.set(cacheKey, result, 120);
-    logger.info(`Active posts with counts cached: ${result.length} posts`);
+    // Cache removed
+    logger.info(`Active posts with counts: ${result.length} posts`);
 
     return result;
   } catch (error) {
@@ -174,13 +166,7 @@ const getActivePostsWithCounts = async (filters = {}) => {
  */
 const getApplicationsForPost = async (postId, filters = {}) => {
   try {
-    const cacheKey = `admin_post_apps:${postId}:${JSON.stringify(filters)}`;
-
-    // Short cache (60s) to shield DB from repeated heavy pulls
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
+    // Cache removed - always query fresh
 
     const {
       status = APPLICATION_STATUS.ELIGIBLE,
@@ -563,8 +549,7 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       }
     };
 
-    // Cache the final response briefly
-    await cache.set(cacheKey, responsePayload, 60);
+    // Cache removed
 
     return responsePayload;
   } catch (error) {

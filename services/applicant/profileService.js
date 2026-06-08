@@ -408,23 +408,18 @@ const getDashboard = async (applicantId) => {
     let eligibleTime = 0;
     try {
       const eligibleStart = Date.now();
-      eligiblePostsCount = await cache.wrap(
-        `eligible_count:${applicantId}`,
-        300, // 5 minutes TTL
-        async () => {
-          // Use a direct optimized query instead of full eligibility check
-          const eligiblePostsData = await eligibilityService.getEligiblePosts(applicantId, {
-            onlyEligible: true,
-            includeLocked: false,
-            page: 1,
-            limit: 1
-          });
-          logger.info(`[${dashId}] Eligible posts for applicant ${applicantId}: ${eligiblePostsData?.pagination?.total || 0}`);
-          return eligiblePostsData.pagination.total || 0;
-        }
-      );
+      // Cache removed - always query fresh
+      // Use a direct optimized query instead of full eligibility check
+      const eligiblePostsData = await eligibilityService.getEligiblePosts(applicantId, {
+        onlyEligible: true,
+        includeLocked: false,
+        page: 1,
+        limit: 1
+      });
+      logger.info(`[${dashId}] Eligible posts for applicant ${applicantId}: ${eligiblePostsData?.pagination?.total || 0}`);
+      eligiblePostsCount = eligiblePostsData.pagination.total || 0;
       eligibleTime = Date.now() - eligibleStart;
-      logger.info(`[${dashId}] getEligiblePosts (cached): ${eligibleTime}ms, count=${eligiblePostsCount}`);
+      logger.info(`[${dashId}] getEligiblePosts: ${eligibleTime}ms, count=${eligiblePostsCount}`);
     } catch (err) {
       eligibleTime = Date.now() - eligibleStart;
       logger.warn(`[${dashId}] Failed to get eligible posts: ${eligibleTime}ms`, { applicantId, error: err.message });

@@ -215,15 +215,9 @@ app.get('*', (req, res, next) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  process.exit(0);
-});
+// NOTE: SIGTERM / SIGINT lifecycle is intentionally handled in server.js only.
+// Registering them here was forcing immediate process.exit(0) before the
+// graceful shutdown in server.js could close the HTTP server / DB pool, which
+// caused brief backend unavailability and Apache "Connection Refused" errors.
 
 module.exports = app;

@@ -2,30 +2,25 @@ module.exports = {
   apps: [{
     name: 'wcd-backend',
     script: 'server.js',
-    instances: 2,              // 2 instances for zero-downtime reloads
-    exec_mode: 'cluster',       // Cluster mode for load balancing
+    instances: 2,           // 2 processes for zero-downtime reloads; PM2 load-balances
+    exec_mode: 'cluster',   // PM2 cluster mode (Node.js cluster code removed from server.js)
     env: {
       NODE_ENV: 'production',
-      PORT: 5000,              // Changed to port 5000
-      ENABLE_CLUSTER: 'false', // Let PM2 handle clustering, not Node.js
+      PORT: 5002,
       ENABLE_CRON: 'true'
     },
-    // Graceful reload settings
+    // Graceful reload: app calls process.send('ready') once DB is up
     wait_ready: true,
-    listen_timeout: 10000,
-    kill_timeout: 5000,
-    
-    // Health check settings
-    health_check_grace_period: 3000,    // 3 seconds grace period
-    health_check_fatal_exceptions: true,
-    
-    // Memory and restart settings
-    max_memory_restart: '500M',    // Restart if memory exceeds 500MB
-    min_uptime: '10s',             // Minimum uptime before considering stable
-    max_restarts: 10,              // Max restarts per app
-    restart_delay: 4000,           // Delay between restarts (4 seconds)
-    autorestart: true,             // Auto-restart on crash
-    
+    listen_timeout: 15000,  // wait up to 15s for process.send('ready')
+    kill_timeout: 10000,    // allow 10s for graceful shutdown before SIGKILL
+
+    // Restart policy
+    max_memory_restart: '500M',
+    min_uptime: '10s',
+    max_restarts: 10,
+    restart_delay: 4000,
+    autorestart: true,
+
     // Logging
     log_file: './logs/combined.log',
     out_file: './logs/out.log',

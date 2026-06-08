@@ -112,12 +112,7 @@ const calculateMeritScore = async (applicationOrId, transaction = null) => {
       applicationId = applicationOrId;
     }
 
-    // Check cache first (works for both ID and object input)
-    const cacheKey = `merit_score:${applicationId}`;
-    const cachedScore = await cache.get(cacheKey);
-    if (cachedScore !== null) {
-      return cachedScore;
-    }
+    // Cache removed - always calculate fresh to avoid in-memory issues
 
     if (!application) {
       // Otherwise fetch from DB with all required associations
@@ -265,8 +260,7 @@ const calculateMeritScore = async (applicationOrId, transaction = null) => {
     // NOTE: We do NOT store merit_score in database anymore for live view,
     // though we return it for the API response.
     
-    // Cache the score for 10 minutes
-    await cache.set(`merit_score:${appId}`, score, 600);
+    // Cache removed
     
     logger.info(`Merit score calculated for app ${appId}: ${score} (edu=${highestEduRank}, pct=${highestPercentageInTopLevel}, local=${localityBonus}, exp=${totalExperienceMonths}, age_pre=${APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE})`);
     return score;
