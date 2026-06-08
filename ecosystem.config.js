@@ -6,7 +6,7 @@ module.exports = {
     exec_mode: 'cluster',   // PM2 cluster mode (Node.js cluster code removed from server.js)
     env: {
       NODE_ENV: 'production',
-      PORT: 5002,
+      PORT: 5000,
       ENABLE_CRON: 'true'
     },
     // Graceful reload: app calls process.send('ready') once DB is up

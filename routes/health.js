@@ -110,4 +110,28 @@ router.get('/metrics', async (req, res) => {
   }
 });
 
+/**
+ * Traffic monitoring endpoint
+ * @access Private (should be protected in production)
+ */
+router.get('/traffic', async (req, res) => {
+  try {
+    const { getTrafficStats } = require('../utils/trafficMonitor');
+    const trafficStats = await getTrafficStats();
+    
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      ...trafficStats
+    });
+  } catch (error) {
+    logger.error('Traffic endpoint error:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Failed to retrieve traffic stats',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;

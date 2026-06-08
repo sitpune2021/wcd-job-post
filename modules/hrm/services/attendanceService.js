@@ -5,6 +5,7 @@
  */
 const { Op, fn, col, literal } = require('sequelize');
 const { Attendance, AttendanceSession, EmployeeMaster, Holiday, LeaveApplication } = require('../models');
+const { ApplicantMaster, ApplicantPersonal } = require('../../../models');
 const db = require('../../../models');
 const logger = require('../../../config/logger');
 const { ApiError } = require('../../../middleware/errorHandler');
@@ -993,7 +994,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
   const dateStr = attendanceDate.toISOString().split('T')[0];
   
   // Validate status
-  const validStatuses = ['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME'];
+  const validStatuses = ['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME', 'WEEKLY_OFF'];
   if (!validStatuses.includes(status)) {
     throw new ApiError(400, 'Invalid attendance status.');
   }

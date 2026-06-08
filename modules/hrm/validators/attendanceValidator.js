@@ -30,7 +30,7 @@ const attendanceQuery = Joi.object({
 const markAttendanceByAdmin = Joi.object({
   employee_ids: Joi.array().items(Joi.number().integer().min(1)).min(1).required(),
   attendance_date: Joi.date().required().max('now'),
-  status: Joi.string().valid('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME').required(),
+  status: Joi.string().valid('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME', 'WEEKLY_OFF').required(),
   remarks: Joi.string().max(500).allow('', null),
   half_day_type: Joi.string().valid('FIRST_HALF', 'SECOND_HALF').when('status', {
     is: 'HALF_DAY',

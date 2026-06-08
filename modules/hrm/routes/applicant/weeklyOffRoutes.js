@@ -38,18 +38,16 @@ router.get('/', async (req, res, next) => {
 
     let claims = await weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, filters);
     
-    // If no claims exist for current month, generate entitlements
-    if (!claims.data || claims.data.length === 0) {
-      try {
-        logger.info('No weekly off claims found, generating entitlements for current month');
-        await weeklyOffClaimService.generateWeeklyOffEntitlements();
-        
-        // Fetch again after generation
-        claims = await weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, filters);
-      } catch (genError) {
-        logger.warn('Failed to auto-generate weekly off entitlements:', genError.message);
-        // Continue with empty claims if generation fails
-      }
+    // Check for new entitlements for current employee only (much faster)
+    try {
+      logger.info('Checking for new weekly off entitlements for current employee');
+      await weeklyOffClaimService.generateWeeklyOffEntitlements(employeeId);
+      
+      // Fetch again after generation to get latest data
+      claims = await weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, filters);
+    } catch (genError) {
+      logger.warn('Failed to auto-generate weekly off entitlements:', genError.message);
+      // Continue with existing claims if generation fails
     }
     
     return ApiResponse.success(res, claims, 'Weekly off claims retrieved successfully');

@@ -45,23 +45,33 @@ function getMonthCode(date) {
  * Creates 1 entitlement per employee based on their last claim date
  * Rolling 7-day cycle: new eligibility starts 7 days after last claim
  */
-async function generateWeeklyOffEntitlements() {
+async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) {
   try {
     const currentDate = new Date();
     const monthCode = getMonthCode(currentDate);
 
     logger.info('Generating rolling weekly off entitlements', {
       currentDate: formatDate(currentDate),
-      monthCode
+      monthCode,
+      employeeId: employeeId || 'all',
+      attempt: retryCount + 1
     });
 
-    // Get all active employees
-    const employees = await EmployeeMaster.findAll({
-      where: {
-        is_active: true
-      },
-      attributes: ['employee_id', 'employee_code']
-    });
+    // Get all active employees or specific employee
+    const employees = employeeId 
+      ? await EmployeeMaster.findAll({
+          where: {
+            employee_id: employeeId,
+            is_active: true
+          },
+          attributes: ['employee_id', 'employee_code']
+        })
+      : await EmployeeMaster.findAll({
+          where: {
+            is_active: true
+          },
+          attributes: ['employee_id', 'employee_code']
+        });
 
     let created = 0;
     let skipped = 0;
@@ -81,12 +91,52 @@ async function generateWeeklyOffEntitlements() {
       let entitlementStart, entitlementEnd;
       
       if (lastApprovedClaim && lastApprovedClaim.claimed_off_date) {
-        // Rolling cycle: new entitlement starts 7 days after last claimed date
+        // Rolling cycle: generate entitlements for all missed weeks since last claim
         const lastClaimDate = new Date(lastApprovedClaim.claimed_off_date);
-        entitlementStart = new Date(lastClaimDate);
-        entitlementStart.setDate(entitlementStart.getDate() + 7); // Add 7 days
-        entitlementEnd = new Date(entitlementStart);
-        entitlementEnd.setDate(entitlementEnd.getDate() + 6); // 7-day window
+        const weekStarts = [];
+        
+        // Generate all week starts since last claim (7-day intervals)
+        let currentWeekStart = new Date(lastClaimDate);
+        currentWeekStart.setDate(currentWeekStart.getDate() + 7); // First entitlement starts 7 days after last claim
+        
+        while (currentWeekStart <= currentDate) {
+          weekStarts.push(new Date(currentWeekStart));
+          currentWeekStart.setDate(currentWeekStart.getDate() + 7); // Next week
+        }
+        
+        // Process each missed week
+        for (const weekStart of weekStarts) {
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6); // 7-day window
+          
+          // Check if entitlement already exists for this period
+          const existing = await WeeklyOffClaim.findOne({
+            where: {
+              employee_id: employee.employee_id,
+              entitlement_week_start: formatDate(weekStart),
+              entitlement_week_end: formatDate(weekEnd)
+            }
+          });
+
+          if (existing) {
+            skipped++;
+            continue;
+          }
+
+          // Create pending entitlement for this week
+          await WeeklyOffClaim.create({
+            employee_id: employee.employee_id,
+            entitlement_week_start: formatDate(weekStart),
+            entitlement_week_end: formatDate(weekEnd),
+            entitlement_month: getMonthCode(weekStart),
+            claim_status: 'PENDING', // Available to claim
+            created_by: null // System generated
+          });
+
+          created++;
+        }
+        
+        continue; // Skip to next employee
       } else {
         // First-time employee: start from current week
         entitlementStart = getWeekStart();
@@ -133,6 +183,13 @@ async function generateWeeklyOffEntitlements() {
     return { created, skipped, total: employees.length };
   } catch (error) {
     logger.error('Error generating weekly off entitlements:', error);
+    
+    // Retry logic for failed generations
+    if (retryCount < 2) {
+      logger.warn(`Retrying weekly off entitlement generation (attempt ${retryCount + 2})`);
+      return await generateWeeklyOffEntitlements(employeeId, retryCount + 1);
+    }
+    
     throw error;
   }
 }
@@ -143,17 +200,29 @@ async function generateWeeklyOffEntitlements() {
 async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
   try {
     const { status, monthCode } = filters;
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
 
     const whereClause = {
       employee_id: employeeId
     };
 
-    if (status) {
-      whereClause.claim_status = status;
+    // Include claims from current month OR recent pending claims from last 14 days
+    if (monthCode) {
+      whereClause[Op.or] = [
+        { entitlement_month: monthCode },
+        {
+          claim_status: 'PENDING',
+          entitlement_week_start: { [Op.gte]: fourteenDaysAgo }
+        }
+      ];
+    } else {
+      // If no month filter, include all claims from last 14 days
+      whereClause.entitlement_week_start = { [Op.gte]: fourteenDaysAgo };
     }
 
-    if (monthCode) {
-      whereClause.entitlement_month = monthCode;
+    if (status) {
+      whereClause.claim_status = status;
     }
 
     const claims = await WeeklyOffClaim.findAll({
@@ -314,8 +383,9 @@ async function autoApproveWeeklyOffClaims() {
     let approved = 0;
 
     for (const claim of pendingClaims) {
+      let transaction;
       try {
-        const transaction = await db.sequelize.transaction();
+        transaction = await db.sequelize.transaction();
 
         // Create attendance record
         const attendanceRecord = await Attendance.create({
@@ -349,6 +419,14 @@ async function autoApproveWeeklyOffClaims() {
         });
       } catch (error) {
         logger.error(`Failed to auto-approve claim ${claim.claim_id}:`, error);
+        // CRITICAL FIX: Rollback transaction on error to prevent connection leak
+        if (transaction) {
+          try {
+            await transaction.rollback();
+          } catch (rollbackError) {
+            logger.error('Failed to rollback transaction:', rollbackError);
+          }
+        }
       }
     }
 

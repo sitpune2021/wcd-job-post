@@ -35,12 +35,15 @@ const dbConfig = {
     ssl: DB_SSL ? { 
       require: true,
       rejectUnauthorized: false 
-    } : false
+    } : false,
+    // CRITICAL: Kill connections stuck in "idle in transaction (aborted)" after 30 seconds
+    // This prevents connection pool exhaustion from zombie transactions
+    idle_in_transaction_session_timeout: 30000
   },
-  // Connection retry configuration
+  // Connection retry configuration - DISABLED to prevent TimeoutError
+  // retry-as-promised was causing "unknown timed out" errors under high load
   retry: {
-    max: 3,        // Maximum retry attempts
-    timeout: 5000  // Time between retries
+    max: 0         // Disable retries - fail fast, don't hang
   }
 };
 

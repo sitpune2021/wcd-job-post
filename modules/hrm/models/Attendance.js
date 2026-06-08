@@ -37,10 +37,7 @@ const Attendance = sequelize.define('HrmAttendance', {
   status: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    defaultValue: 'PRESENT',
-    validate: {
-      isIn: [['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY', 'WEEKLY_OFF']]
-    }
+    defaultValue: 'PRESENT'
   },
   half_day_type: {
     type: DataTypes.STRING(15),

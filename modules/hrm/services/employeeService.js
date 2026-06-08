@@ -11,6 +11,20 @@ const fs = require('fs');
 const path = require('path');
 const { getRelativePath } = require('../../../utils/fileUpload');
 
+// Helper function to format dates consistently
+const formatDate = (date) => {
+  if (!date) return null;
+  return new Date(date).toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+};
+
 // Helper function to normalize upload paths (consistent with other services)
 const toPublicUploadPath = (filePath) => {
   if (!filePath) return null;
@@ -172,8 +186,24 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       distinct: true
     });
 
+    // Format dates in employee data
+    const formattedEmployees = rows.map(employee => {
+      const employeeData = employee.toJSON ? employee.toJSON() : employee;
+      
+      // Format key dates for display
+      return {
+        ...employeeData,
+        onboarding_email_sent_at: formatDate(employeeData.onboarding_email_sent_at),
+        contract_start_date: formatDate(employeeData.contract_start_date),
+        contract_end_date: formatDate(employeeData.contract_end_date),
+        onboarding_completed_at: formatDate(employeeData.onboarding_completed_at),
+        created_at: formatDate(employeeData.created_at),
+        updated_at: formatDate(employeeData.updated_at)
+      };
+    });
+
     return {
-      employees: rows,
+      employees: formattedEmployees,
       pagination: {
         total: count,
         page,

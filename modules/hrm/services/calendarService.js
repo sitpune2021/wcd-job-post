@@ -9,6 +9,7 @@ const logger = require('../../../config/logger');
 const { ApiError } = require('../../../middleware/errorHandler');
 const db = require('../../../models');
 const { Attendance, Holiday, LeaveApplication, LeaveType } = require('../models');
+const WeeklyOffClaim = db.HrmWeeklyOffClaim;
 const EmployeeMaster = db.EmployeeMaster;
 const { getEmployeeFromUser } = require('../utils/hrmHelpers');
 const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
@@ -45,7 +46,7 @@ const getEmployeeCalendar = async (user, query) => {
   const totalDays = endDate.getDate();
 
   // Fetch all relevant data for the month
-  const [attendanceRecords, holidays, approvedLeaves] = await Promise.all([
+  const [attendanceRecords, holidays, approvedLeaves, weeklyOffs] = await Promise.all([
     // Get attendance records
     Attendance.findAll({
       where: {
@@ -113,6 +114,19 @@ const getEmployeeCalendar = async (user, query) => {
           attributes: ['leave_name', 'leave_code']
         }
       ]
+    }),
+    // Get approved weekly offs
+    WeeklyOffClaim.findAll({
+      where: {
+        employee_id: employee.employee_id,
+        claim_status: 'APPROVED',
+        claimed_off_date: {
+          [Op.between]: [
+            startDate.toISOString().split('T')[0],
+            endDate.toISOString().split('T')[0]
+          ]
+        }
+      }
     })
   ]);
 
@@ -170,6 +184,20 @@ const getEmployeeCalendar = async (user, query) => {
     }
   });
 
+  // Create weekly off date set
+  const weeklyOffDates = new Set();
+  const weeklyOffDetailsMap = new Map();
+  weeklyOffs.forEach(weeklyOff => {
+    const dateStr = weeklyOff.claimed_off_date;
+    weeklyOffDates.add(dateStr);
+    weeklyOffDetailsMap.set(dateStr, {
+      claim_id: weeklyOff.claim_id,
+      claim_status: weeklyOff.claim_status,
+      approved_at: weeklyOff.approved_at,
+      approved_by: weeklyOff.approved_by
+    });
+  });
+
   // Get working days using the same method as admin attendance summary
   const workingDaysResult = await getWorkingDaysInMonth(currentMonth, currentYear);
   const workingDays = workingDaysResult.workingDays;
@@ -178,6 +206,7 @@ const getEmployeeCalendar = async (user, query) => {
   const days = [];
   let holidayCount = 0;
   let sundayCount = 0;
+  let weeklyOffCount = 0;
 
   // Use IST date for today to avoid UTC offset causing wrong day in is_past comparison
   const today = new Date(getCurrentDate());
@@ -192,25 +221,15 @@ const getEmployeeCalendar = async (user, query) => {
     let isWorkingDay = true;
     let details = null;
 
-    // Priority order: Holiday > Sunday > Leave > Attendance
+    // Check for definitive statuses first (weekly off, leave)
+    // These override any attendance records
     
-    // Check if it's a holiday
-    if (holidayMap.has(dateStr)) {
-      const holiday = holidayMap.get(dateStr);
-      dayStatus = 'HOLIDAY';
+    // Check if on approved weekly off
+    if (weeklyOffDates.has(dateStr)) {
+      dayStatus = 'WEEKLY_OFF';
       isWorkingDay = false;
-      holidayCount++;
-      details = {
-        holiday_name: holiday.holiday_name,
-        holiday_type: holiday.holiday_type,
-        description: holiday.description
-      };
-    }
-    // Check if it's Sunday
-    else if (dayOfWeek === 0) {
-      dayStatus = 'SUNDAY';
-      isWorkingDay = false;
-      sundayCount++;
+      weeklyOffCount++;
+      details = weeklyOffDetailsMap.get(dateStr);
     }
     // Check if on approved leave
     else if (leaveDates.has(dateStr)) {
@@ -218,7 +237,7 @@ const getEmployeeCalendar = async (user, query) => {
       isWorkingDay = false;
       details = leaveDetailsMap.get(dateStr);
     }
-    // Check attendance record
+    // Check attendance record (only if no weekly off or leave)
     else if (attendanceMap.has(dateStr)) {
       const attendance = attendanceMap.get(dateStr);
       dayStatus = attendance.status;
@@ -229,6 +248,36 @@ const getEmployeeCalendar = async (user, query) => {
         device_type: attendance.device_type,
         remarks: attendance.remarks
       };
+      
+      // Mark special day context if attendance exists
+      if (holidayMap.has(dateStr)) {
+        const holiday = holidayMap.get(dateStr);
+        details.holiday_name = holiday.holiday_name;
+        details.holiday_type = holiday.holiday_type;
+        details.is_holiday_with_attendance = true;
+        holidayCount++;
+      } else if (dayOfWeek === 0) {
+        details.is_sunday_with_attendance = true;
+        sundayCount++;
+      }
+    }
+    // Check if it's a holiday (only if no attendance)
+    else if (holidayMap.has(dateStr)) {
+      const holiday = holidayMap.get(dateStr);
+      dayStatus = 'HOLIDAY';
+      isWorkingDay = false;
+      holidayCount++;
+      details = {
+        holiday_name: holiday.holiday_name,
+        holiday_type: holiday.holiday_type,
+        description: holiday.description
+      };
+    }
+    // Check if it's Sunday (only if no attendance)
+    else if (dayOfWeek === 0) {
+      dayStatus = 'SUNDAY';
+      isWorkingDay = false;
+      sundayCount++;
     }
     // No record for a working day in the past (excludes today) - only within contract period
     else if (currentDate < today && isWorkingDay) {
@@ -294,6 +343,7 @@ const getEmployeeCalendar = async (user, query) => {
       half_day_days: halfDayDays,
       holidays: holidayCount,
       sundays: sundayCount,
+      weekly_off_days: weeklyOffCount,
       attendance_percentage: attendancePercentage
     }
   };
