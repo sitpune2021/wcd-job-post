@@ -35,7 +35,7 @@ class AdminService {
    * @returns {Promise<Object>} - Created user
    */
   async createUser(data, currentUser) {
-    const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id } = data;
+    const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id } = data;
 
     const transaction = await db.sequelize.transaction();
 
@@ -60,23 +60,60 @@ class AdminService {
         throw new ApiError(400, 'Invalid role');
       }
 
+      // Handle employee linking
+      let finalUsername = username;
+      let finalEmail = email;
+      let finalPassword = password;
+      let finalFullName = full_name;
+
+      if (linked_employee_id) {
+        try {
+          // Import the helper functions
+          const { fetchLinkedEmployeeDetails, buildLinkedAdminFields } = require('./admin/adminUserLinkHelper');
+          
+          const employee = await fetchLinkedEmployeeDetails(linked_employee_id);
+          const linkedFields = buildLinkedAdminFields(employee, full_name);
+          
+          // Check if username already exists (exclude soft-deleted users)
+          const existingUser = await AdminUser.findOne({ where: { username: linkedFields.username, is_deleted: false } });
+          if (existingUser) {
+            throw new ApiError(409, `Username ${linkedFields.username} already exists. Please choose a different employee or delete the existing user.`);
+          }
+          
+          // Override fields with employee data
+          finalUsername = linkedFields.username;
+          finalEmail = linkedFields.email;
+          finalPassword = linkedFields.password_hash; // Use employee's password
+          finalFullName = linkedFields.full_name;
+          
+          logger.info(`Admin user will be linked to employee ${linked_employee_id}`);
+        } catch (error) {
+          logger.error('Error linking employee:', error);
+          throw new ApiError(400, 'Failed to link employee: ' + error.message);
+        }
+      }
+
       // Create admin user (model will hash password in beforeCreate hook)
       const user = await AdminUser.create({
-        username,
-        password_hash: password, // Pass plain text, model will hash it
-        full_name,
-        email,
+        username: finalUsername,
+        password_hash: finalPassword, // Pass plain text, model will hash it
+        full_name: finalFullName,
+        email: finalEmail,
         mobile_no,
         role_id,
         district_id,
         scheme_id,
+        linked_employee_id,
         created_by: currentUser.id,
         is_active: true
       }, { transaction });
 
       await transaction.commit();
 
-      logger.info(`Admin user created: ${username} by ${currentUser.username || currentUser.id}`);
+      logger.info(`Admin user created: ${finalUsername} by ${currentUser.username || currentUser.id}`);
+      if (linked_employee_id) {
+        logger.info(`Admin user linked to employee ${linked_employee_id} with auto email/password`);
+      }
       if (district_id || scheme_id) {
         logger.info(`Admin user linked to - District: ${district_id || 'None'}, Scheme: ${scheme_id || 'None'}`);
       }
