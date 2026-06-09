@@ -999,10 +999,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
     throw new ApiError(400, 'Invalid attendance status.');
   }
   
-  if (status === 'HALF_DAY' && !half_day_type) {
-    throw new ApiError(400, 'Half day type is required when status is HALF_DAY.');
-  }
-  
+    
   const t = await db.sequelize.transaction();
   
   try {
@@ -1877,6 +1874,7 @@ const generateAttendanceHTML = (records, filters) => {
     }
   };
 
+  
   
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                       'July', 'August', 'September', 'October', 'November', 'December'];

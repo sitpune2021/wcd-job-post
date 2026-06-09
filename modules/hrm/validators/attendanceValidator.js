@@ -32,11 +32,7 @@ const markAttendanceByAdmin = Joi.object({
   attendance_date: Joi.date().required().max('now'),
   status: Joi.string().valid('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME', 'WEEKLY_OFF').required(),
   remarks: Joi.string().max(500).allow('', null),
-  half_day_type: Joi.string().valid('FIRST_HALF', 'SECOND_HALF').when('status', {
-    is: 'HALF_DAY',
-    then: Joi.required(),
-    otherwise: Joi.optional()
-  })
+  half_day_type: Joi.string().valid('FIRST_HALF', 'SECOND_HALF').optional()
 });
 
 module.exports = {

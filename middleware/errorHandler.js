@@ -115,7 +115,13 @@ const errorHandler = (err, req, res, next) => {
 
     case 'ValidationError':
       statusCode = 400;
-      // Keep the original message for Joi/express-validator errors
+      // Include field-specific errors for Joi validation
+      if (err.details && Array.isArray(err.details)) {
+        errors = err.details.map(detail => ({
+          field: detail.path.join('.'),
+          message: detail.message
+        }));
+      }
       break;
 
     case 'MulterError':
