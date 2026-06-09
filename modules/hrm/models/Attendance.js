@@ -169,6 +169,15 @@ const Attendance = sequelize.define('HrmAttendance', {
     type: DataTypes.TEXT,
     allowNull: true,
     comment: 'Mandatory reason/remark for admin status override'
+  },
+  shift_type_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_hrm_shift_types',
+      key: 'shift_type_id'
+    },
+    comment: 'Shift type for this attendance record'
   }
 }, {
   tableName: 'ms_hrm_attendance',

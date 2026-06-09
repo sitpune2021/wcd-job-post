@@ -12,6 +12,7 @@ const FieldVisit = require('./FieldVisit');
 const PerformanceReview = require('./PerformanceReview');
 const Holiday = require('./Holiday');
 const WeeklyOffClaim = require('./WeeklyOffClaim');
+const ShiftType = require('./ShiftType');
 
 // Import database models for associations
 const db = require('../../../config/db');
@@ -91,6 +92,11 @@ const setupAssociations = (db) => {
   Attendance.belongsTo(EmployeeMaster, {
     foreignKey: 'employee_id',
     as: 'employee'
+  });
+
+  Attendance.belongsTo(ShiftType, {
+    foreignKey: 'shift_type_id',
+    as: 'shiftType'
   });
 
   EmployeeMaster.hasMany(Attendance, {
@@ -263,5 +269,6 @@ module.exports = {
   PerformanceReview,
   Holiday,
   WeeklyOffClaim,
+  ShiftType,
   setupAssociations
 };

@@ -14,12 +14,12 @@ const dbConfig = {
   dialect: 'postgres',
   logging: slowQueryLogger.logQuery,
   benchmark: true,
-  // Connection pool settings
+  // Connection pool settings - optimized for better performance
   pool: {
-    max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX) : 25, 
+    max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX) : 20, // Reduced from 25
     min: process.env.DB_POOL_MIN ? parseInt(process.env.DB_POOL_MIN) : 2,   
-    acquire: 30000,  
-    idle: 10000,     
+    acquire: 15000,  // Reduced from 30s to 15s for faster failover
+    idle: 5000,      // Reduced from 10s to 5s to free connections faster
     evict: 1000      
   },
   define: {

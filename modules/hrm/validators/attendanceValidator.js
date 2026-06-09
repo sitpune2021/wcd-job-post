@@ -6,6 +6,7 @@ const markAttendance = Joi.object({
   longitude: Joi.number().min(-180).max(180).allow(null),
   geo_address: Joi.string().max(500).allow('', null),
   remarks: Joi.string().max(500).allow('', null),
+  shift_type_id: Joi.number().integer().positive().optional(),
   attendance_image: Joi.any().optional()
 });
 
@@ -32,7 +33,8 @@ const markAttendanceByAdmin = Joi.object({
   attendance_date: Joi.date().required().max('now'),
   status: Joi.string().valid('PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WORK_FROM_HOME', 'WEEKLY_OFF').required(),
   remarks: Joi.string().max(500).allow('', null),
-  half_day_type: Joi.string().valid('FIRST_HALF', 'SECOND_HALF').optional()
+  half_day_type: Joi.string().valid('FIRST_HALF', 'SECOND_HALF').optional(),
+  shift_type_id: Joi.number().integer().positive().optional()
 });
 
 module.exports = {

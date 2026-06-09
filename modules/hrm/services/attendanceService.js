@@ -332,6 +332,7 @@ const markAttendance = async (user, data, ip) => {
       check_in_photo_path: data.image?.path || null, // Save check-in image here too
       device_type: attendanceData.device_type || null,
       remarks: data.remarks || null,
+      shift_type_id: data.shift_type_id || null,
       created_by: user.applicant_id || user.id
     });
     
@@ -963,7 +964,7 @@ const getAttendanceSummary = async (adminUser, query) => {
  * Mark attendance for employees (admin function)
  */
 const markAttendanceByAdmin = async (adminUser, data) => {
-  const { employee_ids, attendance_date, status, remarks, half_day_type } = data;
+  const { employee_ids, attendance_date, status, remarks, half_day_type, shift_type_id } = data;
   
   // Validate admin permissions
   const employeeIds = await getEmployeeIdsUnderAdmin(adminUser, EmployeeMaster);
@@ -1085,6 +1086,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
           status: status,
           remarks: remarks || null,
           half_day_type: (status === 'HALF_DAY') ? half_day_type : null,
+          shift_type_id: shift_type_id || null,
           check_in_time: status === 'PRESENT' ? '09:00:00' : null,
           check_out_time: status === 'PRESENT' ? '18:00:00' : null,
           ip_address: '127.0.0.1',
@@ -1241,7 +1243,13 @@ const checkOutSimple = async (user, data, ip) => {
   
   // Auto-determine status based on total work hours using new function
   const hours = parseFloat(totalHours) || 0;
-  const updatedStatus = calculateAttendanceStatus(hours, isHoliday);
+  let updatedStatus = calculateAttendanceStatus(hours, isHoliday);
+  
+  // Ensure status is never null during check-out (database constraint)
+  if (!updatedStatus) {
+    updatedStatus = hours > 0 ? 'HALF_DAY' : 'PRESENT';
+  }
+  
   logger.info('Auto-calculated attendance status', {
     employeeId: employee.employee_id,
     checkInTime: attendance.check_in_time,

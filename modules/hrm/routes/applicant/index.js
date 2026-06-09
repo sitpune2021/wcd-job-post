@@ -18,6 +18,7 @@ const performanceRoutes = require('./performanceRoutes');
 const calendarRoutes = require('./calendarRoutes');
 const payrollViewRoutes = require('./payrollViewRoutes');
 const weeklyOffRoutes = require('./weeklyOffRoutes');
+const shiftTypeRoutes = require('./shiftTypeRoutes');
 
 // Mount routes
 router.use('/profile', profileRoutes);
@@ -29,5 +30,6 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/calendar', calendarRoutes);
 router.use('/payroll-view', payrollViewRoutes);
 router.use('/weekly-off', weeklyOffRoutes);
+router.use('/shift-types', shiftTypeRoutes);
 
 module.exports = router;

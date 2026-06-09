@@ -366,6 +366,17 @@ router.get('/today-status', async (req, res, next) => {
 // Simple check-out endpoint using existing attendance structure
 router.post('/check-out', attendanceUpload, async (req, res, next) => {
   try {
+    // Validate check-out data (minimal validation)
+    const Joi = require('joi');
+    const checkOutSchema = Joi.object({
+      latitude: Joi.number().min(-90).max(90).allow(null),
+      longitude: Joi.number().min(-180).max(180).allow(null),
+      geo_address: Joi.string().max(500).allow('', null)
+    });
+    
+    const { error, value } = checkOutSchema.validate(req.body);
+    if (error) return res.status(400).json({ success: false, message: error.details[0].message });
+
     // Handle uploaded image or existing duplicate file
     let photoData = null;
     
