@@ -32,14 +32,14 @@ const ensureLeaveBalances = async (employeeId, year) => {
     
     // Create unified balance record (11 days total across all leave types)
     const existing = await LeaveBalance.findOne({
-      where: { employee_id: employeeId, year: yearInt }
+      where: { employee_id: employeeId, leave_type_id: 1, year: yearInt }
     });
     
     if (!existing) {
       const defaultDays = parseInt(process.env.DEFAULT_LEAVE_DAYS) || 11;
       await LeaveBalance.create({
         employee_id: employeeId,
-        leave_type_id: null, // Unified balance, not tied to specific leave type
+        leave_type_id: 1, // Use Casual Leave as default (leave_type_id 1 exists)
         year: yearInt,
         total_allocated: defaultDays,
         used: 0,
@@ -71,7 +71,7 @@ const getMyLeaveBalances = async (user) => {
 
   // Get unified balance record
   const unifiedBalance = await LeaveBalance.findOne({
-    where: { employee_id: employee.employee_id, year, is_deleted: false }
+    where: { employee_id: employee.employee_id, leave_type_id: 1, year, is_deleted: false }
   });
 
   // Get all leave types for display
@@ -314,7 +314,7 @@ const getLeaveSummary = async (employeeId, query) => {
   
   await ensureLeaveBalances(employeeId, year);
   const unifiedBalance = await LeaveBalance.findOne({
-    where: { employee_id: employeeId, year, leave_type_id: null, is_deleted: false },
+    where: { employee_id: employeeId, year, leave_type_id: 1, is_deleted: false },
     include: [{ model: LeaveType, as: 'leaveType', attributes: ['leave_code', 'leave_name'], required: false }]
   });
 
@@ -477,19 +477,33 @@ const getLeaveApprovals = async (adminUser, query) => {
     let leaveBalance = null;
     try {
       const year = new Date(leaveData.from_date).getFullYear();
+      
+      // Ensure leave balance exists for this employee
+      await ensureLeaveBalances(leaveData.employee_id, year);
+      
       const balance = await LeaveBalance.findOne({
         where: { 
           employee_id: leaveData.employee_id, 
-          leave_type_id: null, // Unified balance
+          leave_type_id: 1, // Use Casual Leave balance
           year 
         }
       });
+      
       if (balance) {
         leaveBalance = {
           total_allocated: balance.total_allocated,
           used: balance.used,
           remaining: balance.remaining,
           can_be_paid: balance.remaining >= parseFloat(leaveData.total_days || 0)
+        };
+      } else {
+        // Fallback default balance if no record exists
+        const defaultDays = parseInt(process.env.DEFAULT_LEAVE_DAYS) || 11;
+        leaveBalance = {
+          total_allocated: defaultDays,
+          used: 0,
+          remaining: defaultDays,
+          can_be_paid: defaultDays >= parseFloat(leaveData.total_days || 0)
         };
       }
     } catch (err) {
@@ -544,7 +558,7 @@ const actionLeave = async (adminUser, leaveId, data) => {
       
       // Get unified leave balance to enforce paid/unpaid rules
       const balance = await LeaveBalance.findOne({
-        where: { employee_id: leave.employee_id, year },
+        where: { employee_id: leave.employee_id, leave_type_id: 1, year },
         transaction: t
       });
 
