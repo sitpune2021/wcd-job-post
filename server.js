@@ -91,8 +91,14 @@ const server = app.listen(PORT, async () => {
     logger.error('Failed to sync permissions:', error);
   }
 
-  if (ENABLE_CRON) {
+  const isCronWorker = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
+  if (ENABLE_CRON && isCronWorker) {
     initCronJobs();
+  } else if (ENABLE_CRON) {
+    logger.info('CRON: Skipped on non-primary PM2 worker', {
+      nodeAppInstance: process.env.NODE_APP_INSTANCE,
+      pid: process.pid
+    });
   }
 
   const db = require('./config/db');

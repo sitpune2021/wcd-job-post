@@ -40,15 +40,15 @@ class AdminService {
     const transaction = await db.sequelize.transaction();
 
     try {
-      // Check if username already exists (exclude soft-deleted users)
-      const existingUser = await AdminUser.findOne({ where: { username, is_deleted: false } });
+      // Check if username already exists (exclude soft-deleted and inactive users)
+      const existingUser = await AdminUser.findOne({ where: { username, is_deleted: false, is_active: true } });
       if (existingUser) {
         throw new ApiError(400, 'Username already exists');
       }
 
       // Check if email already exists (exclude soft-deleted users)
       if (email) {
-        const existingEmail = await AdminUser.findOne({ where: { email, is_deleted: false } });
+        const existingEmail = await AdminUser.findOne({ where: { email, is_deleted: false, is_active: true } });
         if (existingEmail) {
           throw new ApiError(400, 'Email already exists');
         }
@@ -74,8 +74,8 @@ class AdminService {
           const employee = await fetchLinkedEmployeeDetails(linked_employee_id);
           const linkedFields = buildLinkedAdminFields(employee, full_name);
           
-          // Check if username already exists (exclude soft-deleted users)
-          const existingUser = await AdminUser.findOne({ where: { username: linkedFields.username, is_deleted: false } });
+          // Check if username already exists (exclude soft-deleted and inactive users)
+          const existingUser = await AdminUser.findOne({ where: { username: linkedFields.username, is_deleted: false, is_active: true } });
           if (existingUser) {
             throw new ApiError(409, `Username ${linkedFields.username} already exists. Please choose a different employee or delete the existing user.`);
           }
@@ -126,7 +126,9 @@ class AdminService {
 
       return createdUser;
     } catch (error) {
-      await transaction.rollback();
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       logger.error('Create user error:', error);
       throw error;
     }
@@ -250,13 +252,14 @@ class AdminService {
         }
       }
 
-      // Check email uniqueness if changed (exclude soft-deleted users)
+      // Check email uniqueness if changed (exclude soft-deleted and inactive users)
       if (email && email !== user.email) {
         const existingEmail = await AdminUser.findOne({
           where: { 
             email, 
             admin_id: { [Op.ne]: userId },
-            is_deleted: false
+            is_deleted: false,
+            is_active: true
           }
         });
         if (existingEmail) {

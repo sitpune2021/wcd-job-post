@@ -299,7 +299,9 @@ class MeritListService {
       };
 
     } catch (error) {
-      await transaction.rollback();
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       logger.error('MERIT: Error generating merit list:', error);
       throw error;
     }

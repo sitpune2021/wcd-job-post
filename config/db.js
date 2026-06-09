@@ -16,8 +16,8 @@ const dbConfig = {
   benchmark: true,
   // Connection pool settings
   pool: {
-    max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX) : 5, 
-    min: process.env.DB_POOL_MIN ? parseInt(process.env.DB_POOL_MIN) : 1,   
+    max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX) : 25, 
+    min: process.env.DB_POOL_MIN ? parseInt(process.env.DB_POOL_MIN) : 2,   
     acquire: 30000,  
     idle: 10000,     
     evict: 1000      

@@ -195,12 +195,6 @@ const getAdminDashboard = async (adminUser) => {
 const getEmployeeDashboard = async (user) => {
   let employeeId = null;
   try {
-    logger.info('getEmployeeDashboard: Starting dashboard fetch', { 
-      user_id: user.id || user.employee_id || user.applicant_id,
-      user_type: typeof user,
-      user_keys: Object.keys(user)
-    });
-
     const employee = await getEmployeeFromUser(user, EmployeeMaster);
     if (!employee) {
       logger.warn('getEmployeeDashboard: Employee not found for user', { 

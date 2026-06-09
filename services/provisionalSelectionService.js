@@ -201,12 +201,20 @@ class ProvisionalSelectionService {
       // Allow idempotent SELECT: if already selected, just ensure linked updates happen
       if (action === 'SELECT' && application.status === APPLICATION_STATUS.SELECTED) {
         await transaction.rollback();
-        await cronService.autoRejectOtherApplications(
-          application.applicant_id,
-          applicationId,
-          application.post_id
-        );
-        logger.info(`Final selection retried for already selected application ${applicationId}. Ensured auto-reject executed.`);
+        
+        // Call auto-reject outside of transaction to prevent connection leaks
+        try {
+          await cronService.autoRejectOtherApplications(
+            application.applicant_id,
+            applicationId,
+            application.post_id
+          );
+          logger.info(`Final selection retried for already selected application ${applicationId}. Ensured auto-reject executed.`);
+        } catch (autoRejectError) {
+          logger.error('Auto-reject failed for already selected application:', autoRejectError);
+          // Don't fail the whole operation - selection was already done
+        }
+        
         return {
           success: true,
           applicationId,
@@ -337,7 +345,9 @@ class ProvisionalSelectionService {
         action
       };
     } catch (error) {
-      await transaction.rollback();
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       logger.error('Error in final selection:', error);
       throw error;
     }

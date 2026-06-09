@@ -57,6 +57,7 @@ const fetchLinkedEmployeeDetails = async (employeeId) => {
 
 /**
  * Ensure admin username is unique (case insensitive)
+ * Only checks against active/non-deleted users, allowing reuse of soft-deleted usernames
  */
 const ensureAdminUsernameAvailable = async (username, excludeAdminId = null) => {
   if (!username) return;
@@ -64,6 +65,7 @@ const ensureAdminUsernameAvailable = async (username, excludeAdminId = null) => 
     `SELECT admin_id FROM ms_admin_users 
      WHERE LOWER(username) = LOWER(:username)
        AND is_deleted = false
+       AND is_active = true
        ${excludeAdminId ? 'AND admin_id <> :excludeAdminId' : ''}
      LIMIT 1`,
     {

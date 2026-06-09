@@ -175,7 +175,9 @@ class AllotmentEmailService {
         scheduledDate: scheduledDate
       };
     } catch (error) {
-      await transaction.rollback();
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       logger.error('Failed to schedule allotment email', { error: error.message, postId });
       throw error;
     }

@@ -197,6 +197,25 @@ const initMiddleware = (app) => {
     res.setHeader('X-Correlation-ID', req.correlationId);
 
     const startTime = Date.now();
+    const isStaticRequest = (
+      req.path === '/sw.js' ||
+      req.path === '/manifest.webmanifest' ||
+      req.path.startsWith('/assets/') ||
+      req.path.startsWith('/uploads/') ||
+      (!req.path.startsWith('/api') && req.path.includes('.'))
+    );
+
+    if (isStaticRequest) {
+      res.on('finish', () => {
+        const responseTime = Date.now() - startTime;
+        if (responseTime > 1000 || res.statusCode >= 400) {
+          const logLevel = res.statusCode >= 500 ? 'error' : 'warn';
+          logger[logLevel](`[${req.correlationId}] ${req.method} ${req.originalUrl} ${res.statusCode} ${responseTime}ms`);
+        }
+      });
+      return next();
+    }
+
     const routeKey = `${req.method} ${req.route ? req.route.path : req.originalUrl}`;
 
     apiHitCounts[routeKey] = (apiHitCounts[routeKey] || 0) + 1;
@@ -217,7 +236,7 @@ const initMiddleware = (app) => {
         logger.warn(`SLOW API: ${req.method} ${req.originalUrl} - ${responseTime}ms - IP: ${req.ip} - CID: ${req.correlationId}`);
       }
 
-      if (apiHitCounts[routeKey] > 100) {
+      if (apiHitCounts[routeKey] > 100 && apiHitCounts[routeKey] % 100 === 0) {
         logger.warn(`HIGH TRAFFIC: ${routeKey} - ${apiHitCounts[routeKey]} hits - Potential abuse or inefficient usage`);
       }
 

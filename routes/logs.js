@@ -6,10 +6,56 @@
 const express = require('express');
 const router = express.Router();
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const { ApiError } = require('../middleware/errorHandler');
 const ApiResponse = require('../utils/ApiResponse');
 const logger = require('../config/logger');
+
+const MAX_LOG_LIMIT = 500;
+const LOG_READ_CHUNK_SIZE = 64 * 1024;
+
+async function countLines(filePath) {
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    let hasData = false;
+    const stream = fsSync.createReadStream(filePath);
+
+    stream.on('data', (chunk) => {
+      hasData = true;
+      for (let i = 0; i < chunk.length; i++) {
+        if (chunk[i] === 10) count++;
+      }
+    });
+    stream.on('end', () => resolve(hasData ? count + 1 : 0));
+    stream.on('error', reject);
+  });
+}
+
+async function readLastLines(filePath, linesNeeded) {
+  const stats = await fs.stat(filePath);
+  const fileSize = stats.size;
+  let position = fileSize;
+  let buffer = '';
+  let lines = [];
+
+  const handle = await fs.open(filePath, 'r');
+  try {
+    while (position > 0 && lines.length <= linesNeeded) {
+      const readSize = Math.min(LOG_READ_CHUNK_SIZE, position);
+      position -= readSize;
+
+      const chunkBuffer = Buffer.alloc(readSize);
+      await handle.read(chunkBuffer, 0, readSize, position);
+      buffer = chunkBuffer.toString('utf8') + buffer;
+      lines = buffer.split('\n').filter(line => line.trim().length > 0);
+    }
+  } finally {
+    await handle.close();
+  }
+
+  return lines.slice(-linesNeeded);
+}
 
 /**
  * Get list of available log files
@@ -78,9 +124,29 @@ router.get('/file/:filename', async (req, res, next) => {
     const stats = await fs.stat(filePath);
     const fileSize = stats.size;
     
-    const limitNum = parseInt(limit) || 100;
+    const limitNum = Math.min(parseInt(limit) || 100, MAX_LOG_LIMIT);
     const pageNum = parseInt(page) || 1;
     const offset = (pageNum - 1) * limitNum;
+
+    if (!search && !level && !startDate && !endDate) {
+      const totalCount = await countLines(filePath);
+      const totalPages = Math.ceil(totalCount / limitNum);
+      const linesToRead = offset + limitNum;
+      const latestLines = await readLastLines(filePath, linesToRead);
+      const paginatedLines = latestLines.slice(0, Math.max(0, latestLines.length - offset)).slice(-limitNum);
+
+      return ApiResponse.success(res, {
+        filename,
+        total_lines: totalCount,
+        current_page: pageNum,
+        total_pages: totalPages,
+        lines_per_page: limitNum,
+        file_size: fileSize,
+        last_modified: stats.mtime.toISOString(),
+        lines: paginatedLines.reverse(),
+        filters: { search, level, startDate, endDate }
+      }, 'Log file content retrieved successfully');
+    }
     
     // Read file in chunks (reverse order for latest first)
     const buffer = await fs.readFile(filePath, 'utf8');
@@ -166,18 +232,15 @@ router.get('/tail/:filename', async (req, res, next) => {
       throw ApiError.notFound(`Log file not found: ${filename}`);
     }
     
-    const linesNum = parseInt(lines) || 20;
-    
-    // Read file
-    const buffer = await fs.readFile(filePath, 'utf8');
-    const allLines = buffer.split('\n').filter(line => line.trim().length > 0);
-    
-    // Get last N lines
-    const tailLines = allLines.slice(-linesNum);
+    const linesNum = Math.min(parseInt(lines) || 20, MAX_LOG_LIMIT);
+    const [totalLines, tailLines] = await Promise.all([
+      countLines(filePath),
+      readLastLines(filePath, linesNum)
+    ]);
     
     return ApiResponse.success(res, {
       filename,
-      total_lines: allLines.length,
+      total_lines: totalLines,
       tail_lines: tailLines.length,
       lines: tailLines,
       timestamp: new Date().toISOString()

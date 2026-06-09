@@ -1016,7 +1016,9 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
       });
 
     } catch (txError) {
-      await transaction.rollback();
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       throw txError;
     }
 
@@ -1248,7 +1250,7 @@ router.post('/applications/verify-payment', auditLog('VERIFY_PAYMENT_AND_SUBMIT'
   } catch (error) {
     // === ROLLBACK TRANSACTION ON ERROR ===
     // Ensures no partial data is saved (payment, application, acknowledgement all rolled back)
-    if (transaction) {
+    if (transaction && !transaction.finished) {
       await transaction.rollback();
     }
     next(error);
