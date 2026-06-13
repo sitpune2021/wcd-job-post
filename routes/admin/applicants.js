@@ -76,4 +76,18 @@ router.patch('/ocr', requirePermission('applicants.edit'), auditLog('ADMIN_UPDAT
   }
 });
 
+router.patch('/:id/profile-edit-override', requirePermission('applicants.edit'), auditLog('ADMIN_PROFILE_EDIT_OVERRIDE'), async (req, res, next) => {
+  try {
+    const result = await applicantService.updateProfileEditOverride(
+      req.params.id,
+      req.body.enabled,
+      req.body.reason,
+      req.user.admin_id
+    );
+    return ApiResponse.success(res, result, req.body.enabled ? 'Applicant profile unlocked' : 'Applicant profile lock restored');
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

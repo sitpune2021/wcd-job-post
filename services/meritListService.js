@@ -1,209 +1,74 @@
 /**
- * Merit List Service (LEGACY - Live calculation is now preferred)
- * Generates merit lists with new ranking criteria:
- * 1. Education level (higher display_order = better)
- * 2. Marks/Percentage (higher = better)
- * 3. Experience months (more = better)
- * 4. Age (Configurable: Older/Younger preferred)
- * 5. Local candidate preference (permanent_district matches post district)
- * 
- * NOTE: This service stores results in the MeritList table. 
- * Current system uses live calculation in applicationReviewService.js for better accuracy.
+ * Persisted merit-list service.
+ *
+ * Uses the same score formula as admin review, stores every generation as a
+ * versioned run, and returns only the latest completed run.
  */
-const { APP_CONFIG } = require('../constants/appConfig');
 const db = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
-
-// Scoring weights (can be configured)
-const WEIGHTS = {
-  EDUCATION: 30,      // Max 30 points for education
-  MARKS: 25,          // Max 25 points for marks
-  EXPERIENCE: 20,     // Max 20 points for experience
-  AGE: 15,            // Max 15 points for age (younger = more points)
-  LOCAL_PREFERENCE: 10 // Max 10 points for local candidate
-};
-
-// Normalization constants
-const MAX_EDUCATION_ORDER = 10;  // Assuming max education level display_order is 10
-const MAX_EXPERIENCE_MONTHS = 120; // 10 years max for scoring
-const MIN_AGE = 18;
-const MAX_AGE = 65;
+const { ApiError } = require('../middleware/errorHandler');
+const { calculateMeritScore } = require('./applicationWorkflowService');
 
 class MeritListService {
-
-  /**
-   * Calculate education score based on highest education level
-   * @param {Array} educationRecords - Applicant's education records
-   * @returns {number} - Score (0-30)
-   */
-  calculateEducationScore(educationRecords) {
-    if (!educationRecords || educationRecords.length === 0) return 0;
-
-    let highestOrder = 0;
-    for (const edu of educationRecords) {
-      const order = edu.educationLevel?.display_order || edu.education_level_id || 0;
-      if (order > highestOrder) {
-        highestOrder = order;
-      }
-    }
-
-    // Normalize to 0-30 scale
-    return Math.min(WEIGHTS.EDUCATION, (highestOrder / MAX_EDUCATION_ORDER) * WEIGHTS.EDUCATION);
-  }
-
-  /**
-   * Calculate marks score based on highest percentage
-   * @param {Array} educationRecords - Applicant's education records
-   * @returns {number} - Score (0-25)
-   */
-  calculateMarksScore(educationRecords) {
-    if (!educationRecords || educationRecords.length === 0) return 0;
-
-    let highestPercentage = 0;
-    for (const edu of educationRecords) {
-      const percentage = parseFloat(edu.percentage) || 0;
-      if (percentage > highestPercentage) {
-        highestPercentage = percentage;
-      }
-    }
-
-    // Normalize to 0-25 scale (assuming 100% is max)
-    return Math.min(WEIGHTS.MARKS, (highestPercentage / 100) * WEIGHTS.MARKS);
-  }
-
-  /**
-   * Calculate experience score based on total months
-   * @param {Array} experienceRecords - Applicant's experience records
-   * @returns {number} - Score (0-20)
-   */
-  calculateExperienceScore(experienceRecords) {
-    if (!experienceRecords || experienceRecords.length === 0) return 0;
-
-    let totalMonths = 0;
-    for (const exp of experienceRecords) {
-      totalMonths += exp.total_months || 0;
-    }
-
-    // Normalize to 0-20 scale (cap at MAX_EXPERIENCE_MONTHS)
-    const cappedMonths = Math.min(totalMonths, MAX_EXPERIENCE_MONTHS);
-    return (cappedMonths / MAX_EXPERIENCE_MONTHS) * WEIGHTS.EXPERIENCE;
-  }
-
-  calculateAgeScore(personal) {
-    if (!personal?.dob) return 0;
-
-    const today = new Date();
-    const birthDate = new Date(personal.dob);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-
-    if (age < MIN_AGE || age > MAX_AGE) return 0;
-
-    const ageRange = MAX_AGE - MIN_AGE;
-    const ageFromMin = age - MIN_AGE;
-
-    const agePreference = APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE || 'YOUNGER';
-    let score;
-
-    if (agePreference === 'OLDER') {
-      // Older candidates get higher scores
-      // Age 65 = 15 points, Age 18 = 0 points
-      score = WEIGHTS.AGE * (ageFromMin / ageRange);
-    } else {
-      // Younger candidates get higher scores
-      // Age 18 = 15 points, Age 65 = 0 points
-      score = WEIGHTS.AGE * (1 - (ageFromMin / ageRange));
-    }
-
-    return Math.max(0, score);
-  }
-
-  /**
-   * Calculate local preference score
-   * @param {Object} address - Applicant's address with permanent_district_id
-   * @param {number} postDistrictId - Post's district_id
-   * @returns {Object} - { score: number, isLocal: boolean }
-   */
-  calculateLocalPreferenceScore(address, postDistrictId) {
-    if (!address?.permanent_district_id || !postDistrictId) {
-      return { score: 0, isLocal: false };
-    }
-
-    const isLocal = address.permanent_district_id === postDistrictId;
-    return {
-      score: isLocal ? WEIGHTS.LOCAL_PREFERENCE : 0,
-      isLocal
-    };
-  }
-
-  /**
-   * Custom comparator for sorting applications by merit
-   * New order: Education → Marks → District (local first) → Experience → Age
-   * @param {Object} a - First application
-   * @param {Object} b - Second application
-   * @returns {number} - Comparison result
-   */
-  compareApplications(a, b) {
-    // 1. Education score (higher is better)
-    if (a.education_score !== b.education_score) {
-      return b.education_score - a.education_score;
-    }
-
-    // 2. Marks score (higher is better)
-    if (a.marks_score !== b.marks_score) {
-      return b.marks_score - a.marks_score;
-    }
-
-    // 3. District locality (local candidates first)
-    if (a.is_local_candidate !== b.is_local_candidate) {
-      return b.is_local_candidate ? 1 : -1;
-    }
-
-    // 4. Experience score (higher is better)
-    if (a.experience_score !== b.experience_score) {
-      return b.experience_score - a.experience_score;
-    }
-
-    // 5. Age score (younger preferred, higher score is better)
-    if (a.age_score !== b.age_score) {
-      return b.age_score - a.age_score;
-    }
-
-    // If all equal, maintain original order
-    return 0;
-  }
-
-  /**
-   * Generate merit list for a specific post
-   * @param {number} postId - Post ID
-   * @param {number} districtId - District ID for local preference
-   * @param {number} generatedBy - Admin ID who triggered generation
-   * @returns {Promise<Object>} - Result with merit list entries
-   */
   async generateMeritList(postId, districtId, generatedBy) {
     const transaction = await db.sequelize.transaction();
-
     try {
-      // Get post details
-      const post = await db.PostMaster.findByPk(postId);
-      if (!post) {
-        throw new Error('Post not found');
+      const post = await db.PostMaster.findOne({
+        where: { post_id: postId, is_deleted: false },
+        transaction
+      });
+      if (!post) throw new ApiError(404, 'Post not found');
+      const drive = await db.RecruitmentDrive.findByPk(post.recruitment_drive_id, { transaction });
+      if (!drive) throw new ApiError(409, 'Post is not linked to a recruitment drive');
+      if (drive.status === 'DRAFT') {
+        throw new ApiError(409, 'Activate the recruitment drive before generating merit');
+      }
+      if (drive.status === 'OPEN' && !drive.is_active) {
+        throw new ApiError(409, 'Merit cannot be generated for a non-active open recruitment drive');
       }
 
-      // Get all eligible applications for this post
+      const finalDistrictId = parseInt(districtId, 10) || post.district_id;
+      if (!finalDistrictId) throw new ApiError(400, 'District is required to generate merit');
+
+      const previousRun = await db.MeritGenerationRun.max('run_number', {
+        where: {
+          recruitment_drive_id: drive.recruitment_drive_id,
+          post_id: postId,
+          district_id: finalDistrictId
+        },
+        transaction
+      });
+      const runNumber = (parseInt(previousRun, 10) || 0) + 1;
+      const isOfficial = post.is_closed || !post.is_active || drive.status !== 'OPEN';
+      const run = await db.MeritGenerationRun.create({
+        recruitment_drive_id: drive.recruitment_drive_id,
+        post_id: postId,
+        district_id: finalDistrictId,
+        run_number: runNumber,
+        run_type: isOfficial ? (runNumber > 1 ? 'REGENERATION' : 'OFFICIAL') : 'PREVIEW',
+        status: 'PROCESSING',
+        is_official: isOfficial,
+        formula_snapshot: {
+          formula: 'applicationWorkflowService.calculateMeritScore',
+          tie_breakers: ['submitted_at ASC', 'application_no ASC']
+        },
+        generated_by: generatedBy,
+        started_at: new Date()
+      }, { transaction });
+
       const applications = await db.Application.findAll({
         where: {
           post_id: postId,
-          district_id: districtId,
-          is_deleted: false,
-          status: { [Op.in]: ['SUBMITTED', 'VERIFIED', 'ELIGIBLE'] },
+          district_id: finalDistrictId,
+          recruitment_drive_id: drive.recruitment_drive_id,
+          is_deleted: { [Op.ne]: true },
+          declaration_accepted: true,
+          submitted_at: { [Op.ne]: null },
           system_eligibility: true
         },
         include: [
+          { model: db.PostMaster, as: 'post', attributes: ['post_id', 'district_id'] },
           {
             model: db.ApplicantMaster,
             as: 'applicant',
@@ -218,169 +83,253 @@ class MeritListService {
               { model: db.ApplicantExperience, as: 'experience' }
             ]
           }
-        ]
-      });
-
-      if (applications.length === 0) {
-        await transaction.rollback();
-        return { success: true, message: 'No eligible applications found', count: 0 };
-      }
-
-      // Calculate scores for each application
-      const scoredApplications = applications.map(app => {
-        const applicant = app.applicant;
-
-        const educationScore = this.calculateEducationScore(applicant.education);
-        const marksScore = this.calculateMarksScore(applicant.education);
-        const experienceScore = this.calculateExperienceScore(applicant.experience);
-        const ageScore = this.calculateAgeScore(applicant.personal);
-        const localResult = this.calculateLocalPreferenceScore(applicant.address, districtId);
-
-        const totalScore = educationScore + marksScore + experienceScore + ageScore + localResult.score;
-
-        return {
-          application_id: app.application_id,
-          applicant_id: app.applicant_id,
-          post_id: postId,
-          district_id: districtId,
-          education_score: parseFloat(educationScore.toFixed(2)),
-          marks_score: parseFloat(marksScore.toFixed(2)),
-          experience_score: parseFloat(experienceScore.toFixed(2)),
-          age_score: parseFloat(ageScore.toFixed(2)),
-          local_preference_score: parseFloat(localResult.score.toFixed(2)),
-          is_local_candidate: localResult.isLocal,
-          score: parseFloat(totalScore.toFixed(2)),
-          selection_status: 'PENDING',
-          generated_at: new Date(),
-          generated_by: generatedBy
-        };
-      });
-
-      // Sort using custom comparator (Education → Marks → District → Experience → Age)
-      scoredApplications.sort((a, b) => this.compareApplications(a, b));
-
-      // Assign ranks
-      scoredApplications.forEach((app, index) => {
-        app.rank = index + 1;
-      });
-
-      // Delete existing merit list entries for this post+district
-      await db.MeritList.destroy({
-        where: { post_id: postId, district_id: districtId },
+        ],
         transaction
       });
 
-      // Insert new merit list entries
-      await db.MeritList.bulkCreate(scoredApplications, { transaction });
+      const preferences = applications.length
+        ? await db.ApplicationPreference.findAll({
+          where: {
+            recruitment_drive_id: drive.recruitment_drive_id,
+            application_id: { [Op.in]: applications.map((application) => application.application_id) }
+          },
+          transaction
+        })
+        : [];
+      const preferenceMap = new Map(preferences.map((item) => [item.application_id, item.preference_rank]));
 
-      // Update application merit_score
-      for (const scored of scoredApplications) {
-        await db.Application.update(
-          { merit_score: scored.score },
-          { where: { application_id: scored.application_id }, transaction }
-        );
+      const scored = [];
+      for (const application of applications) {
+        const score = await calculateMeritScore(application, transaction);
+        scored.push({
+          application_id: application.application_id,
+          post_id: postId,
+          district_id: finalDistrictId,
+          recruitment_drive_id: drive.recruitment_drive_id,
+          merit_run_id: run.merit_run_id,
+          generation_version: runNumber,
+          preference_rank: preferenceMap.get(application.application_id) || null,
+          score,
+          score_snapshot: {
+            submitted_at: application.submitted_at,
+            application_no: application.application_no,
+            calculated_at: new Date()
+          },
+          is_official: isOfficial,
+          selection_status: application.selection_status || 'PENDING',
+          generated_at: new Date(),
+          generated_by: generatedBy
+        });
       }
 
-      await transaction.commit();
+      scored.sort((a, b) => {
+        const scoreDifference = Number(b.score) - Number(a.score);
+        if (scoreDifference !== 0) return scoreDifference;
+        const aApp = applications.find((item) => item.application_id === a.application_id);
+        const bApp = applications.find((item) => item.application_id === b.application_id);
+        const submittedDifference = new Date(aApp?.submitted_at || 0) - new Date(bApp?.submitted_at || 0);
+        if (submittedDifference !== 0) return submittedDifference;
+        return String(aApp?.application_no || '').localeCompare(String(bApp?.application_no || ''));
+      });
+      scored.forEach((entry, index) => { entry.rank = index + 1; });
 
-      logger.info(`MERIT: Generated merit list for post ${postId}, district ${districtId}: ${scoredApplications.length} entries`);
+      if (scored.length) {
+        await db.MeritList.bulkCreate(scored, { transaction });
+        for (const entry of scored) {
+          await db.Application.update(
+            { merit_score: entry.score },
+            { where: { application_id: entry.application_id }, transaction }
+          );
+        }
+      }
+
+      await run.update({
+        status: 'COMPLETED',
+        total_applications: scored.length,
+        completed_at: new Date()
+      }, { transaction });
+      await post.update({
+        merit_status: isOfficial ? 'OFFICIAL_GENERATED' : 'PREVIEW_GENERATED'
+      }, { transaction });
+      await transaction.commit();
 
       return {
         success: true,
         postId,
-        districtId,
-        count: scoredApplications.length,
-        topRanked: scoredApplications.slice(0, 10).map(a => ({
-          rank: a.rank,
-          application_id: a.application_id,
-          score: a.score,
-          is_local: a.is_local_candidate
-        }))
+        districtId: finalDistrictId,
+        count: scored.length,
+        meritRunId: run.merit_run_id,
+        runNumber,
+        isOfficial
       };
-
     } catch (error) {
-      if (transaction && !transaction.finished) {
-        await transaction.rollback();
-      }
+      if (transaction && !transaction.finished) await transaction.rollback();
       logger.error('MERIT: Error generating merit list:', error);
       throw error;
     }
   }
 
-  /**
-   * Get merit list for a post/district with global rank filtering
-   * @param {number} postId - Post ID
-   * @param {number} districtId - District ID
-   * @param {Object} options - Pagination options and user info
-   * @returns {Promise<Object>} - Merit list with pagination and batch info
-   */
   async getMeritList(postId, districtId, options = {}) {
     const { page = 1, limit = 50, adminUser } = options;
     const offset = (page - 1) * limit;
+    const post = await db.PostMaster.findByPk(postId);
+    const finalDistrictId = parseInt(districtId, 10) || post?.district_id;
 
-    try {
-      const whereClause = { post_id: postId, district_id: districtId };
-      
-      // Apply global rank filtering if user has assigned rank range
-      let batchInfo = null;
-      if (adminUser && adminUser.review_batch_start && adminUser.review_batch_end) {
-        // Filter by user's global rank range (works across ALL posts)
-        whereClause.rank = {
-          [db.Sequelize.Op.gte]: adminUser.review_batch_start,
-          [db.Sequelize.Op.lte]: adminUser.review_batch_end
-        };
-        
-        batchInfo = {
-          batch_start: adminUser.review_batch_start,
-          batch_end: adminUser.review_batch_end,
-          batch_size: adminUser.review_batch_end - adminUser.review_batch_start + 1,
-          is_filtered: true,
-          note: 'Global rank range - applies to all posts'
-        };
-      } else {
-        batchInfo = {
-          batch_start: null,
-          batch_end: null,
-          batch_size: null,
-          is_filtered: false,
-          note: 'No rank range assigned - sees all applications'
-        };
-      }
-
-      const { count, rows } = await db.MeritList.findAndCountAll({
-        where: whereClause,
-        include: [
-          {
-            model: db.Application,
-            as: 'application',
-            include: [
-              {
-                model: db.ApplicantMaster,
-                as: 'applicant',
-                include: [{ model: db.ApplicantPersonal, as: 'personal' }]
-              }
-            ]
-          }
-        ],
-        order: [['rank', 'ASC']],
-        limit,
-        offset
-      });
-
+    const latestRun = await db.MeritGenerationRun.findOne({
+      where: {
+        post_id: postId,
+        district_id: finalDistrictId,
+        status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] }
+      },
+      order: [['run_number', 'DESC']]
+    });
+    if (!latestRun) {
       return {
-        meritList: rows,
-        batchInfo,
-        pagination: {
-          total: count,
-          page,
-          limit,
-          totalPages: Math.ceil(count / limit)
-        }
+        meritList: [],
+        generationRun: null,
+        batchInfo: null,
+        pagination: { total: 0, page, limit, totalPages: 0 }
       };
+    }
+
+    const where = { merit_run_id: latestRun.merit_run_id };
+    let batchInfo = null;
+    if (adminUser?.review_batch_start && adminUser?.review_batch_end) {
+      where.rank = { [Op.between]: [adminUser.review_batch_start, adminUser.review_batch_end] };
+      batchInfo = {
+        batch_start: adminUser.review_batch_start,
+        batch_end: adminUser.review_batch_end,
+        is_filtered: true
+      };
+    }
+
+    const { count, rows } = await db.MeritList.findAndCountAll({
+      where,
+      include: [{
+        model: db.Application,
+        as: 'application',
+        include: [{
+          model: db.ApplicantMaster,
+          as: 'applicant',
+          include: [{ model: db.ApplicantPersonal, as: 'personal' }]
+        }]
+      }],
+      order: [['rank', 'ASC']],
+      limit,
+      offset
+    });
+
+    return {
+      meritList: rows,
+      generationRun: latestRun,
+      batchInfo,
+      pagination: { total: count, page, limit, totalPages: Math.ceil(count / limit) }
+    };
+  }
+
+  async publishLatestMeritList(postId, districtId, adminId) {
+    const post = await db.PostMaster.findByPk(postId);
+    if (!post) throw new ApiError(404, 'Post not found');
+    const finalDistrictId = parseInt(districtId, 10) || post.district_id;
+    const run = await db.MeritGenerationRun.findOne({
+      where: {
+        post_id: postId,
+        district_id: finalDistrictId,
+        is_official: true,
+        status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] }
+      },
+      order: [['run_number', 'DESC']]
+    });
+    if (!run) throw new ApiError(409, 'Generate an official merit list before publishing');
+    if (run.status === 'PUBLISHED') {
+      return { post_id: postId, merit_run_id: run.merit_run_id, published_at: run.published_at };
+    }
+
+    const transaction = await db.sequelize.transaction();
+    try {
+      const publishedAt = new Date();
+      await db.MeritGenerationRun.update({
+        status: 'PUBLISHED',
+        published_at: publishedAt,
+        published_by: adminId
+      }, { where: { merit_run_id: run.merit_run_id }, transaction });
+      await db.MeritList.update({
+        published_at: publishedAt,
+        published_by: adminId
+      }, { where: { merit_run_id: run.merit_run_id }, transaction });
+      await db.PostMaster.update({
+        merit_status: 'PUBLISHED',
+        merit_published_at: publishedAt,
+        merit_published_by: adminId
+      }, { where: { post_id: postId }, transaction });
+      await transaction.commit();
+      const applications = await db.Application.findAll({
+        where: { post_id: postId, is_deleted: false, submitted_at: { [Op.ne]: null } },
+        attributes: ['applicant_id', 'application_id', 'recruitment_drive_id']
+      });
+      await Promise.all(applications.map((application) =>
+        require('./notificationService').notifyApplicant(application.applicant_id, {
+          title: 'Merit list published',
+          message: `The merit list for ${post.post_name || 'your applied post'} has been published.`,
+          title_mr: 'गुणवत्ता यादी प्रकाशित झाली',
+          message_mr: `${post.post_name_mr || post.post_name || 'आपण अर्ज केलेल्या पदाची'} गुणवत्ता यादी प्रकाशित झाली आहे.`,
+          notification_type: 'MERIT',
+          event_code: 'MERIT_LIST_PUBLISHED',
+          action_url: '/dashboard/applied-posts',
+          recruitment_drive_id: application.recruitment_drive_id,
+          application_id: application.application_id,
+          post_id: postId
+        })
+      ));
+      await require('./notificationService').notifyAdmin(adminId, {
+        title: 'Merit list published',
+        message: `Published merit list for ${post.post_name || postId}.`,
+        notification_type: 'MERIT',
+        event_code: 'MERIT_LIST_PUBLISHED',
+        action_url: `/merit?recruitment_drive_id=${post.recruitment_drive_id}`,
+        recruitment_drive_id: post.recruitment_drive_id,
+        post_id: postId
+      });
+      return { post_id: postId, merit_run_id: run.merit_run_id, published_at: publishedAt };
     } catch (error) {
-      logger.error('MERIT: Error fetching merit list:', error);
+      await transaction.rollback();
       throw error;
     }
+  }
+
+  async getPublishedMeritList(postId) {
+    const run = await db.MeritGenerationRun.findOne({
+      where: { post_id: postId, status: 'PUBLISHED' },
+      order: [['published_at', 'DESC'], ['run_number', 'DESC']]
+    });
+    if (!run) throw new ApiError(404, 'No published merit list is available for this post');
+
+    const [post, rows] = await Promise.all([
+      db.PostMaster.findByPk(postId, {
+        attributes: ['post_id', 'post_code', 'post_name', 'post_name_mr']
+      }),
+      db.MeritList.findAll({
+        where: { merit_run_id: run.merit_run_id },
+        attributes: ['rank'],
+        include: [{
+          model: db.Application,
+          as: 'application',
+          attributes: ['application_no', 'submitted_at'],
+          include: [{
+            model: db.ApplicantMaster,
+            as: 'applicant',
+            attributes: ['applicant_id'],
+            include: [{
+              model: db.ApplicantPersonal,
+              as: 'personal',
+              attributes: ['full_name']
+            }]
+          }]
+        }],
+        order: [['rank', 'ASC']]
+      })
+    ]);
+    return { post, generationRun: run, meritList: rows };
   }
 }
 

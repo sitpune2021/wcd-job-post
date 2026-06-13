@@ -304,32 +304,4 @@ router.get('/merit/export', auditLog('EXPORT_MERIT_LIST'), async (req, res, next
   }
 });
 
-/**
- * @route POST /api/v1/admin/notify
- * @desc Send notifications to applicants - placeholder
- * @access Private (applications.edit permission)
- */
-router.post('/notify', requirePermission(['applications.edit']), auditLog('SEND_NOTIFICATIONS'), async (req, res, next) => {
-  try {
-    const { applicant_ids, message, channel } = req.body;
-
-    if (!applicant_ids || !Array.isArray(applicant_ids) || applicant_ids.length === 0) {
-      throw ApiError.badRequest('Applicant IDs are required.');
-    }
-
-    if (!message) {
-      throw ApiError.badRequest('Message is required.');
-    }
-
-    if (!channel || !['SMS', 'EMAIL', 'SYSTEM'].includes(channel)) {
-      throw ApiError.badRequest('Valid channel is required (SMS, EMAIL, or SYSTEM).');
-    }
-
-    // Placeholder - actual notification sending can be implemented later
-    return ApiResponse.success(res, { count: applicant_ids.length, channel }, 'Notifications queued');
-  } catch (error) {
-    next(error);
-  }
-});
-
 module.exports = router;

@@ -9,6 +9,7 @@ const db = require('../../models');
 const { PostMaster, Scheme, CategoryMaster, PostCategory, ExperienceDomain } = db;
 const { Op } = require('sequelize');
 const logger = require('../../config/logger');
+const { ApiError } = require('../../middleware/errorHandler');
 const { paginatedQuery, isPaginatedResponse } = require('../../utils/pagination');
 const { localizeField } = require('./helpers');
 
@@ -52,6 +53,7 @@ const { localizeField } = require('./helpers');
  */
 const transformPost = (language = 'en') => (p) => ({
   post_id: p.post_id,
+  recruitment_drive_id: p.recruitment_drive_id,
   post_code: p.post_code,
   post_name: localizeField(p, 'post_name', language),
   post_name_en: p.post_name,
@@ -218,9 +220,16 @@ const getPosts = async (query = {}) => {
   try {
     const language = query.lang || 'en';
     const includeInactive = query.include_inactive === 'true';
+    const defaultDrive = await require('../recruitmentDriveService').getDriveForRead();
+    const requestedDriveId = parseOptionalInt(query.recruitment_drive_id);
     
     const baseWhere = {};
     baseWhere.is_deleted = false;
+    if (Number.isInteger(requestedDriveId)) {
+      baseWhere.recruitment_drive_id = requestedDriveId;
+    } else if (defaultDrive && query.include_all_drives !== 'true') {
+      baseWhere.recruitment_drive_id = defaultDrive.recruitment_drive_id;
+    }
     if (!includeInactive) {
       baseWhere.is_active = true;
     }
@@ -234,7 +243,7 @@ const getPosts = async (query = {}) => {
         district_id: { field: 'district_id', type: 'number' }
       },
       attributes: [
-        'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
+        'post_id', 'recruitment_drive_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
         'scheme_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
         'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
@@ -365,6 +374,10 @@ const getPostById = async (postId, language = 'en') => {
     if (post.is_deleted) {
       return null;
     }
+    const drive = await db.RecruitmentDrive.findByPk(post.recruitment_drive_id);
+    if (drive?.status === 'CLOSED') {
+      throw new ApiError(409, 'Posts in a closed recruitment drive cannot be edited');
+    }
 
     const categories = await getPostCategories(postId, language);
 
@@ -427,6 +440,17 @@ const getPostById = async (postId, language = 'en') => {
  */
 const createPost = async (data, userId) => {
   try {
+    const recruitmentDriveService = require('../recruitmentDriveService');
+    const requestedDriveId = parseOptionalInt(data.recruitment_drive_id);
+    const targetDrive = Number.isInteger(requestedDriveId)
+      ? await db.RecruitmentDrive.findByPk(requestedDriveId)
+      : await recruitmentDriveService.requireActiveDrive();
+    if (!targetDrive) {
+      throw new ApiError(404, 'Recruitment drive not found');
+    }
+    if (targetDrive.status === 'CLOSED') {
+      throw new ApiError(409, 'Posts cannot be added to a closed recruitment drive');
+    }
     const minEducationLevelId = parseOptionalInt(data.min_education_level_id);
     const maxEducationLevelId = parseOptionalInt(data.max_education_level_id);
     const schemeId = parseOptionalInt(data.scheme_id);
@@ -434,8 +458,14 @@ const createPost = async (data, userId) => {
     const districtId = parseOptionalInt(data.district_id);
 
     // Validate dates
-    const openingDate = parseOptionalDate(data.opening_date);
-    const closingDate = parseOptionalDate(data.closing_date);
+    const driveOpeningDate = targetDrive.application_start_at
+      ? new Date(targetDrive.application_start_at).toISOString().slice(0, 10)
+      : null;
+    const driveClosingDate = targetDrive.application_end_at
+      ? new Date(targetDrive.application_end_at).toISOString().slice(0, 10)
+      : null;
+    const openingDate = driveOpeningDate ?? parseOptionalDate(data.opening_date);
+    const closingDate = driveClosingDate ?? parseOptionalDate(data.closing_date);
     
     if (openingDate && closingDate) {
       const opening = new Date(openingDate);
@@ -449,6 +479,8 @@ const createPost = async (data, userId) => {
     }
 
     const post = await PostMaster.create({
+      recruitment_drive_id: targetDrive.recruitment_drive_id,
+      source_post_id: parseOptionalInt(data.source_post_id),
       post_code: data.post_code,
       post_name: data.post_name,
       post_name_mr: data.post_name_mr || null,
@@ -474,7 +506,7 @@ const createPost = async (data, userId) => {
       male_only: parseOptionalBool(data.male_only) || false,
       display_order: parseOptionalInt(data.display_order) || 0,
       amount: parseFloat(data.amount) || null,
-      is_active: data.is_active !== undefined ? data.is_active : true,
+      is_active: targetDrive.is_active && targetDrive.applications_open,
       is_deleted: parseOptionalBool(data.is_deleted) || false,
       created_by: userId
     });
@@ -581,6 +613,15 @@ const updatePost = async (postId, data, userId) => {
         error.statusCode = 400;
         throw error;
       }
+    }
+    const finalTotalPositions = updateData.total_positions !== undefined
+      ? updateData.total_positions
+      : post.total_positions;
+    const finalFilledPositions = updateData.filled_positions !== undefined
+      ? updateData.filled_positions
+      : post.filled_positions;
+    if (finalTotalPositions < finalFilledPositions) {
+      throw new ApiError(409, `Total positions cannot be lower than filled positions (${finalFilledPositions})`);
     }
 
     await post.update(updateData);

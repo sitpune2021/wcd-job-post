@@ -8,6 +8,7 @@ const parseOptionalInt = (value) => {
 };
 
 const getPostWiseReport = async (filters = {}) => {
+  const recruitmentDriveId = parseOptionalInt(filters.recruitment_drive_id);
   const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
   const postId = parseOptionalInt(filters.post_id);
@@ -33,13 +34,14 @@ const getPostWiseReport = async (filters = {}) => {
       ON a.post_id = pm.post_id
      AND a.is_deleted = false
     WHERE pm.is_deleted = false
+      AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
       AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       AND (:postId IS NULL OR pm.post_id = :postId)
     GROUP BY pm.post_id, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
     ORDER BY pm.created_at DESC, pm.post_id DESC
     `,
     {
-      replacements: { schemeId, districtId, postId },
+      replacements: { recruitmentDriveId, schemeId, districtId, postId },
       type: QueryTypes.SELECT
     }
   );
@@ -48,6 +50,7 @@ const getPostWiseReport = async (filters = {}) => {
 };
 
 const getPostSelectedCandidatesReport = async (filters = {}) => {
+  const recruitmentDriveId = parseOptionalInt(filters.recruitment_drive_id);
   const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
   const postId = parseOptionalInt(filters.post_id);
@@ -56,6 +59,7 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
     `
     SELECT
       pm.post_id,
+      pm.recruitment_drive_id,
       pm.scheme_id,
       s.scheme_name,
       pm.post_code,
@@ -80,13 +84,18 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
       ON ap.applicant_id = a.applicant_id
      AND ap.is_deleted = false
     WHERE pm.is_deleted = false
+      AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
       AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       AND (:postId IS NULL OR pm.post_id = :postId)
-    GROUP BY pm.post_id, pm.scheme_id, s.scheme_name, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
+    GROUP BY pm.post_id, pm.recruitment_drive_id, pm.scheme_id, s.scheme_name, pm.post_code, pm.post_name, pm.post_name_mr, pm.created_at
+    HAVING COUNT(a.application_id) FILTER (
+      WHERE a.application_id IS NOT NULL
+        AND (:districtId IS NULL OR a.district_id = :districtId)
+    ) > 0
     ORDER BY pm.created_at DESC, pm.post_id DESC
     `,
     {
-      replacements: { schemeId, districtId, postId },
+      replacements: { recruitmentDriveId, schemeId, districtId, postId },
       type: QueryTypes.SELECT
     }
   );
@@ -95,6 +104,7 @@ const getPostSelectedCandidatesReport = async (filters = {}) => {
 };
 
 const getDistrictWiseReport = async (filters = {}) => {
+  const recruitmentDriveId = parseOptionalInt(filters.recruitment_drive_id);
   const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
 
@@ -106,11 +116,13 @@ const getDistrictWiseReport = async (filters = {}) => {
       dm.district_name_mr,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
+          AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
           AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       )::int AS application_count,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
           AND a.status = 'SELECTED'
+          AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
           AND (:schemeId IS NULL OR pm.scheme_id = :schemeId)
       )::int AS selected_count
     FROM ms_district_master dm
@@ -125,7 +137,7 @@ const getDistrictWiseReport = async (filters = {}) => {
     ORDER BY dm.district_name ASC
     `,
     {
-      replacements: { schemeId, districtId },
+      replacements: { recruitmentDriveId, schemeId, districtId },
       type: QueryTypes.SELECT
     }
   );
@@ -134,6 +146,7 @@ const getDistrictWiseReport = async (filters = {}) => {
 };
 
 const getSchemeWiseReport = async (filters = {}) => {
+  const recruitmentDriveId = parseOptionalInt(filters.recruitment_drive_id);
   const schemeId = parseOptionalInt(filters.scheme_id);
   const districtId = parseOptionalInt(filters.district_id);
 
@@ -148,11 +161,13 @@ const getSchemeWiseReport = async (filters = {}) => {
       st.scheme_name as scheme_type_name,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
+          AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
           AND (:districtId IS NULL OR a.district_id = :districtId)
       )::int AS application_count,
       COUNT(a.application_id) FILTER (
         WHERE a.application_id IS NOT NULL
           AND a.status = 'SELECTED'
+          AND (:recruitmentDriveId IS NULL OR pm.recruitment_drive_id = :recruitmentDriveId)
           AND (:districtId IS NULL OR a.district_id = :districtId)
       )::int AS selected_count
     FROM ms_schemes s
@@ -172,7 +187,7 @@ const getSchemeWiseReport = async (filters = {}) => {
     ORDER BY s.scheme_name ASC
     `,
     {
-      replacements: { schemeId, districtId },
+      replacements: { recruitmentDriveId, schemeId, districtId },
       type: QueryTypes.SELECT
     }
   );

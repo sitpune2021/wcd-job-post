@@ -1,13 +1,24 @@
 const db = require('../models');
-const { Op } = require('sequelize');
 const logger = require('../config/logger');
 
 class DashboardService {
+  async getRecruitmentDrives() {
+    return db.RecruitmentDrive.findAll({
+      attributes: ['recruitment_drive_id', 'drive_code', 'drive_name', 'status', 'is_active'],
+      order: [['created_at', 'DESC'], ['recruitment_drive_id', 'DESC']],
+      raw: true
+    });
+  }
+
   /**
    * Get aggregated counts of posts and applications grouped by district.
    */
-  async getSummaryByDistrict() {
+  async getSummaryByDistrict(recruitmentDriveId = null) {
     try {
+      const parsedDriveId = parseInt(recruitmentDriveId, 10);
+      const driveWhere = Number.isInteger(parsedDriveId)
+        ? { recruitment_drive_id: parsedDriveId }
+        : {};
       // 1. Get all active districts
       const districts = await db.DistrictMaster.findAll({
         where: { is_deleted: false, is_active: true },
@@ -18,7 +29,7 @@ class DashboardService {
 
       // 2. Get post counts grouped by district
       const postCounts = await db.PostMaster.findAll({
-        where: { is_deleted: false, is_active: true },
+        where: { is_deleted: false, ...driveWhere },
         attributes: [
           'district_id',
           [db.sequelize.fn('COUNT', db.sequelize.col('post_id')), 'count']
@@ -29,7 +40,7 @@ class DashboardService {
 
       // 3. Get application counts grouped by district
       const appCounts = await db.Application.findAll({
-        where: { is_deleted: false },
+        where: { is_deleted: false, ...driveWhere },
         attributes: [
           'district_id',
           [db.sequelize.fn('COUNT', db.sequelize.col('application_id')), 'count']

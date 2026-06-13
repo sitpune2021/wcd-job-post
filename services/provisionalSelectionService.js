@@ -11,6 +11,34 @@ const cronService = require('./cronService');
 const documentVerificationService = require('./documentVerificationService');
 
 class ProvisionalSelectionService {
+
+  async assertGeneratedMerit(application, transaction) {
+    const meritEntry = await db.MeritList.findOne({
+      where: {
+        application_id: application.application_id,
+        recruitment_drive_id: application.recruitment_drive_id
+      },
+      include: [{
+        model: db.MeritGenerationRun,
+        as: 'generationRun',
+        required: true,
+        where: { status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] } }
+      }],
+      transaction
+    });
+    if (!meritEntry) {
+      throw new ApiError(409, 'Generate the merit list before reviewing or selecting this application');
+    }
+    return meritEntry;
+  }
+
+  async assertSelectionOpen(application, transaction) {
+    const drive = await db.RecruitmentDrive.findByPk(application.recruitment_drive_id, { transaction });
+    if (!drive || !['APPLICATION_CLOSED', 'MERIT_GENERATED', 'SELECTION'].includes(drive.status)) {
+      throw new ApiError(409, 'Close applications before provisional or final selection');
+    }
+    return drive;
+  }
   
   /**
    * Record stage entry in ApplicationStageHistory
@@ -82,6 +110,8 @@ class ProvisionalSelectionService {
 
       // Check if documents are verified (required for provisional selection)
       if (action === 'PROVISIONAL_SELECT') {
+        await this.assertGeneratedMerit(application, transaction);
+        await this.assertSelectionOpen(application, transaction);
         const summary = await documentVerificationService.getVerificationSummary(applicationId);
         if (summary.total === 0) {
           // No documents to verify; mark as verified to allow progression
@@ -161,6 +191,21 @@ class ProvisionalSelectionService {
 
       await transaction.commit();
 
+      if (newStatus === APPLICATION_STATUS.PROVISIONAL_SELECTED) {
+        await require('./notificationService').notifyApplicant(application.applicant_id, {
+          title: 'Provisionally selected',
+          message: `You have been provisionally selected for ${application.post?.post_name || 'the applied post'}.`,
+          title_mr: 'तात्पुरती निवड झाली',
+          message_mr: `${application.post?.post_name_mr || application.post?.post_name || 'अर्ज केलेल्या पदासाठी'} आपली तात्पुरती निवड झाली आहे.`,
+          notification_type: 'SELECTION',
+          event_code: 'APPLICATION_PROVISIONAL_SELECTED',
+          action_url: '/dashboard/applied-posts',
+          recruitment_drive_id: application.recruitment_drive_id,
+          application_id: application.application_id,
+          post_id: application.post_id
+        });
+      }
+
       logger.info(`Application ${applicationId} moved to ${newStatus} by admin ${adminId}`);
 
       return {
@@ -225,6 +270,9 @@ class ProvisionalSelectionService {
         };
       }
 
+      await this.assertGeneratedMerit(application, transaction);
+      await this.assertSelectionOpen(application, transaction);
+
       // Validate current status
       if (application.status !== APPLICATION_STATUS.PROVISIONAL_SELECTED) {
         throw new ApiError(400, `Can only perform final selection from PROVISIONAL_SELECTED status. Current: ${application.status}`);
@@ -244,14 +292,14 @@ class ProvisionalSelectionService {
           lock: transaction.LOCK.UPDATE
         });
 
-        if (!post || post.is_deleted) {
-          throw new ApiError(404, 'Post not found');
-        }
+          if (!post || post.is_deleted) {
+            throw new ApiError(404, 'Post not found');
+          }
 
-        // Check if post is active and not closed
-        if (!post.is_active) {
-          throw new ApiError(400, 'Post is not active for applications');
-        }
+          const activeDrive = await require('./recruitmentDriveService').requireActiveDrive({ transaction });
+          if (post.recruitment_drive_id !== activeDrive.recruitment_drive_id) {
+            throw new ApiError(409, 'Post does not belong to the active recruitment drive');
+          }
 
         // Simple logic: use filled_positions from post master
         const totalPositions = post.total_positions || 0;
@@ -333,6 +381,18 @@ class ProvisionalSelectionService {
           applicationId,
           application.post_id
         );
+        await require('./notificationService').notifyApplicant(application.applicant_id, {
+          title: 'Final selection confirmed',
+          message: `You have been selected for ${application.post?.post_name || 'the applied post'}.`,
+          title_mr: 'अंतिम निवड निश्चित झाली',
+          message_mr: `${application.post?.post_name_mr || application.post?.post_name || 'अर्ज केलेल्या पदासाठी'} आपली अंतिम निवड झाली आहे.`,
+          notification_type: 'SELECTION',
+          event_code: 'APPLICATION_SELECTED',
+          action_url: '/dashboard/applied-posts',
+          recruitment_drive_id: application.recruitment_drive_id,
+          application_id: application.application_id,
+          post_id: application.post_id
+        });
       }
 
       logger.info(`Application ${applicationId} ${action === 'SELECT' ? 'selected' : 'rejected'} by admin ${adminId}`);

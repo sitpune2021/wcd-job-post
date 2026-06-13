@@ -63,6 +63,7 @@ module.exports = {
   createApplication: applicationService.createApplication,
   finalSubmitApplication: applicationService.finalSubmitApplication,
   getApplications: applicationService.getApplications,
+  getApplicationStatusList: applicationService.getApplicationStatusList,
   getApplicationById: applicationService.getApplicationById,
   getStatistics: applicationService.getStatistics
 };

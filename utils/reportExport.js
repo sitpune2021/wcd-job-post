@@ -26,7 +26,7 @@ const sendXlsxFromRows = async (res, filename, columns, rows) => {
   res.end();
 };
 
-const sendPdfFromHtml = async (res, filename, html) => {
+const sendPdfFromHtml = async (res, filename, html, options = {}) => {
   try {
     const pdfBuffer = await htmlToPdf.generatePdf(
       { content: html },
@@ -44,7 +44,8 @@ const sendPdfFromHtml = async (res, filename, html) => {
     }
     
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+    const disposition = options.inline ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}.pdf"`);
     res.setHeader('Content-Length', Buffer.byteLength(pdfBuffer));
     return res.status(200).send(pdfBuffer);
   } catch (error) {

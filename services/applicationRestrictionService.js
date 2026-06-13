@@ -1,558 +1,160 @@
 /**
- * Application Restriction Service
- * Handles validation for application limits based on post names and scheme locations
- * 
+ * Application restrictions for the active recruitment drive.
+ *
  * Rules:
- * 1. All applications must be in the same district
- * 2. Max 2 distinct post names across all schemes combined
- * 3. For each post name, max 2 different scheme locations
- * 4. Total max 4 applications (2 post names × 2 locations each)
- * 5. Location = scheme_id (unified approach for all operational units)
- * 
- * Example valid 4 applications in same district:
- * - "Case Worker" at OSC-1 (scheme_type: OSC)
- * - "Case Worker" at HUB-3 (scheme_type: HUB) (same post name, different location)
- * - "Centre Administrator" at OSC-2 (different post name)
- * - "Centre Administrator" at HUB-1 (same post name, different location)
+ * - Applicant may apply to any number of distinct posts.
+ * - Every application in the active drive must use the district selected by
+ *   the applicant's first active-drive application.
+ * - The same post cannot be applied to twice in the same drive.
+ * - Payment records do not participate in application restrictions.
  */
-
 const db = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
-const Scheme = require('../models/Scheme');
+const recruitmentDriveService = require('./recruitmentDriveService');
 
 class ApplicationRestrictionService {
-
-  constructor() {
-    // Get limits from ENV with defaults
-    // MAX_DISTINCT_POST_NAMES: Max different post names (e.g., Case Worker, Centre Administrator)
-    // MAX_SCHEMES_PER_POST_NAME: Max locations per post name (all schemes combined, default 2)
-    this.MAX_DISTINCT_POST_NAMES = parseInt(process.env.MAX_DISTINCT_POST_NAMES) || 2;
-    this.MAX_SCHEMES_PER_POST_NAME = parseInt(process.env.MAX_SCHEMES_PER_POST_NAME) || 2;
-  }
-
-  /**
-   * Check if applicant can apply to a specific post
-   * @param {number} applicantId - Applicant ID
-   * @param {number} postId - Post ID to apply for
-   * @param {number} districtId - District ID from request body (for accurate comparison)
-   * @returns {Promise<Object>} - { allowed: boolean, reason: string, details: object }
-   */
   async canApplyToPost(applicantId, postId, districtId = null) {
     try {
-      logger.info('[canApplyToPost] start', { applicantId, postId, districtId });
-      // Get the post details (scheme-only approach)
-      const targetPost = await db.PostMaster.unscoped().findOne({
-        where: { post_id: postId },
+      const drive = await recruitmentDriveService.assertApplicationsOpen();
+      const targetPost = await db.PostMaster.findOne({
+        where: {
+          post_id: postId,
+          recruitment_drive_id: drive.recruitment_drive_id,
+          is_deleted: false
+        },
         include: [
-          {
-            model: Scheme,
-            as: 'scheme',
-            include: [
-              {
-                model: db.SchemeType,
-                as: 'schemeType',
-                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-                required: true
-              }
-            ],
-            attributes: ['scheme_id', 'scheme_code', 'scheme_name'],
-            required: true
-          },
-          { model: db.DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name'] }
+          { model: db.Scheme, as: 'scheme', required: true },
+          { model: db.DistrictMaster, as: 'district', required: false }
         ]
       });
 
       if (!targetPost) {
-        logger.warn('[canApplyToPost] post not found', { postId });
-        return {
-          allowed: false,
-          reason: 'Post not found',
-          details: {}
-        };
+        return { allowed: false, reason: 'Post is not part of the active recruitment drive', details: {} };
+      }
+      if (!targetPost.is_active || targetPost.is_closed) {
+        return { allowed: false, reason: 'This post is closed for applications', details: {} };
       }
 
-      // For district comparison, use the district_id from request body when provided
-      // This ensures consistency with existing applications
-      const targetDistrictId = districtId !== null ? districtId : targetPost.district_id;
-      const targetPostName = targetPost.post_name;
-      
-      // Scheme-only approach: All posts must have a scheme assignment
-      if (!targetPost.scheme || !targetPost.scheme.schemeType) {
-        return {
-          allowed: false,
-          reason: 'Post scheme assignment not configured. Please contact admin.',
-          details: {}
-        };
+      const targetDistrictId = Number(targetPost.district_id || targetPost.scheme?.district_id);
+      if (!targetDistrictId) {
+        return { allowed: false, reason: 'Post district is not configured', details: {} };
       }
-      
-      const targetLocationId = targetPost.scheme.scheme_id;
-      const targetLocationType = 'scheme';
+      if (districtId && Number(districtId) !== targetDistrictId) {
+        return { allowed: false, reason: 'Selected district does not match the post district', details: {} };
+      }
 
-      // Get all existing applications for this applicant
-      const existingApplications = await db.Application.findAll({
+      const applications = await db.Application.findAll({
         where: {
           applicant_id: applicantId,
+          recruitment_drive_id: drive.recruitment_drive_id,
           is_deleted: false,
-          status: { [Op.notIn]: ['WITHDRAWN', 'REJECTED'] } // Don't count withdrawn/rejected
+          status: { [Op.notIn]: ['WITHDRAWN'] }
         },
-        include: [
-          {
-            model: db.PostMaster,
-            as: 'post',
-            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
-            include: [
-              {
-                model: Scheme,
-                as: 'scheme',
-                include: [
-                  {
-                    model: db.SchemeType,
-                    as: 'schemeType',
-                    attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-                    required: true
-                  }
-                ],
-                attributes: ['scheme_id', 'scheme_code', 'scheme_name'],
-                required: true
-              },
-              {
-                model: db.DistrictMaster,
-                as: 'district',
-                attributes: ['district_id', 'district_name']
-              }
-            ]
-          },
-          {
-            model: db.ApplicantMaster,
-            as: 'applicant',
-            required: false, // LEFT JOIN to keep applications even if applicant record missing
-            include: [
-              {
-                model: db.ApplicantPersonal,
-                as: 'personal',
-                required: false,
-                attributes: ['full_name']
-              }
-            ]
-          }
-        ]
+        include: [{
+          model: db.PostMaster,
+          as: 'post',
+          required: false,
+          include: [{ model: db.DistrictMaster, as: 'district', required: false }]
+        }],
+        order: [['created_at', 'ASC'], ['application_id', 'ASC']]
       });
 
-      // === EARLY BLOCK: If applicant is SELECTED in any post, block all new applications ===
-      const selectedApplication = existingApplications.find(app => app.status === 'SELECTED');
-      if (selectedApplication) {
-        const selectedPostName = selectedApplication.post?.post_name || 'a post';
-        logger.warn('[canApplyToPost] applicant already SELECTED', { 
-          applicantId, 
-          selectedApplicationId: selectedApplication.application_id,
-          selectedPostId: selectedApplication.post_id,
-          selectedPostName 
-        });
-        return {
-          allowed: false,
-          reason: `You have already been selected for "${selectedPostName}". Selected candidates cannot apply to additional posts.`,
-          details: {
-            selectedApplicationId: selectedApplication.application_id,
-            selectedPostId: selectedApplication.post_id,
-            selectedPostName,
-            selectedAt: selectedApplication.selected_at
-          }
-        };
-      }
-
-      // Include pending/success payments as in-flight applications to prevent bypass
-      const paymentRows = await db.Payment.findAll({
-        where: {
-          applicant_id: applicantId,
-          is_deleted: false,
-          payment_status: { [Op.in]: ['PENDING', 'SUCCESS'] }
-        },
-        include: [
-          {
-            model: db.PostMaster,
-            as: 'post',
-            required: false, // LEFT JOIN to keep payments even if post is null
-            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
-            include: [
-              {
-                model: db.Scheme,
-                as: 'scheme',
-                required: true,
-                attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
-                include: [{
-                  model: db.SchemeType,
-                  as: 'schemeType',
-                  attributes: ['scheme_type_id', 'scheme_code'],
-                  required: true
-                }]
-              },
-              {
-                model: db.DistrictMaster,
-                as: 'district',
-                required: false,
-                attributes: ['district_id', 'district_name']
-              }
-            ]
-          }
-        ]
-      });
-
-      // Normalize pending/success payments into application-like records
-      const paymentApplications = paymentRows
-        .filter(p => p.post)
-        .map(p => ({
-          application_id: `PAY-${p.payment_id}`,
-          applicant_id: p.applicant_id,
-          post_id: p.post_id,
-          district_id: p.district_id,
-          status: `PAYMENT_${p.payment_status}`,
-          post: p.post
-        }));
-
-      // Combine actual applications + in-flight payments
-      const combinedApplications = [...existingApplications, ...paymentApplications];
-
-      // === EARLY BLOCK: If applicant is SELECTED in any post, block all new applications (already checked above, but keep for safety) ===
-      const selectedInCombined = combinedApplications.find(app => app.status === 'SELECTED');
-      if (selectedInCombined) {
-        const selectedPostName = selectedInCombined.post?.post_name || 'a post';
-        return {
-          allowed: false,
-          reason: `You have already been selected for "${selectedPostName}". Selected candidates cannot apply to additional posts.`,
-          details: {
-            selectedApplicationId: selectedInCombined.application_id,
-            selectedPostId: selectedInCombined.post_id,
-            selectedPostName,
-            selectedAt: selectedInCombined.selected_at
-          }
-        };
-      }
-
-      logger.info('[canApplyToPost] existingApplications', {
-        count: combinedApplications.length,
-        applicationsCount: existingApplications.length,
-        paymentCount: paymentApplications.length,
-        targetDistrictId,
-        targetPostName,
-        targetSchemeId
-      });
-
-      // Check if already applied to this exact post (exclude all payment records)
-      const alreadyApplied = combinedApplications.some(app => 
-        app.post_id === postId && 
-        !app.status.startsWith('PAYMENT_')
-      );
-      
-      // Debug logging
-      logger.warn('[canApplyToPost] checking already applied', {
-        applicantId,
-        postId,
-        combinedApplicationsCount: combinedApplications.length,
-        matchingApps: combinedApplications.filter(app => app.post_id === postId).map(app => ({
-          application_id: app.application_id,
-          post_id: app.post_id,
-          status: app.status,
-          isPayment: app.status.startsWith('PAYMENT_')
-        })),
-        alreadyApplied
-      });
-      
-      if (alreadyApplied) {
-        logger.warn('[canApplyToPost] already applied to post', { postId });
+      if (applications.some((application) => Number(application.post_id) === Number(postId))) {
         return {
           allowed: false,
           reason: 'You have already applied to this post',
-          details: { alreadyApplied: true }
+          details: { alreadyApplied: true, recruitmentDriveId: drive.recruitment_drive_id }
         };
       }
 
-      // If no existing applications (ignore pending payments), allow
-      const realApplications = combinedApplications.filter(app => !app.status.startsWith('PAYMENT_'));
-      if (realApplications.length === 0) {
-        logger.info('[canApplyToPost] no existing applications, allow');
+      const firstApplication = applications[0];
+      const lockedDistrictId = firstApplication ? Number(firstApplication.district_id) : null;
+      if (lockedDistrictId && lockedDistrictId !== targetDistrictId) {
         return {
-          allowed: true,
-          reason: 'First application',
+          allowed: false,
+          reason: `All applications in this recruitment must be in the same district`,
           details: {
-            existingApplicationsCount: 0,
-            distinctPostNames: 0,
-            targetPostName,
+            recruitmentDriveId: drive.recruitment_drive_id,
+            existingDistrictId: lockedDistrictId,
+            existingDistrictName: firstApplication.post?.district?.district_name || null,
             targetDistrictId
           }
         };
       }
 
-      // Get district from first application (prefer stored application district, fallback to scheme/post)
-      const firstApp = combinedApplications[0];
-      const firstAppDistrictId = firstApp.district_id || firstApp.post?.district_id || firstApp.post?.scheme?.district_id;
-
-      // Rule 1: All applications must be in same district
-      if (targetDistrictId !== firstAppDistrictId) {
-        logger.warn('[canApplyToPost] district mismatch', { firstAppDistrictId, targetDistrictId });
-        return {
-          allowed: false,
-          reason: `All applications must be in the same district. You have already applied in ${firstApp.post?.district?.district_name || 'another district'}`,
-          details: {
-            existingDistrictId: firstAppDistrictId,
-            targetDistrictId,
-            existingDistrictName: firstApp.post?.district?.district_name || firstApp.post?.scheme?.district?.district_name,
-            targetDistrictName: targetPost.district?.district_name || targetPost.scheme?.district?.district_name
-          }
-        };
-      }
-
-      // Group applications by post name (exclude payment records from location limits)
-      const postNameGroups = this.groupApplicationsByPostName(combinedApplications.filter(app => !app.status.startsWith('PAYMENT_')));
-
-      // Check if applying to existing post name
-      const isExistingPostName = postNameGroups.hasOwnProperty(targetPostName);
-
-      if (isExistingPostName) {
-        // Rule 2: Check OSC limit for this post name
-        const existingOSCsForPostName = postNameGroups[targetPostName];
-
-        // Check if already applied to this location (Scheme-only) for this post name
-        const alreadyAppliedToThisLocation = existingOSCsForPostName.some(
-          app => {
-            // Scheme-only approach: All posts must have a scheme assignment
-            if (!app.post.scheme || !app.post.scheme.schemeType) {
-              logger.warn('Application with missing scheme assignment found', {
-                applicationId: app.application_id,
-                postId: app.post_id
-              });
-              return false;
-            }
-            
-            const appLocationId = app.post.scheme.scheme_id;
-            return appLocationId === targetLocationId;
-          }
-        );
-
-        if (alreadyAppliedToThisLocation) {
-          const locationName = targetPost.scheme.schemeType.scheme_code; // 'OSC' or 'HUB'
-          
-          return {
-            allowed: false,
-            reason: `You have already applied to "${targetPostName}" in this ${locationName}`,
-            details: {
-              postName: targetPostName,
-              locationId: targetLocationId,
-              locationType: targetLocationType,
-              locationName: locationName
-            }
-          };
+      return {
+        allowed: true,
+        reason: firstApplication ? 'Application allowed in selected district' : 'First application selects district',
+        details: {
+          recruitmentDriveId: drive.recruitment_drive_id,
+          targetDistrictId,
+          restrictedToDistrict: lockedDistrictId || targetDistrictId,
+          existingApplicationsCount: applications.length,
+          unlimitedApplications: true
         }
-
-        // Check if location limit reached for this post name
-        if (existingOSCsForPostName.length >= this.MAX_SCHEMES_PER_POST_NAME) {
-          return {
-            allowed: false,
-            reason: `You have reached the maximum limit of ${this.MAX_SCHEMES_PER_POST_NAME} location applications for "${targetPostName}"`,
-            details: {
-              postName: targetPostName,
-              currentLocationCount: existingOSCsForPostName.length,
-              maxLocationAllowed: this.MAX_SCHEMES_PER_POST_NAME,
-              existingLocations: existingOSCsForPostName.map(app => ({
-                locationName: app.post.scheme?.scheme_name,
-                locationType: app.post.scheme?.schemeType?.scheme_code || 'SCHEME',
-                applicationNo: app.application_no
-              }))
-            }
-          };
-        }
-
-        // Allow - applying to same post name, different location, within limit
-        const locationName = targetPost.scheme?.schemeType?.scheme_code || 'SCHEME';
-        return {
-          allowed: true,
-          reason: `Applying to "${targetPostName}" in a different ${locationName} (${existingOSCsForPostName.length + 1}/${this.MAX_SCHEMES_PER_POST_NAME})`,
-          details: {
-            postName: targetPostName,
-            isNewPostName: false,
-            currentLocationCount: existingOSCsForPostName.length,
-            maxLocationAllowed: this.MAX_SCHEMES_PER_POST_NAME
-          }
-        };
-      } else {
-        // Rule 3: Check distinct post name limit
-        const distinctPostNameCount = Object.keys(postNameGroups).length;
-
-        if (distinctPostNameCount >= this.MAX_DISTINCT_POST_NAMES) {
-          return {
-            allowed: false,
-            reason: `You have reached the maximum limit of ${this.MAX_DISTINCT_POST_NAMES} distinct post names. You have already applied to: ${Object.keys(postNameGroups).join(', ')}`,
-            details: {
-              currentDistinctPostNames: distinctPostNameCount,
-              maxDistinctPostNames: this.MAX_DISTINCT_POST_NAMES,
-              existingPostNames: Object.keys(postNameGroups)
-            }
-          };
-        }
-
-        // Allow - new post name, within limit
-        return {
-          allowed: true,
-          reason: `Applying to new post name "${targetPostName}" (${distinctPostNameCount + 1}/${this.MAX_DISTINCT_POST_NAMES})`,
-          details: {
-            postName: targetPostName,
-            isNewPostName: true,
-            currentDistinctPostNames: distinctPostNameCount,
-            maxDistinctPostNames: this.MAX_DISTINCT_POST_NAMES
-          }
-        };
-      }
-
+      };
     } catch (error) {
       logger.error('Error checking application restrictions:', error);
       throw error;
     }
   }
 
-  /**
-   * Group applications by post name
-   * @param {Array} applications - Array of application records with post details
-   * @returns {Object} - { postName: [applications] }
-   */
-  groupApplicationsByPostName(applications) {
-    const groups = {};
-
-    for (const app of applications) {
-      const postName = app.post?.post_name;
-      if (!postName) continue;
-
-      if (!groups[postName]) {
-        groups[postName] = [];
-      }
-      groups[postName].push(app);
-    }
-
-    return groups;
-  }
-
-  /**
-   * Get application summary for an applicant
-   * @param {number} applicantId - Applicant ID
-   * @returns {Promise<Object>} - Summary of applications and limits
-   */
   async getApplicationSummary(applicantId) {
-    try {
-      const existingApplications = await db.Application.findAll({
-        where: {
-          applicant_id: applicantId,
-          is_deleted: false,
-          status: { [Op.notIn]: ['WITHDRAWN', 'REJECTED'] }
-        },
+    const drive = await recruitmentDriveService.requireActiveDrive();
+    const applications = await db.Application.findAll({
+      where: {
+        applicant_id: applicantId,
+        recruitment_drive_id: drive.recruitment_drive_id,
+        is_deleted: false,
+        status: { [Op.notIn]: ['WITHDRAWN'] }
+      },
+      include: [{
+        model: db.PostMaster,
+        as: 'post',
         include: [
-          {
-            model: db.PostMaster,
-            as: 'post',
-            attributes: ['post_id', 'post_name', 'scheme_id', 'district_id'],
-            include: [
-              {
-                model: db.Scheme,
-                as: 'scheme',
-                attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
-                include: [{
-                  model: db.SchemeType,
-                  as: 'schemeType',
-                  attributes: ['scheme_type_id', 'scheme_code'],
-                  required: true
-                }]
-              },
-              {
-                model: db.DistrictMaster,
-                as: 'district',
-                attributes: ['district_id', 'district_name']
-              }
-            ]
-          }
+          { model: db.Scheme, as: 'scheme', required: false },
+          { model: db.DistrictMaster, as: 'district', required: false }
         ]
-      });
+      }],
+      order: [['created_at', 'ASC'], ['application_id', 'ASC']]
+    });
 
-      const postNameGroups = this.groupApplicationsByPostName(existingApplications);
-      const distinctPostNameCount = Object.keys(postNameGroups).length;
-
-      // Get district from first application
-      let districtId = null;
-      let districtName = null;
-      if (existingApplications.length > 0) {
-        const firstApp = existingApplications[0];
-        districtId = firstApp.post?.scheme?.district_id || firstApp.post?.district_id;
-        districtName = firstApp.post?.district?.district_name || firstApp.post?.scheme?.district?.district_name;
-      }
-
-      return {
-        totalApplications: existingApplications.length,
-        distinctPostNames: distinctPostNameCount,
-        maxDistinctPostNames: this.MAX_DISTINCT_POST_NAMES,
-        maxSchemesPerPostName: this.MAX_SCHEMES_PER_POST_NAME,
-        canApplyToNewPostName: distinctPostNameCount < this.MAX_DISTINCT_POST_NAMES,
-        restrictedToDistrict: districtId,
-        restrictedToDistrictName: districtName,
-        postNameBreakdown: Object.keys(postNameGroups).map(postName => ({
-          postName,
-          applicationCount: postNameGroups[postName].length,
-          canApplyToMoreSchemes: postNameGroups[postName].length < this.MAX_SCHEMES_PER_POST_NAME,
-          applications: postNameGroups[postName].map(app => ({
-            applicationNo: app.application_no,
-            status: app.status,
-            schemeName: app.post?.scheme?.scheme_name,
-            schemeType: app.post?.scheme?.schemeType?.scheme_code,
-            postId: app.post_id
-          }))
-        }))
-      };
-
-    } catch (error) {
-      logger.error('Error getting application summary:', error);
-      throw error;
-    }
+    const first = applications[0];
+    return {
+      recruitmentDriveId: drive.recruitment_drive_id,
+      recruitmentDriveName: drive.drive_name,
+      applicationsOpen: drive.applications_open,
+      totalApplications: applications.length,
+      unlimitedApplications: true,
+      maxDistinctPostNames: null,
+      maxSchemesPerPostName: null,
+      canApplyToNewPostName: drive.applications_open,
+      restrictedToDistrict: first?.district_id || null,
+      restrictedToDistrictName: first?.post?.district?.district_name || null,
+      applications: applications.map((application) => ({
+        applicationId: application.application_id,
+        applicationNo: application.application_no,
+        status: application.status,
+        postId: application.post_id,
+        postName: application.post?.post_name,
+        schemeName: application.post?.scheme?.scheme_name
+      }))
+    };
   }
 
-  /**
-   * Get available posts for an applicant based on restrictions
-   * @param {number} applicantId - Applicant ID
-   * @returns {Promise<Object>} - Available posts and restrictions
-   */
   async getAvailablePostsForApplicant(applicantId) {
-    try {
-      const summary = await this.getApplicationSummary(applicantId);
-
-      // If no applications yet, all open posts are available
-      if (summary.totalApplications === 0) {
-        return {
-          canApplyToAnyDistrict: true,
-          canApplyToAnyPost: true,
-          restrictions: {
-            districtId: null,
-            existingPostNames: []
-          }
-        };
-      }
-
-      // Build restrictions
-      const restrictions = {
+    const summary = await this.getApplicationSummary(applicantId);
+    return {
+      canApplyToAnyDistrict: summary.totalApplications === 0,
+      canApplyToAnyPost: summary.applicationsOpen,
+      restrictions: {
         districtId: summary.restrictedToDistrict,
         districtName: summary.restrictedToDistrictName,
-        existingPostNames: summary.postNameBreakdown.map(p => p.postName),
-        canApplyToNewPostName: summary.canApplyToNewPostName,
-        postNamesWithOSCAvailable: summary.postNameBreakdown
-          .filter(p => p.canApplyToMoreOSC)
-          .map(p => p.postName)
-      };
-
-      return {
-        canApplyToAnyDistrict: false,
-        canApplyToAnyPost: false,
-        restrictions,
-        summary
-      };
-
-    } catch (error) {
-      logger.error('Error getting available posts:', error);
-      throw error;
-    }
+        unlimitedApplications: true
+      },
+      summary
+    };
   }
 }
 

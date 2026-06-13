@@ -60,6 +60,11 @@ const ApplicantEducation = sequelize.define('ApplicantEducation', {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: true
   },
+  cgpa: {
+    type: DataTypes.DECIMAL(3, 2),
+    allowNull: true,
+    comment: 'Applicant-entered CGPA; percentage stores the calculated equivalent'
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW

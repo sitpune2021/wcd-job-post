@@ -9,9 +9,11 @@ const applicantService = require('../services/applicant');
 const eligibilityService = require('../services/eligibilityService');
 const acknowledgementService = require('../services/applicant/acknowledgementService');
 const applicationRestrictionService = require('../services/applicationRestrictionService');
+const applicationPreferenceService = require('../services/applicationPreferenceService');
 const { upload } = require('../utils/fileUpload');
 const { uploadRateLimiter } = require('../config/rateLimiters');
 const logger = require('../config/logger');
+const notificationService = require('../services/notificationService');
 const {
   toBool,
   buildFileUrl,
@@ -25,6 +27,31 @@ const ocrVerificationService = require('../services/ocr/ocrVerificationService')
 // All routes require authentication
 router.use(authenticate);
 router.use(requireRole('APPLICANT'));
+
+router.get('/notifications', async (req, res, next) => {
+  try {
+    const applicant_id = req.user.applicant_id;
+    const [notifications, unread_count] = await Promise.all([
+      notificationService.list({ applicant_id, is_read: false }, req.query),
+      notificationService.unreadCount({ applicant_id })
+    ]);
+    return ApiResponse.success(res, { notifications, unread_count }, 'Notifications retrieved');
+  } catch (error) { next(error); }
+});
+
+router.patch('/notifications/read-all', async (req, res, next) => {
+  try {
+    await notificationService.markRead({ applicant_id: req.user.applicant_id });
+    return ApiResponse.success(res, null, 'Notifications marked as read');
+  } catch (error) { next(error); }
+});
+
+router.patch('/notifications/:id/read', async (req, res, next) => {
+  try {
+    await notificationService.markRead({ applicant_id: req.user.applicant_id }, req.params.id);
+    return ApiResponse.success(res, null, 'Notification marked as read');
+  } catch (error) { next(error); }
+});
 
 // ==================== DASHBOARD ====================
 
@@ -619,29 +646,6 @@ router.get('/posts/eligible', auditLog('VIEW_ELIGIBLE_POSTS'), async (req, res, 
     res.set('Surrogate-Control', 'no-store');
     res.set('ETag', `W/"${Date.now()}"`);
     
-    // Check if applicant is also an employee
-    const db = require('../models');
-    const { EmployeeMaster } = require('../modules/hrm/models');
-    
-    const employee = await EmployeeMaster.findOne({
-      where: { 
-        applicant_id: req.user.applicant_id,
-        is_deleted: false 
-      },
-      attributes: ['employee_id', 'employee_code', 'onboarding_status']
-    });
-    
-    if (employee) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are an employee and cannot view posts. Employees cannot apply for posts.',
-        data: {
-          employee_code: employee.employee_code,
-          onboarding_status: employee.onboarding_status
-        }
-      });
-    }
-    
     const onlyEligible = req.query.only_eligible !== 'false';
     const includeLocked = req.query.include_locked === 'true';
     const page = req.query.page;
@@ -827,7 +831,7 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
         post_id,
         is_deleted: false
       },
-      attributes: ['post_id', 'post_name', 'district_id', 'female_only', 'male_only', 'scheme_id', 'is_active'],
+      attributes: ['post_id', 'post_name', 'district_id', 'female_only', 'male_only', 'scheme_id', 'is_active', 'is_closed', 'recruitment_drive_id'],
       include: [
         { model: db.Scheme, as: 'scheme', required: true, attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
           include: [{
@@ -845,7 +849,7 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
     }
 
     // Validate post is active BEFORE taking payment
-    if (!post.is_active) {
+    if (!post.is_active || post.is_closed) {
       return res.status(400).json({
         success: false,
         message: 'This post is no longer accepting applications',
@@ -897,57 +901,9 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
       });
     }
 
-    // === STEP 6: Get Post Details ===
-    const paymentService = require('../services/paymentService');
-    
-    const finalDistrictId = district_id || post.district_id;
+    // === STEP 6: Free application flow ===
+    const finalDistrictId = post.district_id;
 
-    // === STEP 7: Check Payment Requirement ===
-    // Payment required only for distinct post names (max 2)
-    // Same post name in same district = FREE (no additional payment)
-    const paymentCheck = await paymentService.checkPaymentRequired(
-      req.user.applicant_id,
-      post_id,
-      post.post_name,
-      finalDistrictId
-    );
-
-    // === CASE A: PAYMENT REQUIRED ===
-    // Create Razorpay order and store application data in payment metadata
-    // Application will be created later in verify-payment API after payment success
-    if (paymentCheck.required) {
-      const paymentOrder = await paymentService.createPaymentOrder(
-        req.user.applicant_id,
-        post_id,
-        post.post_name,
-        finalDistrictId,
-        {
-          declaration_accepted,
-          place: place.trim(),
-          ip_address: req.ip,
-          user_agent: req.get('user-agent')
-        }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: 'Validation successful. Payment required.',
-        paymentRequired: true,
-        paymentOrder: {
-          razorpay_order_id: paymentOrder.razorpay_order_id,
-          amount: paymentOrder.amount,
-          breakdown: paymentOrder.breakdown,
-          razorpay_key_id: paymentOrder.razorpay_key_id
-        },
-        post: {
-          post_id: post.post_id,
-          post_name: post.post_name,
-          district_id: finalDistrictId
-        }
-      });
-    }
-
-    // === CASE B: NO PAYMENT REQUIRED ===
     // Directly create application + acknowledgement in single transaction
     // No need to call verify-payment API
     const transaction = await db.sequelize.transaction();
@@ -959,7 +915,11 @@ router.post('/applications/apply', auditLog('APPLY_APPLICATION'), async (req, re
 
       // Check if already applied to this post
       const existing = await db.Application.findOne({
-        where: { applicant_id: req.user.applicant_id, post_id },
+        where: {
+          applicant_id: req.user.applicant_id,
+          post_id,
+          recruitment_drive_id: post.recruitment_drive_id
+        },
         transaction
       });
 
@@ -1295,6 +1255,33 @@ router.get('/applications/summary', auditLog('VIEW_APPLICATION_SUMMARY'), async 
       success: true,
       data: summary
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/applications/preferences', auditLog('VIEW_APPLICATION_PREFERENCES'), async (req, res, next) => {
+  try {
+    const preferences = await applicationPreferenceService.listPreferences(req.user.applicant_id);
+    return ApiResponse.success(res, preferences, 'Application preferences retrieved');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/applications/preferences', auditLog('UPDATE_APPLICATION_PREFERENCES'), async (req, res, next) => {
+  try {
+    const payload = req.body?.preferences ?? req.body;
+    const preferences = Array.isArray(payload)
+      ? payload
+      : Object.keys(payload || {}).every((key) => /^\d+$/.test(key))
+        ? Object.values(payload)
+        : payload;
+    const savedPreferences = await applicationPreferenceService.replacePreferences(
+      req.user.applicant_id,
+      preferences
+    );
+    return ApiResponse.success(res, savedPreferences, 'Application preferences updated');
   } catch (error) {
     next(error);
   }

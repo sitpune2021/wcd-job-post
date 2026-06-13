@@ -7,6 +7,9 @@ const router = express.Router();
 
 router.use('/applicants', require('./applicants'));
 router.use('/dashboard', require('./dashboard'));
+router.use('/recruitment-drives', require('./recruitmentDrives'));
+router.use('/portal-settings', require('./portalSettings'));
+router.use('/notifications', require('./notifications'));
 
 // Legacy fallback (keep last)
 router.use(require('./legacy'));

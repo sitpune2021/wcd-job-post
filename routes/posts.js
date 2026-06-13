@@ -121,12 +121,12 @@ router.post('/:id/close', authenticate, requirePermission(['posts.close']), asyn
 // Reopen post (reactivate for new recruitment cycle)
 router.post('/:id/reopen', authenticate, requirePermission(['posts.edit']), async (req, res, next) => {
   try {
-    const { resetFilledPositions = true, newClosingDate = null, clearApplications = false } = req.body;
+    const { newClosingDate = null } = req.body;
     
     const post = await postService.reopenPost(
       req.params.id, 
       req.user.admin_id, 
-      { resetFilledPositions, newClosingDate, clearApplications }
+      { newClosingDate }
     );
     
     return ApiResponse.success(res, post, 'Post reopened successfully for new recruitment cycle');

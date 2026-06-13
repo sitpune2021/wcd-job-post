@@ -12,7 +12,7 @@ const { ApiError } = require('../../middleware/errorHandler');
 const { Op } = require('sequelize');
 const path = require('path');
 const fs = require('fs');
-const { getRelativePath, getAbsolutePath } = require('../../utils/fileUpload');
+const { getRelativePath, getAbsolutePath, optimizeUploadedImage } = require('../../utils/fileUpload');
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -33,6 +33,7 @@ const toPublicUploadPath = (filePath) => {
  */
 const saveDocument = async (applicantId, fileData, docTypeInfo) => {
   try {
+    fileData = await optimizeUploadedImage(fileData);
     const { doc_type_id, doc_type } = docTypeInfo;
 
     // If only doc_type_id is provided, resolve doc_type from DocumentType

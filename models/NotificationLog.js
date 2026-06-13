@@ -31,6 +31,20 @@ const NotificationLog = sequelize.define('NotificationLog', {
     type: DataTypes.TEXT,
     allowNull: false
   },
+  title: DataTypes.STRING(255),
+  title_mr: DataTypes.STRING(255),
+  message_mr: DataTypes.TEXT,
+  notification_type: DataTypes.STRING(40),
+  event_code: DataTypes.STRING(60),
+  action_url: DataTypes.STRING(500),
+  recruitment_drive_id: DataTypes.INTEGER,
+  application_id: DataTypes.INTEGER,
+  post_id: DataTypes.INTEGER,
+  is_read: { type: DataTypes.BOOLEAN, defaultValue: false },
+  read_at: DataTypes.DATE,
+  metadata: DataTypes.JSONB,
+  is_deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deleted_at: DataTypes.DATE,
   status: {
     type: DataTypes.STRING(20),
     defaultValue: 'PENDING'
@@ -42,7 +56,10 @@ const NotificationLog = sequelize.define('NotificationLog', {
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW
-  }
+  },
+  created_by: DataTypes.INTEGER,
+  updated_at: DataTypes.DATE,
+  updated_by: DataTypes.INTEGER
 }, {
   tableName: 'ms_notification_log',
   timestamps: false

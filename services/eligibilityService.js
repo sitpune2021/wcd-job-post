@@ -871,6 +871,7 @@ class EligibilityService {
    */
   async getEligiblePosts(applicantId, options = {}, legacyIncludeLocked) {
     try {
+      const recruitmentDriveService = require('./recruitmentDriveService');
       let normalizedOptions = {};
       if (typeof options === 'boolean' || typeof legacyIncludeLocked === 'boolean') {
         normalizedOptions = {
@@ -894,6 +895,22 @@ class EligibilityService {
       const limitNumber = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
       const searchTerm = search ? search.toString().trim().toLowerCase() : '';
       const districtFilterId = Number.isFinite(parseInt(districtId, 10)) ? parseInt(districtId, 10) : null;
+      const activeDrive = await recruitmentDriveService.getActiveDrive();
+      if (!activeDrive) {
+        return {
+          posts: [],
+          pagination: { total: 0, page: pageNumber, limit: limitNumber, totalPages: 0 },
+          total: 0,
+          total_posts: 0,
+          eligible_count: 0,
+          filters: {
+            only_eligible: !!onlyEligible,
+            include_locked: !!includeLocked,
+            search: searchTerm || null,
+            district_id: districtFilterId
+          }
+        };
+      }
 
       logger.info('getEligiblePosts request', {
         applicantId,
@@ -910,6 +927,7 @@ class EligibilityService {
       const lockedApps = await db.Application.findAll({
         where: {
           applicant_id: applicantId,
+          recruitment_drive_id: activeDrive.recruitment_drive_id,
           is_locked: true,
           is_deleted: false
         },
@@ -926,6 +944,7 @@ class EligibilityService {
 
       const postWhereClause = {
         is_active: true,
+        recruitment_drive_id: activeDrive.recruitment_drive_id,
         is_deleted: false
       };
 

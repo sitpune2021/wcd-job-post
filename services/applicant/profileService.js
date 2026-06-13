@@ -22,7 +22,7 @@ const {
 } = db;
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
-const { getRelativePath, getAbsolutePath } = require('../../utils/fileUpload');
+const { getRelativePath, getAbsolutePath, optimizeUploadedImage } = require('../../utils/fileUpload');
 const { Op } = require('sequelize');
 const documentService = require('./documentService');
 const eligibilityService = require('../eligibilityService');
@@ -31,22 +31,7 @@ const path = require('path');
 const fs = require('fs');
 const EducationLevel = require('../../models/EducationLevel');
 
-const isProfileLocked = async (applicantId) => {
-  const count = await Application.count({
-    where: {
-      applicant_id: applicantId,
-      is_deleted: false
-    }
-  });
-  return (count || 0) > 0;
-};
-
-const assertProfileEditable = async (applicantId) => {
-  const locked = await isProfileLocked(applicantId);
-  if (locked) {
-    throw new ApiError(403, 'Profile is locked after applying. You can only upload required documents.');
-  }
-};
+const { isProfileLocked, assertProfileEditable } = require('./profileEditPolicy');
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -93,6 +78,7 @@ const replacePersonalFile = async (applicantId, fileData, columnName, options = 
     validate(personal);
   }
 
+  fileData = await optimizeUploadedImage(fileData);
   const relativePath = getRelativePath(fileData.path).replace(/\\/g, '/');
 
   if (personal[columnName]) {
@@ -406,8 +392,8 @@ const getDashboard = async (applicantId) => {
     // Optimized: Cache per user for 5 minutes, and only fetch count not full data
     let eligiblePostsCount = 0;
     let eligibleTime = 0;
+    const eligibleStart = Date.now();
     try {
-      const eligibleStart = Date.now();
       // Cache removed - always query fresh
       // Use a direct optimized query instead of full eligibility check
       const eligiblePostsData = await eligibilityService.getEligiblePosts(applicantId, {
@@ -614,18 +600,33 @@ const savePersonalProfile = async (applicantId, data) => {
       if (normalizedMobile.length !== 10) {
         throw new ApiError(400, 'Mobile number must be 10 digits');
       }
+      const duplicateMobile = await ApplicantMaster.findOne({
+        where: { mobile_no: normalizedMobile, applicant_id: { [Op.ne]: applicantId }, is_deleted: false },
+        attributes: ['applicant_id']
+      });
+      if (duplicateMobile) throw new ApiError(409, 'This mobile number is already registered to another applicant.');
       await ApplicantMaster.update({ mobile_no: normalizedMobile }, { where: { applicant_id: applicantId } });
+    }
+
+    if (aadhar_no) {
+      const normalizedAadhaar = String(aadhar_no).replace(/\s/g, '');
+      const duplicateAadhaar = await ApplicantPersonal.findOne({
+        where: { aadhar_no: normalizedAadhaar, applicant_id: { [Op.ne]: applicantId }, is_deleted: false },
+        attributes: ['applicant_id']
+      });
+      if (duplicateAadhaar) throw new ApiError(409, 'This Aadhaar number is already registered to another applicant.');
+      data.aadhar_no = normalizedAadhaar;
     }
 
     if (personal) {
       await personal.update({
         full_name, dob, gender, domicile_maharashtra: normalizedDomicile,
-        aadhar_no, father_name, mother_name, marital_status
+        aadhar_no: data.aadhar_no || aadhar_no, father_name, mother_name, marital_status
       });
     } else {
       personal = await ApplicantPersonal.create({
         applicant_id: applicantId, full_name, dob, gender, domicile_maharashtra: normalizedDomicile,
-        aadhar_no, father_name, mother_name, marital_status
+        aadhar_no: data.aadhar_no || aadhar_no, father_name, mother_name, marital_status
       });
     }
 

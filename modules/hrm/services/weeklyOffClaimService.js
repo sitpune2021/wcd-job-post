@@ -387,6 +387,33 @@ async function autoApproveWeeklyOffClaims() {
       try {
         transaction = await db.sequelize.transaction();
 
+        const existingAttendance = await Attendance.findOne({
+          where: {
+            employee_id: claim.employee_id,
+            attendance_date: claim.claimed_off_date
+          },
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+        if (existingAttendance) {
+          await claim.update({
+            claim_status: 'REJECTED',
+            approved_by: null,
+            approved_at: new Date(),
+            admin_remarks: 'Auto-rejected because attendance already exists for the claimed date',
+            auto_approved: false,
+            attendance_id: existingAttendance.attendance_id,
+            updated_by: null
+          }, { transaction });
+          await transaction.commit();
+          logger.warn('Weekly off claim auto-rejected because attendance exists', {
+            claimId: claim.claim_id,
+            employeeId: claim.employee_id,
+            attendanceId: existingAttendance.attendance_id
+          });
+          continue;
+        }
+
         // Create attendance record
         const attendanceRecord = await Attendance.create({
           employee_id: claim.employee_id,

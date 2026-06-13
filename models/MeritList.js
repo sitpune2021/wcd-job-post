@@ -15,6 +15,14 @@ const MeritList = sequelize.define('MeritList', {
       key: 'application_id'
     }
   },
+  recruitment_drive_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  merit_run_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   post_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -32,7 +40,7 @@ const MeritList = sequelize.define('MeritList', {
     }
   },
   score: {
-    type: DataTypes.DECIMAL(10, 2),
+    type: DataTypes.DECIMAL(20, 4),
     allowNull: true,
     comment: 'Total composite score for ranking'
   },
@@ -86,7 +94,21 @@ const MeritList = sequelize.define('MeritList', {
   generated_by: {
     type: DataTypes.INTEGER,
     allowNull: true
-  }
+  },
+  generation_version: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1
+  },
+  preference_rank: DataTypes.INTEGER,
+  score_snapshot: DataTypes.JSONB,
+  is_official: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  published_at: DataTypes.DATE,
+  published_by: DataTypes.INTEGER
 }, {
   tableName: 'ms_merit_lists',
   timestamps: false

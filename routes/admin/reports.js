@@ -24,6 +24,7 @@ router.use(authenticate);
 router.get('/post-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_POST_WISE'), async (req, res, next) => {
   try {
     const rows = await reportsService.getPostWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
@@ -126,6 +127,7 @@ router.delete('/post-selected/:postId/allotment-upload', requirePermission('repo
 router.get('/post-selected', requirePermission('reports.view'), auditLog('VIEW_REPORT_POST_SELECTED'), async (req, res, next) => {
   try {
     const rows = await reportsService.getPostSelectedCandidatesReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
@@ -340,6 +342,7 @@ router.get('/post-wise/export', requirePermission('reports.view'), auditLog('EXP
     }
 
     const rows = await reportsService.getPostWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
@@ -377,6 +380,7 @@ router.post('/post-wise/export', requirePermission('reports.view'), auditLog('EX
     }
 
     const rows = await reportsService.getPostWiseReport({
+      recruitment_drive_id: req.body?.recruitment_drive_id ?? req.query.recruitment_drive_id,
       scheme_id: req.body?.scheme_id ?? req.query.scheme_id,
       district_id: req.body?.district_id ?? req.query.district_id,
       post_id: req.body?.post_id ?? req.query.post_id
@@ -412,6 +416,7 @@ router.post('/post-wise/export', requirePermission('reports.view'), auditLog('EX
 router.get('/district-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_DISTRICT_WISE'), async (req, res, next) => {
   try {
     const rows = await reportsService.getDistrictWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
@@ -432,6 +437,7 @@ router.get('/district-wise/export', requirePermission('reports.view'), auditLog(
     }
 
     const rows = await reportsService.getDistrictWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
@@ -460,6 +466,7 @@ router.get('/district-wise/export', requirePermission('reports.view'), auditLog(
 router.get('/scheme-wise', requirePermission('reports.view'), auditLog('VIEW_REPORT_SCHEME_WISE'), async (req, res, next) => {
   try {
     const rows = await reportsService.getSchemeWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
@@ -480,6 +487,7 @@ router.get('/scheme-wise/export', requirePermission('reports.view'), auditLog('E
     }
 
     const rows = await reportsService.getSchemeWiseReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id
     });
@@ -518,6 +526,7 @@ router.get('/post-selected/export', requirePermission('reports.view'), auditLog(
     }
 
     const rows = await reportsService.getPostSelectedCandidatesReport({
+      recruitment_drive_id: req.query.recruitment_drive_id,
       scheme_id: req.query.scheme_id,
       district_id: req.query.district_id,
       post_id: req.query.post_id
@@ -583,6 +592,7 @@ router.post('/post-selected/export', requirePermission('reports.view'), auditLog
     }
 
     const rows = await reportsService.getPostSelectedCandidatesReport({
+      recruitment_drive_id: req.body?.recruitment_drive_id ?? req.query.recruitment_drive_id,
       scheme_id: req.body?.scheme_id ?? req.query.scheme_id,
       district_id: req.body?.district_id ?? req.query.district_id,
       post_id: req.body?.post_id ?? req.query.post_id

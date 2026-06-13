@@ -16,6 +16,14 @@ const Application = sequelize.define('Application', {
       key: 'applicant_id'
     }
   },
+  recruitment_drive_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_recruitment_drives',
+      key: 'recruitment_drive_id'
+    }
+  },
   post_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -140,7 +148,7 @@ const Application = sequelize.define('Application', {
     allowNull: true
   },
   merit_score: {
-    type: DataTypes.DECIMAL(10, 2),
+    type: DataTypes.DECIMAL(20, 4),
     allowNull: true,
     comment: 'Calculated merit score for ranking'
   },
@@ -166,6 +174,10 @@ const Application = sequelize.define('Application', {
     type: DataTypes.TEXT,
     allowNull: true,
     comment: 'Reason for auto-rejection (e.g., selected in other post)'
+  },
+  profile_snapshot: {
+    type: DataTypes.JSONB,
+    allowNull: true
   },
   created_at: {
     type: DataTypes.DATE,

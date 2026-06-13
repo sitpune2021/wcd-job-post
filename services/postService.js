@@ -10,6 +10,7 @@ const { postMasterService } = require('./masters');
 // Get all posts (public - only active)
 const getAllPosts = async (filters = {}, language = 'en') => {
   try {
+    const activeDrive = await require('./recruitmentDriveService').getActiveDrive();
     let query = `
       SELECT 
         p.post_id,
@@ -49,6 +50,11 @@ const getAllPosts = async (filters = {}, language = 'en') => {
     `;
 
     const replacements = {};
+
+    if (activeDrive && !filters.includeAllDrives) {
+      query += ` AND p.recruitment_drive_id = :recruitment_drive_id`;
+      replacements.recruitment_drive_id = activeDrive.recruitment_drive_id;
+    }
 
     if (!filters.includeInactive) {
       query += ` AND p.is_active = true`;
@@ -209,8 +215,10 @@ const getPostById = async (postId, language = 'en') => {
 // Create post
 const createPost = async (data, userId) => {
   try {
+    const activeDrive = await require('./recruitmentDriveService').requireActiveDrive();
     const [result] = await sequelize.query(
       `INSERT INTO ms_post_master (
+        recruitment_drive_id,
         post_name, post_name_mr, description, description_mr,
         min_qualification, min_experience_months, required_domains,
         experience_domain_id,
@@ -220,6 +228,7 @@ const createPost = async (data, userId) => {
         is_active, created_by, created_at, updated_at
       )
       VALUES (
+        :recruitment_drive_id,
         :post_name, :post_name_mr, :description, :description_mr,
         :min_qualification, :min_experience_months, :required_domains,
         :experience_domain_id,
@@ -231,6 +240,7 @@ const createPost = async (data, userId) => {
       RETURNING *`,
       {
         replacements: {
+          recruitment_drive_id: activeDrive.recruitment_drive_id,
           post_name: data.post_name,
           post_name_mr: data.post_name_mr || null,
           description: data.description || null,
@@ -387,13 +397,26 @@ const publishPost = async (postId, userId) => {
 // Close post (deactivate)
 const closePost = async (postId, userId) => {
   try {
+    const activeDrive = await require('./recruitmentDriveService').requireActiveDrive();
     const [result] = await sequelize.query(
       `UPDATE ms_post_master 
-       SET is_active = false, updated_by = :updated_by, updated_at = NOW()
-       WHERE post_id = :postId AND is_deleted = false
+       SET is_active = false,
+           is_closed = true,
+           closed_at = NOW(),
+           closed_by = :closed_by,
+           updated_by = :updated_by,
+           updated_at = NOW()
+         WHERE post_id = :postId
+           AND recruitment_drive_id = :recruitmentDriveId
+           AND is_deleted = false
        RETURNING post_id, post_name, is_active`,
       {
-        replacements: { postId, updated_by: userId }
+          replacements: {
+            postId,
+            recruitmentDriveId: activeDrive.recruitment_drive_id,
+            updated_by: userId,
+            closed_by: `ADMIN_${userId}`
+          }
       }
     );
 
@@ -412,14 +435,17 @@ const closePost = async (postId, userId) => {
 // Reopen post (reactivate for new recruitment cycle)
 const reopenPost = async (postId, userId, options = {}) => {
   try {
-    const { resetFilledPositions = true, newClosingDate = null, clearApplications = false } = options;
+    const activeDrive = await require('./recruitmentDriveService').assertApplicationsOpen();
+    const { newClosingDate = null } = options;
     
     // Get current post details
     const [postDetails] = await sequelize.query(
       `SELECT post_id, post_name, total_positions, filled_positions, closing_date, is_active, is_closed
-       FROM ms_post_master 
-       WHERE post_id = :postId AND is_deleted = false`,
-      { replacements: { postId } }
+         FROM ms_post_master 
+         WHERE post_id = :postId
+           AND recruitment_drive_id = :recruitmentDriveId
+           AND is_deleted = false`,
+        { replacements: { postId, recruitmentDriveId: activeDrive.recruitment_drive_id } }
     );
 
     if (postDetails.length === 0) {
@@ -438,13 +464,11 @@ const reopenPost = async (postId, userId, options = {}) => {
       'updated_at = NOW()'
     ];
     
-    let replacements = { postId, updated_by: userId };
-
-    // Reset filled positions if requested
-    if (resetFilledPositions) {
-      updateFields.push('filled_positions = 0');
-      logger.info(`Resetting filled positions for post ${postId} from ${post.filled_positions} to 0`);
-    }
+      let replacements = {
+        postId,
+        recruitmentDriveId: activeDrive.recruitment_drive_id,
+        updated_by: userId
+      };
 
     // Set new closing date if provided
     if (newClosingDate) {
@@ -453,26 +477,13 @@ const reopenPost = async (postId, userId, options = {}) => {
       logger.info(`Setting new closing date for post ${postId}: ${newClosingDate}`);
     }
 
-    // Clear/reject pending applications if requested
-    if (clearApplications) {
-      await sequelize.query(
-        `UPDATE ms_applications 
-         SET status = 'REJECTED', 
-             rejection_reason = 'Post reopened - previous cycle closed',
-             updated_at = NOW()
-         WHERE post_id = :postId 
-         AND status NOT IN ('SELECTED', 'REJECTED')
-         AND is_deleted = false`,
-        { replacements: { postId } }
-      );
-      logger.info(`Cleared pending applications for reopened post ${postId}`);
-    }
-
     // Update the post
     const [result] = await sequelize.query(
       `UPDATE ms_post_master 
        SET ${updateFields.join(', ')}
-       WHERE post_id = :postId AND is_deleted = false
+         WHERE post_id = :postId
+           AND recruitment_drive_id = :recruitmentDriveId
+           AND is_deleted = false
        RETURNING post_id, post_name, is_active, filled_positions, closing_date`,
       { replacements }
     );
@@ -484,9 +495,7 @@ const reopenPost = async (postId, userId, options = {}) => {
     const reopenedPost = result[0];
     
     logger.info(`Post reopened: ${postId} (${reopenedPost.post_name}) by user ${userId}`, {
-      resetFilledPositions,
       newClosingDate,
-      clearApplications,
       newStatus: {
         is_active: reopenedPost.is_active,
         filled_positions: reopenedPost.filled_positions,

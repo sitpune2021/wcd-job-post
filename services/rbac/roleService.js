@@ -230,14 +230,29 @@ const updateRole = async (roleId, data, updatedBy) => {
  */
 const deleteRole = async (roleId, deletedBy) => {
   try {
-    // Check if role is system role
     const [role] = await sequelize.query(
-      `SELECT is_system_role FROM ms_roles WHERE role_id = :roleId`,
+      `SELECT role_id, is_system_role, is_deleted FROM ms_roles WHERE role_id = :roleId`,
       { replacements: { roleId } }
     );
 
-    if (role.length > 0 && role[0].is_system_role) {
+    if (role.length === 0 || role[0].is_deleted) {
+      return false;
+    }
+
+    if (role[0].is_system_role) {
       throw new Error('Cannot delete system role');
+    }
+
+    const [assignedUsers] = await sequelize.query(
+      `SELECT COUNT(*)::integer AS count
+       FROM ms_admin_users
+       WHERE role_id = :roleId AND is_deleted = false`,
+      { replacements: { roleId } }
+    );
+    if (assignedUsers[0]?.count > 0) {
+      const error = new Error(`Cannot delete role because it is assigned to ${assignedUsers[0].count} admin user(s)`);
+      error.statusCode = 409;
+      throw error;
     }
 
     const [result] = await sequelize.query(

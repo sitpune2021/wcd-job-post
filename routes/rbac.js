@@ -168,6 +168,9 @@ router.delete('/roles/:id', authenticate, requirePermission(['roles.delete']), a
     }
     return ApiResponse.deleted(res, 'Role deleted successfully');
   } catch (error) {
+    if (error.statusCode === 409 || error.message === 'Cannot delete system role') {
+      return next(new ApiError(409, error.message));
+    }
     next(error);
   }
 });

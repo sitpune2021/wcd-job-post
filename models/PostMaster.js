@@ -7,6 +7,22 @@ const PostMaster = sequelize.define('PostMaster', {
     primaryKey: true,
     autoIncrement: true
   },
+  recruitment_drive_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_recruitment_drives',
+      key: 'recruitment_drive_id'
+    }
+  },
+  source_post_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_post_master',
+      key: 'post_id'
+    }
+  },
   post_name: {
     type: DataTypes.STRING(100),
     allowNull: false
@@ -177,6 +193,13 @@ const PostMaster = sequelize.define('PostMaster', {
     defaultValue: 0,
     comment: 'Number of positions filled'
   },
+  merit_status: {
+    type: DataTypes.STRING(30),
+    allowNull: false,
+    defaultValue: 'NOT_GENERATED'
+  },
+  merit_published_at: DataTypes.DATE,
+  merit_published_by: DataTypes.INTEGER,
   is_active: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

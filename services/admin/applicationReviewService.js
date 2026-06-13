@@ -33,7 +33,17 @@ const { APPLICATION_STATUS, ACTOR_TYPE } = require('../../constants/applicationS
 const { Op } = require('sequelize');
 const applicantDocumentService = require('../applicant/documentService');
 const { getRelativePath } = require('../../utils/fileUpload');
-const { calculateMeritScore } = require('../applicationWorkflowService');
+
+const statusLabelMr = (status) => ({
+  DRAFT: 'मसुदा',
+  SUBMITTED: 'सादर',
+  ELIGIBLE: 'पात्र',
+  INELIGIBLE: 'अपात्र',
+  ON_HOLD: 'प्रलंबित',
+  PROVISIONAL_SELECTED: 'तात्पुरती निवड',
+  SELECTED: 'निवड',
+  REJECTED: 'नाकारले'
+}[status] || status);
 
 // ==================== POSTS FOR MERIT REVIEW ====================
 
@@ -44,19 +54,28 @@ const { calculateMeritScore } = require('../applicationWorkflowService');
  */
 const getActivePostsWithCounts = async (filters = {}) => {
   try {
+    const reviewDrive = await require('../recruitmentDriveService').getDriveForRead(filters.recruitment_drive_id);
+    if (!reviewDrive) return [];
     // Create cache key
     // Cache removed - always query fresh
 
     const whereClause = {
+      recruitment_drive_id: reviewDrive.recruitment_drive_id,
       is_deleted: false
     };
 
-    if (filters.scheme_id) {
-      whereClause.scheme_id = filters.scheme_id;
+    const scopedSchemeId = filters.adminUser?.scheme_id || filters.scheme_id;
+    const scopedDistrictId = filters.adminUser?.district_id || filters.district_id;
+
+    if (scopedSchemeId) {
+      whereClause.scheme_id = scopedSchemeId;
     }
 
-    if (filters.district_id) {
-      whereClause.district_id = filters.district_id;
+    if (scopedDistrictId) {
+      whereClause.district_id = scopedDistrictId;
+    }
+    if (filters.scheme_type_id) {
+      whereClause['$scheme.schemeType.scheme_type_id$'] = filters.scheme_type_id;
     }
 
     // Text search across post/scheme/district (en + mr)
@@ -84,7 +103,13 @@ const getActivePostsWithCounts = async (filters = {}) => {
         'district_id',
         'post_code',
         'description',
-        'description_mr'
+        'description_mr',
+        'recruitment_drive_id',
+        'total_positions',
+        'filled_positions',
+        'is_active',
+        'is_closed',
+        'merit_status'
       ],
       include: [
         { 
@@ -121,9 +146,28 @@ const getActivePostsWithCounts = async (filters = {}) => {
         COUNT(*) FILTER (WHERE status = 'REJECTED') as rejected_count,
         COUNT(*) as total_count
       FROM ms_applications
-      WHERE post_id IN (:postIds) AND is_deleted = false
+      WHERE post_id IN (:postIds)
+        AND recruitment_drive_id = :recruitmentDriveId
+        AND is_deleted = false
       GROUP BY post_id
-    `, { replacements: { postIds } });
+    `, { replacements: { postIds, recruitmentDriveId: reviewDrive.recruitment_drive_id } });
+
+    const meritRuns = await db.MeritGenerationRun.findAll({
+      where: {
+        post_id: { [Op.in]: postIds },
+        recruitment_drive_id: reviewDrive.recruitment_drive_id,
+        status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] }
+      },
+      order: [['run_number', 'DESC']],
+      attributes: [
+        'merit_run_id', 'post_id', 'run_number', 'run_type', 'status',
+        'is_official', 'total_applications', 'completed_at', 'published_at'
+      ]
+    });
+    const latestRunByPost = new Map();
+    meritRuns.forEach((run) => {
+      if (!latestRunByPost.has(run.post_id)) latestRunByPost.set(run.post_id, run.toJSON());
+    });
 
     const countsMap = countRows.reduce((acc, row) => {
       acc[row.post_id] = row;
@@ -142,6 +186,15 @@ const getActivePostsWithCounts = async (filters = {}) => {
         selected_count: 0,
         rejected_count: 0,
         total_count: 0
+      };
+      postJson.latest_merit_run = latestRunByPost.get(post.post_id) || null;
+      postJson.review_ready = latestRunByPost.has(post.post_id);
+      postJson.recruitment_drive = {
+        recruitment_drive_id: reviewDrive.recruitment_drive_id,
+        drive_code: reviewDrive.drive_code,
+        drive_name: reviewDrive.drive_name,
+        status: reviewDrive.status,
+        is_active: reviewDrive.is_active
       };
       return postJson;
     });
@@ -166,8 +219,6 @@ const getActivePostsWithCounts = async (filters = {}) => {
  */
 const getApplicationsForPost = async (postId, filters = {}) => {
   try {
-    // Cache removed - always query fresh
-
     const {
       status = APPLICATION_STATUS.ELIGIBLE,
       district_id,
@@ -176,17 +227,87 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       limit = 50,
       adminUser
     } = filters;
+    const scopedDistrictId = adminUser?.district_id || district_id;
+    const scopedSchemeId = adminUser?.scheme_id || null;
+    const reviewDrive = await require('../recruitmentDriveService').getDriveForRead(filters.recruitment_drive_id);
+    if (!reviewDrive) {
+      return {
+        applications: [],
+        statusSummary: {},
+        post: null,
+        generationRun: null,
+        batchInfo: null,
+        pagination: { page: Number(page), limit: Number(limit), total: 0, totalPages: 0 }
+      };
+    }
+
+    const postDetails = await PostMaster.findOne({
+      where: {
+        post_id: postId,
+        recruitment_drive_id: reviewDrive.recruitment_drive_id,
+        is_deleted: false,
+        ...(scopedDistrictId ? { district_id: scopedDistrictId } : {}),
+        ...(scopedSchemeId ? { scheme_id: scopedSchemeId } : {})
+      },
+      include: [
+        {
+          model: Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_name_mr'],
+          include: [{
+            model: SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: true
+          }]
+        },
+        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] }
+      ]
+    });
+    if (!postDetails) throw new ApiError(404, 'Post not found in selected recruitment drive');
+
+    const finalDistrictId = parseInt(scopedDistrictId, 10) || postDetails.district_id;
+    const latestRun = await db.MeritGenerationRun.findOne({
+      where: {
+        post_id: postId,
+        recruitment_drive_id: reviewDrive.recruitment_drive_id,
+        district_id: finalDistrictId,
+        status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] }
+      },
+      order: [['run_number', 'DESC']]
+    });
+
+    const lightPost = {
+      post_name: postDetails.post_name,
+      post_code: postDetails.post_code,
+      merit_status: postDetails.merit_status,
+      scheme: postDetails.scheme ? {
+        scheme_name: postDetails.scheme.scheme_name,
+        scheme_type: postDetails.scheme.schemeType?.scheme_code
+      } : null,
+      district: postDetails.district ? { district_name: postDetails.district.district_name } : null
+    };
+    if (!latestRun) {
+      return {
+        applications: [],
+        statusSummary: {},
+        post: lightPost,
+        generationRun: null,
+        batchInfo: null,
+        pagination: { page: Number(page), limit: Number(limit), total: 0, totalPages: 0 }
+      };
+    }
 
     // Build where clause - ONLY truly submitted applications
     const whereClause = {
       post_id: postId,
+      recruitment_drive_id: reviewDrive.recruitment_drive_id,
+      is_deleted: { [Op.ne]: true },
       declaration_accepted: true,
       submitted_at: { [Op.ne]: null }
     };
 
-    // Special handling for ELIGIBLE: show ALL submitted applications
-    // For other statuses: filter by specific status
-    if (status && status !== APPLICATION_STATUS.ELIGIBLE) {
+    if (status) {
       if (Array.isArray(status)) {
         whereClause.status = { [Op.in]: status };
       } else {
@@ -194,8 +315,8 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       }
     }
 
-    if (district_id) {
-      whereClause.district_id = district_id;
+    if (scopedDistrictId) {
+      whereClause.district_id = scopedDistrictId;
     }
 
     // Build applicant search if provided
@@ -212,6 +333,30 @@ const getApplicationsForPost = async (postId, filters = {}) => {
     }
 
     const offset = (page - 1) * limit;
+    let batchInfo = {
+      batch_start: null,
+      batch_end: null,
+      batch_size: null,
+      is_filtered: false,
+      note: 'No rank range assigned - sees all applications'
+    };
+    let queryOffset = offset;
+    let queryLimit = parseInt(limit);
+
+    if (adminUser?.review_batch_start && adminUser?.review_batch_end) {
+      const startRank = adminUser.review_batch_start;
+      const endRank = adminUser.review_batch_end;
+      const batchSize = endRank - startRank + 1;
+      batchInfo = {
+        batch_start: startRank,
+        batch_end: endRank,
+        batch_size: batchSize,
+        is_filtered: true,
+        note: 'Global rank range - applies to all posts'
+      };
+      queryOffset = (startRank - 1) + offset;
+      queryLimit = Math.max(0, Math.min(parseInt(limit), batchSize - offset));
+    }
 
     // Get total count
     const totalCount = await Application.count({
@@ -222,15 +367,31 @@ const getApplicationsForPost = async (postId, filters = {}) => {
         required: false,
         attributes: { exclude: ['password_hash', 'password_reset_token', 'password_reset_token_expires_at', 'activation_token', 'activation_token_expires_at'] },
         include: [{ model: ApplicantPersonal, as: 'personal', required: false }]
-      }]
+      }, {
+        model: db.MeritList,
+        as: 'merit',
+        required: true,
+        where: { merit_run_id: latestRun.merit_run_id },
+        attributes: []
+      }],
+      distinct: true
     });
 
-    // Fetch ALL applications for this post (we'll calculate merit scores and sort in-memory)
+    // Merit is persisted, so sort and paginate in PostgreSQL instead of loading
+    // every application/profile into memory for each review-page request.
     const applications = await Application.findAll({
       where: { ...whereClause, ...applicantWhere },
       include: [
         { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] },
         { model: EligibilityResult, as: 'eligibility', required: false },
+        { model: db.ApplicationPreference, as: 'preference', required: false, attributes: ['preference_rank'] },
+        {
+          model: db.MeritList,
+          as: 'merit',
+          required: true,
+          where: { merit_run_id: latestRun.merit_run_id },
+          attributes: ['rank', 'score', 'preference_rank']
+        },
         { model: PostMaster, as: 'post', required: false },
         {
           model: db.ApplicantMaster,
@@ -268,85 +429,53 @@ const getApplicationsForPost = async (postId, filters = {}) => {
                 ['passing_year', 'DESC']
               ]
             },
-            { model: ApplicantExperience, as: 'experience', required: false }
+            { model: ApplicantExperience, as: 'experience', required: false, separate: true }
           ]
         }
       ],
       order: [
-        ['submitted_at', 'ASC'],
-        ['application_no', 'ASC']
-      ]
+        [{ model: db.MeritList, as: 'merit' }, 'rank', 'ASC']
+      ],
+      limit: queryLimit,
+      offset: queryOffset,
+      subQuery: false
     });
 
-    logger.info(`Calculating merit scores for ${applications.length} applications in post ${postId}`);
-
-    // Calculate merit score for each application in-memory
-    const applicationsWithScores = await Promise.all(applications.map(async (app) => {
-      try {
-        // PERF: Passing the pre-fetched app object avoids N+1 queries for 50,000+ records
-        const score = await calculateMeritScore(app);
-        return { ...app.toJSON(), calculated_merit_score: score };
-      } catch (error) {
-        logger.error(`Failed to calculate merit score for application ${app.application_id}:`, error);
-        return { ...app.toJSON(), calculated_merit_score: 0 };
-      }
-    }));
-
-    // Sort by calculated merit score (descending), then submission time, then app number
-    applicationsWithScores.sort((a, b) => {
-      if (b.calculated_merit_score !== a.calculated_merit_score) {
-        return b.calculated_merit_score - a.calculated_merit_score;
-      }
-      if (a.submitted_at && b.submitted_at) {
-        const timeCompare = new Date(a.submitted_at) - new Date(b.submitted_at);
-        if (timeCompare !== 0) return timeCompare;
-      }
-      return (a.application_no || '').localeCompare(b.application_no || '');
+    // Merit is generated explicitly and stored. Review reads persisted scores
+    // so opening this page never recalculates every application.
+    const applicationsWithScores = applications.map((app) => {
+      const json = app.toJSON();
+      return {
+        ...json,
+        calculated_merit_score: Number(json.merit?.score || 0)
+      };
     });
 
-    // Apply batch filtering if user has assigned batch range
-    let batchInfo = null;
-    let filteredApplications = applicationsWithScores;
-
-    if (adminUser && adminUser.review_batch_start && adminUser.review_batch_end) {
-      const startRank = adminUser.review_batch_start;
-      const endRank = adminUser.review_batch_end;
-
-      // Filter by rank range (1-indexed)
-      filteredApplications = applicationsWithScores.filter((app, index) => {
-        const rank = index + 1; // Convert 0-indexed to 1-indexed rank
-        return rank >= startRank && rank <= endRank;
-      });
-
-      batchInfo = {
-        batch_start: startRank,
-        batch_end: endRank,
-        batch_size: endRank - startRank + 1,
-        is_filtered: true,
-        note: 'Global rank range - applies to all posts'
-      };
-    } else {
-      batchInfo = {
-        batch_start: null,
-        batch_end: null,
-        batch_size: null,
-        is_filtered: false,
-        note: 'No rank range assigned - sees all applications'
-      };
-    }
-
-    // Apply pagination after filtering
-    const paginatedApplications = filteredApplications.slice(offset, offset + parseInt(limit));
+    const paginatedApplications = applicationsWithScores;
+    const filteredTotal = batchInfo.is_filtered
+      ? Math.max(0, Math.min(batchInfo.batch_size, totalCount - batchInfo.batch_start + 1))
+      : totalCount;
 
     // Get status summary for this post (only submitted applications)
     const [statusSummary] = await db.sequelize.query(`
       SELECT status, COUNT(*) as count
       FROM ms_applications
       WHERE post_id = :postId 
+        AND recruitment_drive_id = :recruitmentDriveId
         AND declaration_accepted = true 
         AND submitted_at IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM ms_merit_lists ml
+          WHERE ml.application_id = ms_applications.application_id
+            AND ml.merit_run_id = :meritRunId
+        )
       GROUP BY status
-    `, { replacements: { postId } });
+    `, { replacements: {
+      postId,
+      recruitmentDriveId: reviewDrive.recruitment_drive_id,
+      meritRunId: latestRun.merit_run_id
+    } });
 
     const statusKeys = [
       APPLICATION_STATUS.ELIGIBLE,
@@ -368,23 +497,6 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       }
     });
 
-    const postDetails = await PostMaster.findByPk(postId, {
-      include: [
-        { 
-          model: Scheme, 
-          as: 'scheme', 
-          attributes: ['scheme_id', 'scheme_name', 'scheme_name_mr'],
-          include: [{
-            model: SchemeType,
-            as: 'schemeType',
-            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-            required: true
-          }]
-        },
-        { model: DistrictMaster, as: 'district', attributes: ['district_id', 'district_name', 'district_name_mr'] }
-      ]
-    });
-
     // Batch fetch applicant-level aggregates for the current page to avoid N+1 queries
     const applicantIds = Array.from(new Set(paginatedApplications
       .map((a) => a.applicant_id)
@@ -399,9 +511,10 @@ const getApplicationsForPost = async (postId, filters = {}) => {
         SELECT applicant_id, COUNT(*)::int AS total_applications
         FROM ms_applications
         WHERE applicant_id IN (:applicantIds)
+          AND recruitment_drive_id = :recruitmentDriveId
           AND is_deleted = false
         GROUP BY applicant_id
-      `, { replacements: { applicantIds } });
+      `, { replacements: { applicantIds, recruitmentDriveId: reviewDrive.recruitment_drive_id } });
 
       applicantCountsMap = Object.fromEntries(
         (counts || []).map((row) => [row.applicant_id, row.total_applications])
@@ -424,10 +537,15 @@ const getApplicationsForPost = async (postId, filters = {}) => {
         LEFT JOIN ms_district_master dm ON a.district_id = dm.district_id
         WHERE a.applicant_id IN (:applicantIds)
           AND a.post_id != :currentPostId
+          AND a.recruitment_drive_id = :recruitmentDriveId
           AND a.is_deleted = false
         ORDER BY a.submitted_at DESC
       `, {
-        replacements: { applicantIds, currentPostId: postId }
+        replacements: {
+          applicantIds,
+          currentPostId: postId,
+          recruitmentDriveId: reviewDrive.recruitment_drive_id
+        }
       });
 
       applicantOtherPostsMap = (otherPosts || []).reduce((acc, row) => {
@@ -440,8 +558,8 @@ const getApplicationsForPost = async (postId, filters = {}) => {
     // For each application, attach aggregated applicant data
     const applicationsWithDetails = paginatedApplications.map((app, index) => {
       const appJson = app; // Already JSON from previous step
-      appJson.merit_rank = offset + index + 1;
-      appJson.merit_score = app.calculated_merit_score; // Use calculated score
+      appJson.merit_rank = app.merit?.rank || queryOffset + index + 1;
+      appJson.merit_score = Number(app.merit?.score ?? app.calculated_merit_score);
 
       appJson.applicant_total_applications = applicantCountsMap[appJson.applicant_id] || 0;
       appJson.applicant_other_applications = applicantOtherPostsMap[appJson.applicant_id] || [];
@@ -452,19 +570,6 @@ const getApplicationsForPost = async (postId, filters = {}) => {
     const filteredStatusSummary = Object.fromEntries(
       Object.entries(normalizedStatusSummary).filter(([, v]) => Number(v) > 0)
     );
-
-    // Build lightweight post info
-    const lightPost = postDetails
-      ? {
-        post_name: postDetails.post_name,
-        post_code: postDetails.post_code,
-        scheme: postDetails.scheme ? { 
-          scheme_name: postDetails.scheme.scheme_name,
-          scheme_type: postDetails.scheme.schemeType?.scheme_code
-        } : null,
-        district: postDetails.district ? { district_name: postDetails.district.district_name } : null
-      }
-      : null;
 
     // Trim application fields for response
     const trimmedApplications = applicationsWithDetails.map((app, idx) => {
@@ -498,6 +603,9 @@ const getApplicationsForPost = async (postId, filters = {}) => {
         application_id: app.application_id,
         application_no: app.application_no || null,
         status: app.status,
+        merit_rank: app.merit_rank,
+        merit_score: app.merit_score,
+        preference_rank: app.preference?.preference_rank || null,
         applicant_total_applications: app.applicant_total_applications || 0,
         applicant_other_applications: otherApps,
         applicant: {
@@ -540,12 +648,13 @@ const getApplicationsForPost = async (postId, filters = {}) => {
       applications: trimmedApplications,
       statusSummary: filteredStatusSummary,
       post: lightPost,
+      generationRun: latestRun,
       batchInfo: batchInfo,
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total: filteredApplications.length, // Use filtered count for pagination
-        totalPages: Math.ceil(filteredApplications.length / limit)
+        total: filteredTotal,
+        totalPages: Math.ceil(filteredTotal / limit)
       }
     };
 
@@ -573,10 +682,19 @@ const getAllApplications = async (filters = {}) => {
       district_id,
       search,
       page = 1,
-      limit = 50
+      limit = 50,
+      adminUser
     } = filters;
+    const scopedDistrictId = adminUser?.district_id || district_id;
+    const scopedSchemeId = adminUser?.scheme_id || null;
 
     const whereClause = {};
+    if (String(filters.all_drives) !== 'true') {
+      const reviewDrive = await require('../recruitmentDriveService').getDriveForRead(filters.recruitment_drive_id);
+      if (reviewDrive) {
+        whereClause.recruitment_drive_id = reviewDrive.recruitment_drive_id;
+      }
+    }
 
     if (status) {
       if (Array.isArray(status)) {
@@ -590,9 +708,13 @@ const getAllApplications = async (filters = {}) => {
       whereClause.post_id = post_id;
     }
 
-    if (district_id) {
-      whereClause.district_id = district_id;
+    if (scopedDistrictId) {
+      whereClause.district_id = scopedDistrictId;
     }
+    if (scopedSchemeId) {
+      whereClause['$post.scheme_id$'] = scopedSchemeId;
+    }
+    const statusSummaryWhere = { ...whereClause };
 
     const offset = (page - 1) * limit;
 
@@ -650,9 +772,9 @@ const getAllApplications = async (filters = {}) => {
               as: 'scheme', 
               attributes: ['scheme_id', 'scheme_name'],
               include: [{
-                model: SchemeType,
-                as: 'schemeType',
-                attributes: ['scheme_type_id', 'scheme_code'],
+              model: SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
                 required: true
               }]
             }
@@ -668,11 +790,38 @@ const getAllApplications = async (filters = {}) => {
     });
 
     // Get overall status summary
-    const [statusSummary] = await db.sequelize.query(`
-      SELECT status, COUNT(*) as count
-      FROM ms_applications
-      GROUP BY status
-    `);
+    const statusSummaryIncludes = [];
+    if (search) {
+      statusSummaryIncludes.push(
+        {
+          model: ApplicantMaster,
+          as: 'applicant',
+          attributes: [],
+          required: false,
+          include: [{ model: ApplicantPersonal, as: 'personal', attributes: [], required: false }]
+        },
+        { model: DistrictMaster, as: 'district', attributes: [], required: false }
+      );
+    }
+    if (search || scopedSchemeId) {
+      statusSummaryIncludes.push({
+        model: PostMaster,
+        as: 'post',
+        attributes: [],
+        required: Boolean(scopedSchemeId)
+      });
+    }
+
+    const statusSummary = await Application.findAll({
+      where: statusSummaryWhere,
+      attributes: [
+        'status',
+        [db.sequelize.fn('COUNT', db.sequelize.col('Application.application_id')), 'count']
+      ],
+      include: statusSummaryIncludes,
+      group: ['status'],
+      raw: true
+    });
 
     return {
       applications: rows,
@@ -760,6 +909,20 @@ const bulkUpdateStatus = async (applicationIds, action, options = {}) => {
         created_at: actionTimestamp
       });
 
+      await require('../notificationService').notifyApplicant(application.applicant_id, {
+        title: `Application ${action.replaceAll('_', ' ').toLowerCase()}`,
+        message: `Your application status has changed from ${oldStatus} to ${action}.`,
+        title_mr: 'अर्जाची स्थिती अद्यतनित झाली',
+        message_mr: `आपल्या अर्जाची स्थिती ${statusLabelMr(oldStatus)} वरून ${statusLabelMr(action)} अशी बदलली आहे.`,
+        notification_type: 'APPLICATION',
+        event_code: `APPLICATION_${action}`,
+        action_url: '/dashboard/applied-posts',
+        recruitment_drive_id: application.recruitment_drive_id,
+        application_id: application.application_id,
+        post_id: application.post_id,
+        metadata: { old_status: oldStatus, new_status: action, remarks }
+      });
+
       results.success.push(appId);
     } catch (error) {
       results.failed.push({ id: appId, error: error.message });
@@ -825,6 +988,20 @@ const updateApplicationStatus = async (applicationId, newStatus, options = {}) =
     });
 
     logger.info(`Application ${applicationId} status changed: ${oldStatus} -> ${newStatus} by admin ${adminId}`);
+
+    if (oldStatus !== newStatus) await require('../notificationService').notifyApplicant(application.applicant_id, {
+      title: `Application ${newStatus.replaceAll('_', ' ').toLowerCase()}`,
+      message: `Your application status has changed from ${oldStatus} to ${newStatus}.`,
+      title_mr: 'अर्जाची स्थिती अद्यतनित झाली',
+      message_mr: `आपल्या अर्जाची स्थिती ${statusLabelMr(oldStatus)} वरून ${statusLabelMr(newStatus)} अशी बदलली आहे.`,
+      notification_type: 'APPLICATION',
+      event_code: `APPLICATION_${newStatus}`,
+      action_url: '/dashboard/applied-posts',
+      recruitment_drive_id: application.recruitment_drive_id,
+      application_id: application.application_id,
+      post_id: application.post_id,
+      metadata: { old_status: oldStatus, new_status: newStatus, remarks }
+    });
 
     // Reload with associations
     await application.reload();

@@ -186,6 +186,22 @@ class DocumentVerificationService {
       if (!application) {
         throw new ApiError(404, 'Application not found');
       }
+      const meritEntry = await db.MeritList.findOne({
+        where: {
+          application_id: applicationId,
+          recruitment_drive_id: application.recruitment_drive_id
+        },
+        include: [{
+          model: db.MeritGenerationRun,
+          as: 'generationRun',
+          required: true,
+          where: { status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] } }
+        }],
+        transaction
+      });
+      if (!meritEntry) {
+        throw new ApiError(409, 'Generate the merit list before document verification');
+      }
 
       const verificationResults = [];
 
@@ -237,6 +253,22 @@ class DocumentVerificationService {
       await transaction.commit();
 
       logger.info(`Documents verified for application ${applicationId} by admin ${verifiedBy}`);
+      await require('./notificationService').notifyApplicant(application.applicant_id, {
+        title: allVerified ? 'Documents verified' : 'Document verification updated',
+        message: allVerified
+          ? 'All required documents for your application have been verified.'
+          : 'Your application document verification has been updated. Please review your application.',
+        title_mr: allVerified ? 'कागदपत्रांची पडताळणी पूर्ण' : 'कागदपत्र पडताळणी अद्यतनित',
+        message_mr: allVerified
+          ? 'आपल्या अर्जासाठी आवश्यक सर्व कागदपत्रांची पडताळणी झाली आहे.'
+          : 'आपल्या अर्जाच्या कागदपत्र पडताळणीमध्ये बदल झाला आहे. कृपया आपला अर्ज तपासा.',
+        notification_type: 'DOCUMENT',
+        event_code: allVerified ? 'DOCUMENTS_VERIFIED' : 'DOCUMENTS_UPDATED',
+        action_url: '/dashboard/applied-posts',
+        recruitment_drive_id: application.recruitment_drive_id,
+        application_id: application.application_id,
+        post_id: application.post_id
+      });
 
       return {
         success: true,

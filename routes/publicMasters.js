@@ -3,12 +3,107 @@
  * These endpoints provide read-only access to master data for applicant portal
  * No authentication required for basic lookups
  */
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const db = require('../models');
-const { ApiError } = require('../middleware/errorHandler');
-const ApiResponse = require('../utils/ApiResponse');
-const { Op } = require('sequelize');
+
+router.get("/recruitment-drive/current", async (_req, res, next) => {
+  try {
+    const recruitmentDriveService = require("../services/recruitmentDriveService");
+    const drive = await recruitmentDriveService.getActiveDrive();
+    const now = new Date();
+    const registrationControlEnabled = await recruitmentDriveService.followsRegistrationWindow();
+    const registrationAvailable = !registrationControlEnabled || Boolean(
+      drive &&
+      drive.status === "OPEN" &&
+      drive.registration_open &&
+      (!drive.registration_start_at || now >= new Date(drive.registration_start_at)) &&
+      (!drive.registration_end_at || now <= new Date(drive.registration_end_at))
+    );
+    const applicationsAvailable = Boolean(
+      drive &&
+      drive.status === "OPEN" &&
+      drive.applications_open &&
+      (!drive.application_start_at || now >= new Date(drive.application_start_at)) &&
+      (!drive.application_end_at || now <= new Date(drive.application_end_at))
+    );
+    return res.status(200).json({
+      success: true,
+      data: {
+        registration_control_enabled: registrationControlEnabled,
+        registration_available: registrationAvailable,
+        applications_available: applicationsAvailable,
+        ...(drive ? {
+            recruitment_drive_id: drive.recruitment_drive_id,
+            drive_code: drive.drive_code,
+            drive_name: drive.drive_name,
+            status: drive.status,
+            registration_open: drive.registration_open,
+            applications_open: drive.applications_open,
+            application_start_at: drive.application_start_at,
+            application_end_at: drive.application_end_at,
+          } : {}),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+const db = require("../models");
+const { ApiError } = require("../middleware/errorHandler");
+const ApiResponse = require("../utils/ApiResponse");
+const { Op } = require("sequelize");
+const {
+  sendPdfFromHtml,
+  buildSimpleReportHtml,
+  sanitizeFileName,
+} = require("../utils/reportExport");
+
+router.get("/posts/:postId/published-merit", async (req, res, next) => {
+  try {
+    const result =
+      await require("../services/meritListService").getPublishedMeritList(
+        parseInt(req.params.postId),
+      );
+    return ApiResponse.success(res, result, "Published merit list retrieved");
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/posts/:postId/published-merit.pdf", async (req, res, next) => {
+  try {
+    const result =
+      await require("../services/meritListService").getPublishedMeritList(
+        parseInt(req.params.postId),
+      );
+    const rows = result.meritList.map((item) => ({
+      // rank: item.rank,
+      application_no: item.application?.application_no || "",
+      applicant_name: item.application?.applicant?.personal?.full_name || "",
+      applied_date: item.application?.submitted_at
+        ? new Date(item.application.submitted_at).toLocaleDateString("en-GB", {
+            timeZone: "Asia/Kolkata",
+          })
+        : "",
+    }));
+    const title = `Published Merit List - ${result.post?.post_name || result.post?.post_code || req.params.postId}`;
+    const html = buildSimpleReportHtml(
+      title,
+      [
+        // { key: 'rank', header: 'Rank', width: 10 },
+        { key: "application_no", header: "Application No.", width: 30 },
+        { key: "applicant_name", header: "Applicant Name", width: 35 },
+        { key: "applied_date", header: "Applied Date", width: 25 },
+      ],
+      rows,
+    );
+    return sendPdfFromHtml(res, sanitizeFileName(title), html, {
+      inline: true,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ==================== EDUCATION LEVELS ====================
 
@@ -17,20 +112,33 @@ const { Op } = require('sequelize');
  * @desc Get all education levels for dropdown
  * @access Public
  */
-router.get('/education-levels', async (req, res, next) => {
+router.get("/education-levels", async (req, res, next) => {
   try {
     const levels = await db.EducationLevel.findAll({
       where: { is_active: true },
-      attributes: ['level_id', 'doc_type_id', 'level_code', 'level_name', 'level_name_mr', 'level_category', 'display_order'],
+      attributes: [
+        "level_id",
+        "doc_type_id",
+        "level_code",
+        "level_name",
+        "level_name_mr",
+        "level_category",
+        "display_order",
+      ],
       include: [
         {
           model: db.DocumentType,
-          as: 'documentType',
+          as: "documentType",
           required: false,
-          attributes: ['doc_type_id', 'doc_type_code', 'doc_type_name', 'doc_type_name_mr']
-        }
+          attributes: [
+            "doc_type_id",
+            "doc_type_code",
+            "doc_type_name",
+            "doc_type_name_mr",
+          ],
+        },
       ],
-      order: [['display_order', 'ASC']]
+      order: [["display_order", "ASC"]],
     });
 
     const result = levels.map((l) => {
@@ -40,7 +148,7 @@ router.get('/education-levels', async (req, res, next) => {
         documentType: undefined,
         doc_type_code: row.documentType?.doc_type_code || null,
         doc_type_name: row.documentType?.doc_type_name || null,
-        doc_type_name_mr: row.documentType?.doc_type_name_mr || null
+        doc_type_name_mr: row.documentType?.doc_type_name_mr || null,
       };
     });
 
@@ -55,26 +163,39 @@ router.get('/education-levels', async (req, res, next) => {
  * @desc Get education levels grouped by category
  * @access Public
  */
-router.get('/education-levels/grouped', async (req, res, next) => {
+router.get("/education-levels/grouped", async (req, res, next) => {
   try {
     const levels = await db.EducationLevel.findAll({
       where: { is_active: true },
-      attributes: ['level_id', 'doc_type_id', 'level_code', 'level_name', 'level_name_mr', 'level_category', 'display_order'],
+      attributes: [
+        "level_id",
+        "doc_type_id",
+        "level_code",
+        "level_name",
+        "level_name_mr",
+        "level_category",
+        "display_order",
+      ],
       include: [
         {
           model: db.DocumentType,
-          as: 'documentType',
+          as: "documentType",
           required: false,
-          attributes: ['doc_type_id', 'doc_type_code', 'doc_type_name', 'doc_type_name_mr']
-        }
+          attributes: [
+            "doc_type_id",
+            "doc_type_code",
+            "doc_type_name",
+            "doc_type_name_mr",
+          ],
+        },
       ],
-      order: [['display_order', 'ASC']]
+      order: [["display_order", "ASC"]],
     });
 
     // Group by category
     const grouped = levels.reduce((acc, level) => {
       const row = level.toJSON();
-      const category = row.level_category || 'Other';
+      const category = row.level_category || "Other";
       if (!acc[category]) {
         acc[category] = [];
       }
@@ -83,7 +204,7 @@ router.get('/education-levels/grouped', async (req, res, next) => {
         documentType: undefined,
         doc_type_code: row.documentType?.doc_type_code || null,
         doc_type_name: row.documentType?.doc_type_name || null,
-        doc_type_name_mr: row.documentType?.doc_type_name_mr || null
+        doc_type_name_mr: row.documentType?.doc_type_name_mr || null,
       });
       return acc;
     }, {});
@@ -101,40 +222,51 @@ router.get('/education-levels/grouped', async (req, res, next) => {
  * @desc Get all experience domains for dropdown
  * @access Public
  */
-router.get('/experience-domains', async (req, res, next) => {
+router.get("/experience-domains", async (req, res, next) => {
   try {
-    const lang = (req.query.lang || 'en').toLowerCase();
+    const lang = (req.query.lang || "en").toLowerCase();
 
     const domains = await db.ExperienceDomain.findAll({
       where: { is_active: true },
       attributes: [
-        'id',
-        'doc_type_id',
-        'domain_code',
-        'domain_name',
-        'domain_name_mr',
-        'description',
-        'description_mr',
-        'display_order'
+        "id",
+        "doc_type_id",
+        "domain_code",
+        "domain_name",
+        "domain_name_mr",
+        "description",
+        "description_mr",
+        "display_order",
       ],
       include: [
         {
           model: db.DocumentType,
-          as: 'documentType',
+          as: "documentType",
           required: false,
-          attributes: ['doc_type_id', 'doc_type_code', 'doc_type_name', 'doc_type_name_mr']
-        }
+          attributes: [
+            "doc_type_id",
+            "doc_type_code",
+            "doc_type_name",
+            "doc_type_name_mr",
+          ],
+        },
       ],
-      order: [['display_order', 'ASC']]
+      order: [["display_order", "ASC"]],
     });
 
     const result = domains.map((d) => {
       const row = d.toJSON();
-      const localizedName = lang === 'mr' && row.domain_name_mr ? row.domain_name_mr : row.domain_name;
-      const localizedDescription = lang === 'mr' && row.description_mr ? row.description_mr : row.description;
+      const localizedName =
+        lang === "mr" && row.domain_name_mr
+          ? row.domain_name_mr
+          : row.domain_name;
+      const localizedDescription =
+        lang === "mr" && row.description_mr
+          ? row.description_mr
+          : row.description;
 
       const localizedDocTypeName =
-        lang === 'mr' && row.documentType?.doc_type_name_mr
+        lang === "mr" && row.documentType?.doc_type_name_mr
           ? row.documentType.doc_type_name_mr
           : row.documentType?.doc_type_name;
 
@@ -147,7 +279,7 @@ router.get('/experience-domains', async (req, res, next) => {
         doc_type_code: row.documentType?.doc_type_code || null,
         doc_type_name: row.documentType?.doc_type_name || null,
         doc_type_name_mr: row.documentType?.doc_type_name_mr || null,
-        doc_type_name_localized: localizedDocTypeName || null
+        doc_type_name_localized: localizedDocTypeName || null,
       };
     });
 
@@ -164,12 +296,19 @@ router.get('/experience-domains', async (req, res, next) => {
  * @desc Get all stream groups for dropdown
  * @access Public
  */
-router.get('/stream-groups', async (req, res, next) => {
+router.get("/stream-groups", async (req, res, next) => {
   try {
     const groups = await db.StreamGroup.findAll({
       where: { is_active: true },
-      attributes: ['id', 'group_code', 'group_name', 'group_name_mr', 'streams', 'display_order'],
-      order: [['display_order', 'ASC']]
+      attributes: [
+        "id",
+        "group_code",
+        "group_name",
+        "group_name_mr",
+        "streams",
+        "display_order",
+      ],
+      order: [["display_order", "ASC"]],
     });
     res.status(200).json(groups);
   } catch (error) {
@@ -184,12 +323,12 @@ router.get('/stream-groups', async (req, res, next) => {
  * @desc Get all districts for dropdown
  * @access Public
  */
-router.get('/districts', async (req, res, next) => {
+router.get("/districts", async (req, res, next) => {
   try {
     const districts = await db.DistrictMaster.findAll({
       where: { is_active: true },
-      attributes: ['district_id', 'district_name', 'district_name_mr'],
-      order: [['district_name', 'ASC']]
+      attributes: ["district_id", "district_name", "district_name_mr"],
+      order: [["district_name", "ASC"]],
     });
     res.status(200).json(districts);
   } catch (error) {
@@ -202,15 +341,15 @@ router.get('/districts', async (req, res, next) => {
  * @desc Get talukas for a district
  * @access Public
  */
-router.get('/districts/:districtId/talukas', async (req, res, next) => {
+router.get("/districts/:districtId/talukas", async (req, res, next) => {
   try {
     const talukas = await db.TalukaMaster.findAll({
-      where: { 
+      where: {
         district_id: req.params.districtId,
-        is_active: true 
+        is_active: true,
       },
-      attributes: ['taluka_id', 'taluka_name', 'taluka_name_mr'],
-      order: [['taluka_name', 'ASC']]
+      attributes: ["taluka_id", "taluka_name", "taluka_name_mr"],
+      order: [["taluka_name", "ASC"]],
     });
     res.status(200).json(talukas);
   } catch (error) {
@@ -223,20 +362,42 @@ router.get('/districts/:districtId/talukas', async (req, res, next) => {
  * @desc Get all non-deleted districts with count of active posts in each district
  * @access Public
  */
-router.get('/district-posts', async (req, res, next) => {
+router.get("/district-posts", async (req, res, next) => {
   try {
-    const page = parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
-    const limit = parseInt(req.query.limit, 10) > 0 ? parseInt(req.query.limit, 10) : 20;
+    const page =
+      parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
+    const limit =
+      parseInt(req.query.limit, 10) > 0 ? parseInt(req.query.limit, 10) : 20;
     const offset = (page - 1) * limit;
 
-    // Get post counts grouped by district
+    const recruitmentDriveService = require("../services/recruitmentDriveService");
+    const drive = await recruitmentDriveService.getActiveDrive();
+    const now = new Date();
+    const applicationsAvailable = Boolean(
+      drive &&
+      drive.status === "OPEN" &&
+      drive.applications_open &&
+      (!drive.application_start_at || now >= new Date(drive.application_start_at)) &&
+      (!drive.application_end_at || now <= new Date(drive.application_end_at))
+    );
+    if (!applicationsAvailable) {
+      return ApiResponse.paginated(res, [], {
+        total: 0, page, limit, totalPages: 0,
+      }, "District post counts retrieved successfully");
+    }
+
     const postCounts = await db.PostMaster.findAll({
-      where: { is_active: true, is_deleted: false },
+      where: {
+        recruitment_drive_id: drive.recruitment_drive_id,
+        is_active: true,
+        is_closed: false,
+        is_deleted: false,
+      },
       attributes: [
-        'district_id',
-        [db.sequelize.fn('COUNT', db.sequelize.col('*')), 'post_count']
+        "district_id",
+        [db.sequelize.fn("COUNT", db.sequelize.col("*")), "post_count"],
       ],
-      group: ['district_id']
+      group: ["district_id"],
     });
 
     const countMap = postCounts.reduce((acc, row) => {
@@ -248,8 +409,8 @@ router.get('/district-posts', async (req, res, next) => {
     // Fetch districts (non-deleted, active)
     const districts = await db.DistrictMaster.findAll({
       where: { is_active: true, is_deleted: false },
-      attributes: ['district_id', 'district_name', 'district_name_mr'],
-      order: [['district_name', 'ASC']]
+      attributes: ["district_id", "district_name", "district_name_mr"],
+      order: [["district_name", "ASC"]],
     });
 
     const result = districts.map((d) => {
@@ -257,23 +418,28 @@ router.get('/district-posts', async (req, res, next) => {
       const districtId = row.district_id || 0;
       return {
         ...row,
-        post_count: countMap[districtId] || 0
+        post_count: countMap[districtId] || 0,
       };
     });
 
     // Filter districts with post_count > 0
-    const filteredResult = result.filter(d => d.post_count > 0);
+    const filteredResult = result.filter((d) => d.post_count > 0);
 
     // Apply pagination
     const total = filteredResult.length;
     const paginatedData = filteredResult.slice(offset, offset + limit);
 
-    ApiResponse.paginated(res, paginatedData, {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    }, 'District post counts retrieved successfully');
+    ApiResponse.paginated(
+      res,
+      paginatedData,
+      {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+      "District post counts retrieved successfully",
+    );
   } catch (error) {
     next(error);
   }
@@ -286,24 +452,33 @@ router.get('/district-posts', async (req, res, next) => {
  * @desc Get all document types for upload
  * @access Public
  */
-router.get('/document-types', async (req, res, next) => {
+router.get("/document-types", async (req, res, next) => {
   try {
     const docTypes = await db.DocumentType.findAll({
       where: { is_active: true },
       attributes: [
-        'doc_type_id', 'doc_code', 'doc_type_name', 'doc_type_name_mr', 
-        'description', 'is_mandatory', 'allowed_file_types', 
-        'max_file_size_mb', 'multiple_files_allowed', 'display_order'
+        "doc_type_id",
+        "doc_code",
+        "doc_type_name",
+        "doc_type_name_mr",
+        "description",
+        "is_mandatory",
+        "allowed_file_types",
+        "max_file_size_mb",
+        "multiple_files_allowed",
+        "display_order",
       ],
-      order: [['display_order', 'ASC']]
+      order: [["display_order", "ASC"]],
     });
-    res.status(200).json(docTypes.map((d) => {
-      const row = d.toJSON();
-      return {
-        ...row,
-        is_mandatory_for_all: row.is_mandatory
-      };
-    }));
+    res.status(200).json(
+      docTypes.map((d) => {
+        const row = d.toJSON();
+        return {
+          ...row,
+          is_mandatory_for_all: row.is_mandatory,
+        };
+      }),
+    );
   } catch (error) {
     next(error);
   }
@@ -316,18 +491,26 @@ router.get('/document-types', async (req, res, next) => {
  * @desc Get all schemes
  * @access Public
  */
-router.get('/schemes', async (req, res, next) => {
+router.get("/schemes", async (req, res, next) => {
   try {
     const schemes = await db.Scheme.findAll({
       where: { is_active: true },
-      attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr', 'description'],
-      include: [{
-        model: db.SchemeType,
-        as: 'schemeType',
-        attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-        required: true
-      }],
-      order: [['scheme_id', 'ASC']]
+      attributes: [
+        "scheme_id",
+        "scheme_code",
+        "scheme_name",
+        "scheme_name_mr",
+        "description",
+      ],
+      include: [
+        {
+          model: db.SchemeType,
+          as: "schemeType",
+          attributes: ["scheme_type_id", "scheme_code", "scheme_name"],
+          required: true,
+        },
+      ],
+      order: [["scheme_id", "ASC"]],
     });
     res.status(200).json(schemes);
   } catch (error) {
@@ -340,18 +523,25 @@ router.get('/schemes', async (req, res, next) => {
  * @desc Get all active posts with basic info
  * @access Public
  */
-router.get('/posts', async (req, res, next) => {
+router.get("/posts", async (req, res, next) => {
   try {
+    const activeDrive =
+      await require("../services/recruitmentDriveService").getActiveDrive();
     const { scheme_id, district_id, search } = req.query;
-    const page = parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
-    const limit = parseInt(req.query.limit, 10) > 0 ? parseInt(req.query.limit, 10) : 20;
+    const page =
+      parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
+    const limit =
+      parseInt(req.query.limit, 10) > 0 ? parseInt(req.query.limit, 10) : 20;
     const offset = (page - 1) * limit;
 
-    const where = { 
+    const where = {
       is_active: true,
-      is_deleted: false
+      is_deleted: false,
     };
-    
+    if (activeDrive) {
+      where.recruitment_drive_id = activeDrive.recruitment_drive_id;
+    }
+
     if (scheme_id) {
       where.scheme_id = scheme_id;
     }
@@ -364,73 +554,120 @@ router.get('/posts', async (req, res, next) => {
           [Op.or]: [
             { post_name: { [Op.iLike]: `%${search}%` } },
             { post_name_mr: { [Op.iLike]: `%${search}%` } },
-            { '$district.district_name$': { [Op.iLike]: `%${search}%` } },
-            { '$district.district_name_mr$': { [Op.iLike]: `%${search}%` } },
-            { '$scheme.scheme_name$': { [Op.iLike]: `%${search}%` } },
-            { '$scheme.scheme_name_mr$': { [Op.iLike]: `%${search}%` } },
-            { '$scheme.scheme_code$': { [Op.iLike]: `%${search}%` } },
-            { '$scheme.schemeType.scheme_code$': { [Op.iLike]: `%${search}%` } },
-            { '$minEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
-            { '$minEducationLevel.level_name_mr$': { [Op.iLike]: `%${search}%` } },
-            { '$maxEducationLevel.level_name$': { [Op.iLike]: `%${search}%` } },
-            { '$maxEducationLevel.level_name_mr$': { [Op.iLike]: `%${search}%` } }
-          ]
+            { "$district.district_name$": { [Op.iLike]: `%${search}%` } },
+            { "$district.district_name_mr$": { [Op.iLike]: `%${search}%` } },
+            { "$scheme.scheme_name$": { [Op.iLike]: `%${search}%` } },
+            { "$scheme.scheme_name_mr$": { [Op.iLike]: `%${search}%` } },
+            { "$scheme.scheme_code$": { [Op.iLike]: `%${search}%` } },
+            {
+              "$scheme.schemeType.scheme_code$": { [Op.iLike]: `%${search}%` },
+            },
+            { "$minEducationLevel.level_name$": { [Op.iLike]: `%${search}%` } },
+            {
+              "$minEducationLevel.level_name_mr$": {
+                [Op.iLike]: `%${search}%`,
+              },
+            },
+            { "$maxEducationLevel.level_name$": { [Op.iLike]: `%${search}%` } },
+            {
+              "$maxEducationLevel.level_name_mr$": {
+                [Op.iLike]: `%${search}%`,
+              },
+            },
+          ],
         }
       : {};
 
     const { rows: posts, count: total } = await db.PostMaster.findAndCountAll({
       where: { ...where, ...searchFilter },
       attributes: [
-        'post_id', 'post_code', 'post_name', 'post_name_mr', 
-        'description', 'description_mr',
-        'min_age', 'max_age', 'female_only', 'male_only',
-        'min_experience_months',
-        'education_text', 'display_order',
-        'opening_date', 'closing_date', 'total_positions', 'filled_positions',
-        'district_specific', 'is_state_level', 'is_active', 'created_at', 'updated_at',
-        'min_education_level_id', 'max_education_level_id',
-        'scheme_id', 'district_id'
+        "post_id",
+        "post_code",
+        "post_name",
+        "post_name_mr",
+        "description",
+        "description_mr",
+        "min_age",
+        "max_age",
+        "female_only",
+        "male_only",
+        "min_experience_months",
+        "education_text",
+        "display_order",
+        "opening_date",
+        "closing_date",
+        "total_positions",
+        "filled_positions",
+        "district_specific",
+        "is_state_level",
+        "is_active",
+        "created_at",
+        "updated_at",
+        "min_education_level_id",
+        "max_education_level_id",
+        "scheme_id",
+        "district_id",
       ],
       include: [
-        { 
-          model: db.Scheme, 
-          as: 'scheme',
+        {
+          model: db.Scheme,
+          as: "scheme",
           required: true,
-          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
-          include: [{
-            model: db.SchemeType,
-            as: 'schemeType',
-            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-            required: true
-          }]
+          attributes: [
+            "scheme_id",
+            "scheme_code",
+            "scheme_name",
+            "scheme_name_mr",
+          ],
+          include: [
+            {
+              model: db.SchemeType,
+              as: "schemeType",
+              attributes: ["scheme_type_id", "scheme_code", "scheme_name"],
+              required: true,
+            },
+          ],
         },
         {
           model: db.DistrictMaster,
-          as: 'district',
-          attributes: ['district_id', 'district_name', 'district_name_mr']
+          as: "district",
+          attributes: ["district_id", "district_name", "district_name_mr"],
         },
         {
           model: db.EducationLevel,
-          as: 'minEducationLevel',
-          attributes: ['level_id', 'level_code', 'level_name', 'level_name_mr']
+          as: "minEducationLevel",
+          attributes: ["level_id", "level_code", "level_name", "level_name_mr"],
         },
         {
           model: db.EducationLevel,
-          as: 'maxEducationLevel',
-          attributes: ['level_id', 'level_code', 'level_name', 'level_name_mr']
-        }
+          as: "maxEducationLevel",
+          attributes: ["level_id", "level_code", "level_name", "level_name_mr"],
+        },
       ],
-      order: [['scheme_id', 'ASC'], ['display_order', 'ASC'], ['post_id', 'ASC']],
+      order: [
+        ["scheme_id", "ASC"],
+        ["display_order", "ASC"],
+        ["post_id", "ASC"],
+      ],
       limit,
-      offset
+      offset,
     });
 
     const formatted = posts.map((p) => {
       const row = p.toJSON();
       const { experience_text, ...rest } = row;
       const minExperienceMonths = row.min_experience_months ?? 0;
+      const now = new Date();
+      const applicationsAvailable = Boolean(
+        activeDrive &&
+        activeDrive.status === "OPEN" &&
+        activeDrive.applications_open &&
+        (!activeDrive.application_start_at || now >= new Date(activeDrive.application_start_at)) &&
+        (!activeDrive.application_end_at || now <= new Date(activeDrive.application_end_at))
+      );
       return {
         ...rest,
+        is_open: applicationsAvailable && Boolean(row.is_active),
         min_experience_months: minExperienceMonths,
         post_name_en: row.post_name,
         post_name_mr: row.post_name_mr,
@@ -453,7 +690,7 @@ router.get('/posts', async (req, res, next) => {
               level_id: row.minEducationLevel.level_id,
               level_name: row.minEducationLevel.level_name,
               level_name_en: row.minEducationLevel.level_name,
-              level_name_mr: row.minEducationLevel.level_name_mr
+              level_name_mr: row.minEducationLevel.level_name_mr,
             }
           : null,
         max_education: row.maxEducationLevel
@@ -461,30 +698,30 @@ router.get('/posts', async (req, res, next) => {
               level_id: row.maxEducationLevel.level_id,
               level_name: row.maxEducationLevel.level_name,
               level_name_en: row.maxEducationLevel.level_name,
-              level_name_mr: row.maxEducationLevel.level_name_mr
+              level_name_mr: row.maxEducationLevel.level_name_mr,
             }
           : null,
         available_positions: Math.max(
           0,
-          (row.total_positions || 0) - (row.filled_positions || 0)
+          (row.total_positions || 0) - (row.filled_positions || 0),
         ),
         district: row.district || null,
-        scheme: row.scheme || null
+        scheme: row.scheme || null,
       };
     });
 
     res.status(200).json({
       success: true,
-      message: 'Posts retrieved successfully',
+      message: "Posts retrieved successfully",
       data: {
         posts: formatted,
         pagination: {
           total,
           page,
           limit,
-          totalPages: Math.ceil(total / limit)
-        }
-      }
+          totalPages: Math.ceil(total / limit),
+        },
+      },
     });
   } catch (error) {
     next(error);
@@ -496,77 +733,105 @@ router.get('/posts', async (req, res, next) => {
  * @desc Get post details with requirements
  * @access Public
  */
-router.get('/posts/:postId', async (req, res, next) => {
+router.get("/posts/:postId", async (req, res, next) => {
   try {
+    const activeDrive =
+      await require("../services/recruitmentDriveService").getActiveDrive();
     const post = await db.PostMaster.findOne({
-      where: { 
+      where: {
         post_id: req.params.postId,
-        is_deleted: false
+        is_deleted: false,
+        ...(activeDrive
+          ? { recruitment_drive_id: activeDrive.recruitment_drive_id }
+          : {}),
       },
       include: [
-        { 
-          model: db.Scheme, 
-          as: 'scheme',
-          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr'],
-          include: [{
-            model: db.SchemeType,
-            as: 'schemeType',
-            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-            required: true
-          }],
-          required: true
+        {
+          model: db.Scheme,
+          as: "scheme",
+          attributes: [
+            "scheme_id",
+            "scheme_code",
+            "scheme_name",
+            "scheme_name_mr",
+          ],
+          include: [
+            {
+              model: db.SchemeType,
+              as: "schemeType",
+              attributes: ["scheme_type_id", "scheme_code", "scheme_name"],
+              required: true,
+            },
+          ],
+          required: true,
         },
         {
           model: db.DistrictMaster,
-          as: 'district',
-          attributes: ['district_id', 'district_name', 'district_name_mr'],
-          required: false
+          as: "district",
+          attributes: ["district_id", "district_name", "district_name_mr"],
+          required: false,
         },
         {
           model: db.EducationLevel,
-          as: 'minEducationLevel',
-          attributes: ['level_id', 'level_code', 'level_name', 'level_name_mr'],
-          required: false
+          as: "minEducationLevel",
+          attributes: ["level_id", "level_code", "level_name", "level_name_mr"],
+          required: false,
         },
         {
           model: db.EducationLevel,
-          as: 'maxEducationLevel',
-          attributes: ['level_id', 'level_code', 'level_name', 'level_name_mr'],
-          required: false
+          as: "maxEducationLevel",
+          attributes: ["level_id", "level_code", "level_name", "level_name_mr"],
+          required: false,
         },
         {
           model: db.ExperienceDomain,
-          as: 'experienceDomain',
-          attributes: ['id', 'domain_code', 'domain_name', 'domain_name_mr'],
-          required: false
+          as: "experienceDomain",
+          attributes: ["id", "domain_code", "domain_name", "domain_name_mr"],
+          required: false,
         },
         {
           model: db.PostDocumentRequirement,
-          as: 'documentRequirements',
+          as: "documentRequirements",
           required: false,
-          include: [{
-            model: db.DocumentType,
-            as: 'documentType',
-            attributes: ['doc_type_id', 'doc_code', 'doc_type_name', 'doc_type_name_mr'],
-            required: false
-          }]
-        }
-      ]
+          include: [
+            {
+              model: db.DocumentType,
+              as: "documentType",
+              attributes: [
+                "doc_type_id",
+                "doc_code",
+                "doc_type_name",
+                "doc_type_name_mr",
+              ],
+              required: false,
+            },
+          ],
+        },
+      ],
     });
 
     if (!post) {
-      throw new ApiError(404, 'Post not found');
+      throw new ApiError(404, "Post not found");
     }
 
     const { scheme, district, ...rest } = post.toJSON();
 
     const formatted = {
       ...rest,
+      is_open: Boolean(
+        activeDrive &&
+        activeDrive.status === "OPEN" &&
+        activeDrive.applications_open &&
+        (!activeDrive.application_start_at || new Date() >= new Date(activeDrive.application_start_at)) &&
+        (!activeDrive.application_end_at || new Date() <= new Date(activeDrive.application_end_at)) &&
+        rest.is_active &&
+        !rest.is_closed
+      ),
       female_only: rest.female_only,
       male_only: rest.male_only,
       available_positions: Math.max(
         0,
-        (post.total_positions || 0) - (post.filled_positions || 0)
+        (post.total_positions || 0) - (post.filled_positions || 0),
       ),
       scheme_code: scheme?.scheme_code || null,
       scheme_name: scheme?.scheme_name || null,
@@ -576,18 +841,22 @@ router.get('/posts/:postId', async (req, res, next) => {
       district_name: district?.district_name || null,
       district_name_en: district?.district_name || null,
       district_name_mr: district?.district_name_mr || null,
-      min_education: post.minEducationLevel ? {
-        level_id: post.minEducationLevel.level_id,
-        level_name: post.minEducationLevel.level_name,
-        level_name_en: post.minEducationLevel.level_name,
-        level_name_mr: post.minEducationLevel.level_name_mr
-      } : null,
-      max_education: post.maxEducationLevel ? {
-        level_id: post.maxEducationLevel.level_id,
-        level_name: post.maxEducationLevel.level_name,
-        level_name_en: post.maxEducationLevel.level_name,
-        level_name_mr: post.maxEducationLevel.level_name_mr
-      } : null
+      min_education: post.minEducationLevel
+        ? {
+            level_id: post.minEducationLevel.level_id,
+            level_name: post.minEducationLevel.level_name,
+            level_name_en: post.minEducationLevel.level_name,
+            level_name_mr: post.minEducationLevel.level_name_mr,
+          }
+        : null,
+      max_education: post.maxEducationLevel
+        ? {
+            level_id: post.maxEducationLevel.level_id,
+            level_name: post.maxEducationLevel.level_name,
+            level_name_en: post.maxEducationLevel.level_name,
+            level_name_mr: post.maxEducationLevel.level_name_mr,
+          }
+        : null,
     };
 
     res.status(200).json(formatted);
@@ -603,7 +872,7 @@ router.get('/posts/:postId', async (req, res, next) => {
  * @desc Get all categories for dropdown (applicant personal info)
  * @access Public
  */
-router.get('/categories', async (req, res, next) => {
+router.get("/categories", async (req, res, next) => {
   try {
     // const categories = await db.CategoryMaster.findAll({
     //   where: { is_active: true, is_deleted: false },
@@ -621,7 +890,7 @@ router.get('/categories', async (req, res, next) => {
  * @desc Get allowed categories for a specific post
  * @access Public
  */
-router.get('/posts/:postId/categories', async (req, res, next) => {
+router.get("/posts/:postId/categories", async (req, res, next) => {
   try {
     // const postCategories = await db.PostCategory.findAll({
     //   where: { post_id: req.params.postId, is_active: true },
@@ -647,10 +916,10 @@ router.get('/posts/:postId/categories', async (req, res, next) => {
  * @desc Get all rejection reasons (for reference)
  * @access Public
  */
-router.get('/rejection-reasons', async (req, res, next) => {
+router.get("/rejection-reasons", async (req, res, next) => {
   try {
     const { category } = req.query;
-    
+
     const where = { is_active: true };
     if (category) {
       where.category = category;
@@ -658,8 +927,18 @@ router.get('/rejection-reasons', async (req, res, next) => {
 
     const reasons = await db.RejectionReason.findAll({
       where,
-      attributes: ['id', 'reason_code', 'reason_text', 'reason_text_mr', 'category', 'display_order'],
-      order: [['category', 'ASC'], ['display_order', 'ASC']]
+      attributes: [
+        "id",
+        "reason_code",
+        "reason_text",
+        "reason_text_mr",
+        "category",
+        "display_order",
+      ],
+      order: [
+        ["category", "ASC"],
+        ["display_order", "ASC"],
+      ],
     });
     res.status(200).json(reasons);
   } catch (error) {
@@ -669,26 +948,38 @@ router.get('/rejection-reasons', async (req, res, next) => {
 
 // ==================== SKILLS ====================
 
-router.get('/skills', async (req, res, next) => {
+router.get("/skills", async (req, res, next) => {
   try {
     const { lang } = req.query;
-    const language = (lang || 'en').toLowerCase();
+    const language = (lang || "en").toLowerCase();
 
     const skills = await db.SkillMaster.findAll({
       where: { is_active: true },
-      attributes: ['skill_id', 'skill_name', 'skill_name_mr', 'description', 'description_mr'],
-      order: [['skill_id', 'ASC']]
+      attributes: [
+        "skill_id",
+        "skill_name",
+        "skill_name_mr",
+        "description",
+        "description_mr",
+      ],
+      order: [["skill_id", "ASC"]],
     });
 
     const result = skills.map((s) => {
       const row = s.toJSON();
-      const localizedName = language === 'mr' && row.skill_name_mr ? row.skill_name_mr : row.skill_name;
-      const localizedDescription = language === 'mr' && row.description_mr ? row.description_mr : row.description;
+      const localizedName =
+        language === "mr" && row.skill_name_mr
+          ? row.skill_name_mr
+          : row.skill_name;
+      const localizedDescription =
+        language === "mr" && row.description_mr
+          ? row.description_mr
+          : row.description;
 
       return {
         ...row,
         skill_name_localized: localizedName,
-        description_localized: localizedDescription
+        description_localized: localizedDescription,
       };
     });
 
@@ -705,11 +996,19 @@ router.get('/skills', async (req, res, next) => {
  * @desc Get all active banners
  * @access Public
  */
-router.get('/banners', async (req, res, next) => {
+router.get("/banners", async (req, res, next) => {
   try {
-    const banners = await db.BannerMaster.scope('onlyActive').findAll({
-      attributes: ['banner_id', 'banner_image_path', 'banner_image_path_mr', 'display_order'],
-      order: [['display_order', 'ASC'], ['banner_id', 'DESC']]
+    const banners = await db.BannerMaster.scope("onlyActive").findAll({
+      attributes: [
+        "banner_id",
+        "banner_image_path",
+        "banner_image_path_mr",
+        "display_order",
+      ],
+      order: [
+        ["display_order", "ASC"],
+        ["banner_id", "DESC"],
+      ],
     });
     res.status(200).json(banners);
   } catch (error) {
@@ -724,29 +1023,45 @@ router.get('/banners', async (req, res, next) => {
  * @desc Get public statistics (districts, posts, applicants, selected candidates)
  * @access Public
  */
-router.get('/stats', async (req, res, next) => {
+router.get("/stats", async (req, res, next) => {
   try {
     const { lang } = req.query;
-    const language = (lang || 'en').toLowerCase();
+    const language = (lang || "en").toLowerCase();
 
     // Count districts
     const districtCount = await db.DistrictMaster.count({
-      where: { is_active: true, is_deleted: false }
+      where: { is_active: true, is_deleted: false },
     });
 
-    // Count active posts
-    const postCount = await db.PostMaster.count({
-      where: { is_active: true, is_deleted: false }
-    });
+    const recruitmentDriveService = require("../services/recruitmentDriveService");
+    const drive = await recruitmentDriveService.getActiveDrive();
+    const now = new Date();
+    const applicationsAvailable = Boolean(
+      drive &&
+      drive.status === "OPEN" &&
+      drive.applications_open &&
+      (!drive.application_start_at || now >= new Date(drive.application_start_at)) &&
+      (!drive.application_end_at || now <= new Date(drive.application_end_at))
+    );
+    const postCount = applicationsAvailable
+      ? await db.PostMaster.count({
+          where: {
+            recruitment_drive_id: drive.recruitment_drive_id,
+            is_active: true,
+            is_closed: false,
+            is_deleted: false,
+          },
+        })
+      : 0;
 
     // Count total applicants (unique applicants who have registered)
     const applicantCount = await db.ApplicantMaster.count({
-      where: { is_deleted: false }
+      where: { is_deleted: false },
     });
 
     // Count active, non-deleted schemes
     const schemeCount = await db.Scheme.count({
-      where: { is_active: true, is_deleted: false }
+      where: { is_active: true, is_deleted: false },
     });
 
     const stats = {
@@ -756,18 +1071,18 @@ router.get('/stats', async (req, res, next) => {
       total_schemes: schemeCount,
       labels: {
         en: {
-          districts: 'Districts',
-          posts: 'Available Posts',
-          applicants: 'Registered Applicants',
-          schemes: 'Schemes'
+          districts: "Districts",
+          posts: "Available Posts",
+          applicants: "Registered Applicants",
+          schemes: "Schemes",
         },
         mr: {
-          districts: 'जिल्हे',
-          posts: 'उपलब्ध पदे',
-          applicants: 'नोंदणीकृत अर्जदार',
-          schemes: 'योजना'
-        }
-      }
+          districts: "जिल्हे",
+          posts: "उपलब्ध पदे",
+          applicants: "नोंदणीकृत अर्जदार",
+          schemes: "योजना",
+        },
+      },
     };
 
     res.status(200).json(stats);

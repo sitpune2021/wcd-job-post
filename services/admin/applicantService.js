@@ -182,6 +182,31 @@ const updateApplicantOCR = async (applicantIds = [], ocrDisabled = false) => {
   }
 };
 
+const updateProfileEditOverride = async (applicantId, enabled, reason, adminId) => {
+  if (enabled && !String(reason || '').trim()) {
+    throw new ApiError(400, 'A reason is required when unlocking an applicant profile');
+  }
+  const applicant = await ApplicantMaster.findOne({
+    where: { applicant_id: applicantId, is_deleted: false }
+  });
+  if (!applicant) throw new ApiError(404, 'Applicant not found');
+
+  await applicant.update({
+    profile_edit_override: !!enabled,
+    profile_edit_override_reason: enabled ? String(reason).trim() : null,
+    profile_edit_override_by: adminId,
+    profile_edit_override_at: new Date(),
+    updated_by: adminId,
+    updated_at: new Date()
+  });
+  return {
+    applicant_id: applicant.applicant_id,
+    profile_edit_override: applicant.profile_edit_override,
+    profile_edit_override_reason: applicant.profile_edit_override_reason,
+    profile_edit_override_at: applicant.profile_edit_override_at
+  };
+};
+
 /**
  * Get applicant by ID with full profile details
  * @param {number} applicantId - Applicant ID
@@ -381,5 +406,6 @@ const getApplicantById = async (applicantId) => {
 module.exports = {
   getApplicants,
   getApplicantById,
-  updateApplicantOCR
+  updateApplicantOCR,
+  updateProfileEditOverride
 };

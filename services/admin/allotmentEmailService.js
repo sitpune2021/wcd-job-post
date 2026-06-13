@@ -208,7 +208,7 @@ class AllotmentEmailService {
         is_deleted: false
       },
       include: [
-        { model: db.PostMaster, as: 'post', attributes: ['post_id', 'post_name', 'post_code'] },
+        { model: db.PostMaster, as: 'post', attributes: ['post_id', 'post_name', 'post_name_mr', 'post_code', 'recruitment_drive_id'] },
         { model: db.PostAllotmentUpload, as: 'upload', attributes: ['upload_id', 'file_path', 'original_name'] }
       ],
       timeout: 30000 // 30 seconds timeout to avoid TimeoutError
@@ -348,6 +348,18 @@ class AllotmentEmailService {
         await tracking.update({
           status: 'SENT',
           sent_at: sentTime
+        });
+        await require('../notificationService').notifyApplicant(tracking.applicant_id, {
+          title: 'Allotment letter sent',
+          message: `Your allotment letter for ${schedule.post?.post_name || 'the selected post'} has been sent to your registered email address.`,
+          title_mr: 'नियुक्ती पत्र पाठवले',
+          message_mr: `${schedule.post?.post_name_mr || schedule.post?.post_name || 'निवड झालेल्या पदाचे'} नियुक्ती पत्र आपल्या नोंदणीकृत ईमेल पत्त्यावर पाठवले आहे.`,
+          notification_type: 'ALLOTMENT',
+          event_code: 'ALLOTMENT_LETTER_SENT',
+          action_url: '/dashboard/applied-posts',
+          recruitment_drive_id: schedule.post?.recruitment_drive_id,
+          application_id: tracking.application_id,
+          post_id: schedule.post_id
         });
 
         sent++;

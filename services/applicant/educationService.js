@@ -6,10 +6,10 @@
 // ============================================================================
 
 const db = require('../../models');
-const { ApplicantEducation, EducationLevel, Application, ApplicantMaster, ApplicantPersonal } = db;
+const { ApplicantEducation, EducationLevel, ApplicantMaster, ApplicantPersonal } = db;
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
-const { getRelativePath } = require('../../utils/fileUpload');
+const { getRelativePath, optimizeUploadedImage } = require('../../utils/fileUpload');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 
@@ -24,16 +24,15 @@ const isOcrEnabled = () => {
   return enabled === 'true' || enabled === '1';
 };
 
-const assertProfileEditable = async (applicantId) => {
-  const count = await Application.count({
-    where: {
-      applicant_id: applicantId,
-      is_deleted: false
-    }
-  });
-  if ((count || 0) > 0) {
-    throw new ApiError(403, 'Profile is locked after applying. You can only upload required documents.');
-  }
+const { assertProfileEditable } = require('./profileEditPolicy');
+
+const isCgpaColumnWriteError = (error) => {
+  const code = error?.original?.code || error?.parent?.code;
+  const sql = String(error?.original?.sql || error?.parent?.sql || '');
+  return (
+    sql.includes('"cgpa"') &&
+    (code === '42703' || code === '22003')
+  );
 };
 
 /**
@@ -175,8 +174,8 @@ const getCandidateNameFromCertificate = async (filePath) => {
  */
 const addEducation = async (applicantId, data, fileData = null) => {
   const {
-    education_level_id, qualification_level, degree_name, seatNumber,
-    university_board, passing_year, percentage, specialization, stream_subject
+    education_level_id, qualification_level, degree_name, seatNumber, seat_number,
+    university_board, passing_year, percentage, cgpa, specialization, stream_subject
   } = data;
 
   try {
@@ -188,42 +187,17 @@ const addEducation = async (applicantId, data, fileData = null) => {
       if (!level) {
         throw new ApiError(400, 'Invalid education level ID');
       }
-
-      // Prevent duplicate education level entries (non-deleted)
-      const existing = await ApplicantEducation.findOne({
-        where: {
-          applicant_id: applicantId,
-          education_level_id,
-          is_deleted: false
-        }
-      });
-      if (existing) {
-        throw new ApiError(400, 'This education level is already added. Please edit the existing record.');
-      }
     }
 
-    const certificatePath = fileData?.path
-      ? getRelativePath(fileData.path).replace(/\\/g, '/')
-      : null;
-
-    // ==================== SIMPLIFIED DUPLICATE VALIDATIONS ====================
-    
-    // 1. Check for duplicate passing year (for different education levels)
-    if (passing_year && education_level_id) {
-      const duplicateYear = await ApplicantEducation.findOne({
-        where: {
-          applicant_id: applicantId,
-          passing_year: passing_year,
-          is_deleted: false,
-          education_level_id: { [db.Sequelize.Op.ne]: education_level_id }
-        },
-        include: [{ model: EducationLevel, as: 'educationLevel', attributes: ['level_name'] }]
-      });
-      
-      if (duplicateYear) {
-        throw new ApiError(400, 
-          `This passing year (${passing_year}) is already used for ${duplicateYear.educationLevel?.level_name || 'another education level'}. Each education level should be from a different year.`);
-      }
+    const normalizedCgpa = cgpa === undefined || cgpa === null || cgpa === '' ? null : Number(cgpa);
+    const normalizedPercentage = percentage === undefined || percentage === null || percentage === ''
+      ? (normalizedCgpa === null ? null : Number(((normalizedCgpa - 0.5) * 10).toFixed(2)))
+      : Number(percentage);
+    if (normalizedCgpa !== null && (!Number.isFinite(normalizedCgpa) || normalizedCgpa < 0.5 || normalizedCgpa > 10)) {
+      throw new ApiError(400, 'CGPA must be between 0.5 and 10');
+    }
+    if (!Number.isFinite(normalizedPercentage) || normalizedPercentage < 0 || normalizedPercentage > 100) {
+      throw new ApiError(400, 'Percentage must be between 0 and 100');
     }
 
     // 2. Check if certificate name matches applicant's name
@@ -253,20 +227,35 @@ const addEducation = async (applicantId, data, fileData = null) => {
         logger.info(`Name validation passed for applicant ${applicantId}`);
       }
     }
+    fileData = await optimizeUploadedImage(fileData);
+    const certificatePath = fileData?.path
+      ? getRelativePath(fileData.path).replace(/\\/g, '/')
+      : null;
 
-    const education = await ApplicantEducation.create({
+    const createPayload = {
       applicant_id: applicantId,
       education_level_id,
       qualification_level,
       degree_name,
       university_board,
-      seatNumber,
+      seatnumber: seatNumber || seat_number,
       passing_year,
-      percentage,
+      percentage: normalizedPercentage,
+      cgpa: normalizedCgpa,
       specialization,
       stream_subject,
       certificate_path: certificatePath
-    });
+    };
+
+    let education;
+    try {
+      education = await ApplicantEducation.create(createPayload);
+    } catch (error) {
+      if (!isCgpaColumnWriteError(error)) throw error;
+      logger.warn(`CGPA column is not ready in DB, saving education for applicant ${applicantId} without cgpa`);
+      delete createPayload.cgpa;
+      education = await ApplicantEducation.create(createPayload);
+    }
 
     // Fetch with education level details
     const created = await ApplicantEducation.findByPk(education.education_id, {
@@ -303,23 +292,11 @@ const updateEducation = async (applicantId, educationId, data, fileData = null) 
       throw new ApiError(404, 'Education record not found');
     }
 
-    // If changing education_level_id, ensure no duplicate
+    // Validate a changed education level.
     if (data.education_level_id && data.education_level_id !== education.education_level_id) {
       const level = await EducationLevel.findByPk(data.education_level_id);
       if (!level) {
         throw new ApiError(400, 'Invalid education level ID');
-      }
-
-      const duplicate = await ApplicantEducation.findOne({
-        where: {
-          applicant_id: applicantId,
-          education_level_id: data.education_level_id,
-          is_deleted: false,
-          education_id: { [db.Sequelize.Op.ne]: educationId }
-        }
-      });
-      if (duplicate) {
-        throw new ApiError(400, 'This education level is already added. Please edit the existing record.');
       }
     }
 
@@ -327,32 +304,28 @@ const updateEducation = async (applicantId, educationId, data, fileData = null) 
     
     // 1. Update certificate path if new file provided
     if (fileData?.path) {
+      fileData = await optimizeUploadedImage(fileData);
       data.certificate_path = getRelativePath(fileData.path).replace(/\\/g, '/');
     }
 
-    // 2. Check for duplicate passing year (if being updated)
-    const newYear = data.passing_year !== undefined ? data.passing_year : education.passing_year;
-    const newEducationLevelId = data.education_level_id !== undefined ? data.education_level_id : education.education_level_id;
-    
-    if (newYear && newEducationLevelId && data.passing_year !== undefined) {
-      const duplicateYear = await ApplicantEducation.findOne({
-        where: {
-          applicant_id: applicantId,
-          passing_year: newYear,
-          is_deleted: false,
-          education_level_id: { [db.Sequelize.Op.ne]: newEducationLevelId },
-          education_id: { [db.Sequelize.Op.ne]: educationId }
-        },
-        include: [{ model: EducationLevel, as: 'educationLevel', attributes: ['level_name'] }]
-      });
-      
-      if (duplicateYear) {
-        throw new ApiError(400, 
-          `This passing year (${newYear}) is already used for ${duplicateYear.educationLevel?.level_name || 'another education level'}. Each education level should be from a different year.`);
+    if (data.cgpa !== undefined) {
+      const normalizedCgpa = data.cgpa === null || data.cgpa === '' ? null : Number(data.cgpa);
+      if (normalizedCgpa !== null && (!Number.isFinite(normalizedCgpa) || normalizedCgpa < 0.5 || normalizedCgpa > 10)) {
+        throw new ApiError(400, 'CGPA must be between 0.5 and 10');
       }
+      data.cgpa = normalizedCgpa;
+      if (normalizedCgpa !== null) data.percentage = Number(((normalizedCgpa - 0.5) * 10).toFixed(2));
     }
 
-    await education.update(data);
+    try {
+      await education.update(data);
+    } catch (error) {
+      if (!isCgpaColumnWriteError(error)) throw error;
+      logger.warn(`CGPA column is not ready in DB, updating education ${educationId} without cgpa`);
+      const retryData = { ...data };
+      delete retryData.cgpa;
+      await education.update(retryData);
+    }
     logger.info(`Education updated for applicant: ${applicantId}`);
     return education;
   } catch (error) {

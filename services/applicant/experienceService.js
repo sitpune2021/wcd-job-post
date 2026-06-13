@@ -6,10 +6,10 @@
 // ============================================================================
 
 const db = require('../../models');
-const { ApplicantExperience, ExperienceDomain, Application } = db;
+const { ApplicantExperience, ExperienceDomain } = db;
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
-const { getRelativePath } = require('../../utils/fileUpload');
+const { getRelativePath, optimizeUploadedImage } = require('../../utils/fileUpload');
 
 const toPublicUploadPath = (filePath) => {
   if (!filePath) return null;
@@ -17,17 +17,7 @@ const toPublicUploadPath = (filePath) => {
   return '/' + rel.replace(/^\/+/, '');
 };
 
-const assertProfileEditable = async (applicantId) => {
-  const count = await Application.count({
-    where: {
-      applicant_id: applicantId,
-      is_deleted: false
-    }
-  });
-  if ((count || 0) > 0) {
-    throw new ApiError(403, 'Profile is locked after applying. You can only upload required documents.');
-  }
-};
+const { assertProfileEditable } = require('./profileEditPolicy');
 
 // ==================== EXPERIENCE CRUD OPERATIONS ====================
 
@@ -73,6 +63,11 @@ const addExperience = async (applicantId, data, filesData = {}) => {
 
   try {
     await assertProfileEditable(applicantId);
+    const [certificate, offerLetter, salarySlip] = await Promise.all([
+      optimizeUploadedImage(filesData?.certificate),
+      optimizeUploadedImage(filesData?.offer_letter),
+      optimizeUploadedImage(filesData?.salary_slip)
+    ]);
 
     // Validate domain_id if provided
     if (domain_id) {
@@ -82,14 +77,14 @@ const addExperience = async (applicantId, data, filesData = {}) => {
       }
     }
 
-    const certificatePath = filesData?.certificate?.path
-      ? getRelativePath(filesData.certificate.path).replace(/\\/g, '/')
+    const certificatePath = certificate?.path
+      ? getRelativePath(certificate.path).replace(/\\/g, '/')
       : null;
-    const offerLetterPath = filesData?.offer_letter?.path
-      ? getRelativePath(filesData.offer_letter.path).replace(/\\/g, '/')
+    const offerLetterPath = offerLetter?.path
+      ? getRelativePath(offerLetter.path).replace(/\\/g, '/')
       : null;
-    const salarySlipPath = filesData?.salary_slip?.path
-      ? getRelativePath(filesData.salary_slip.path).replace(/\\/g, '/')
+    const salarySlipPath = salarySlip?.path
+      ? getRelativePath(salarySlip.path).replace(/\\/g, '/')
       : null;
 
     const experience = await ApplicantExperience.create({
@@ -137,6 +132,11 @@ const addExperience = async (applicantId, data, filesData = {}) => {
 const updateExperience = async (applicantId, experienceId, data, filesData = {}) => {
   try {
     await assertProfileEditable(applicantId);
+    const [certificate, offerLetter, salarySlip] = await Promise.all([
+      optimizeUploadedImage(filesData?.certificate),
+      optimizeUploadedImage(filesData?.offer_letter),
+      optimizeUploadedImage(filesData?.salary_slip)
+    ]);
 
     const experience = await ApplicantExperience.findOne({
       where: { experience_id: experienceId, applicant_id: applicantId }
@@ -180,14 +180,14 @@ const updateExperience = async (applicantId, experienceId, data, filesData = {})
     };
 
     // Update file paths if new files provided
-    if (filesData?.certificate?.path) {
-      updateData.certificate_path = getRelativePath(filesData.certificate.path).replace(/\\/g, '/');
+    if (certificate?.path) {
+      updateData.certificate_path = getRelativePath(certificate.path).replace(/\\/g, '/');
     }
-    if (filesData?.offer_letter?.path) {
-      updateData.offer_letter_path = getRelativePath(filesData.offer_letter.path).replace(/\\/g, '/');
+    if (offerLetter?.path) {
+      updateData.offer_letter_path = getRelativePath(offerLetter.path).replace(/\\/g, '/');
     }
-    if (filesData?.salary_slip?.path) {
-      updateData.salary_slip_path = getRelativePath(filesData.salary_slip.path).replace(/\\/g, '/');
+    if (salarySlip?.path) {
+      updateData.salary_slip_path = getRelativePath(salarySlip.path).replace(/\\/g, '/');
     }
 
     await experience.update(updateData);

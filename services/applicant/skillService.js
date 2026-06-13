@@ -6,10 +6,10 @@
 // ============================================================================
 
 const db = require('../../models');
-const { ApplicantSkill, SkillMaster, Application } = db;
+const { ApplicantSkill, SkillMaster } = db;
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
-const { getRelativePath } = require('../../utils/fileUpload');
+const { getRelativePath, optimizeUploadedImage } = require('../../utils/fileUpload');
 
 const toPublicUploadPath = (filePath) => {
   if (!filePath) return null;
@@ -17,17 +17,7 @@ const toPublicUploadPath = (filePath) => {
   return '/' + rel.replace(/^\/+/, '');
 };
 
-const assertProfileEditable = async (applicantId) => {
-  const count = await Application.count({
-    where: {
-      applicant_id: applicantId,
-      is_deleted: false
-    }
-  });
-  if ((count || 0) > 0) {
-    throw new ApiError(403, 'Profile is locked after applying. You can only upload required documents.');
-  }
-};
+const { assertProfileEditable } = require('./profileEditPolicy');
 
 const addSkill = async (applicantId, data, fileData = null) => {
   const {
@@ -66,6 +56,7 @@ const addSkill = async (applicantId, data, fileData = null) => {
       throw new ApiError(400, 'Skill already added');
     }
 
+    fileData = await optimizeUploadedImage(fileData);
     const certificatePath = fileData?.path
       ? getRelativePath(fileData.path).replace(/\\/g, '/')
       : null;

@@ -17,7 +17,7 @@ const {
 const logger = require('../config/logger');
 
 const DEFAULT_EMAIL_CRON = '*/5 * * * *';
-const DEFAULT_POST_CLOSE_CRON = '5 0 * * *'; // Daily at 00:05 AM IST
+const DEFAULT_POST_CLOSE_CRON = '*/5 * * * *'; // Check drive end times every five minutes
 
 function resolveAllotmentCron(rawValue) {
   if (!rawValue) return DEFAULT_EMAIL_CRON;
@@ -69,14 +69,14 @@ function initCronJobs() {
   const rawPostCloseCron = process.env.POST_CLOSE_CRON;
   const postCloseCron = resolvePostCloseCron(rawPostCloseCron);
   
-  // Run daily (default 00:05 AM IST) to close expired posts
+  // Run daily (default 00:05 AM IST) to close expired recruitment drives.
   // Cron expression: minute hour day-of-month month day-of-week
   cron.schedule(postCloseCron, async () => {
-    logger.info('CRON: Running post closure check...');
+    logger.info('CRON: Running recruitment drive closure check...');
     try {
-      await cronService.closeExpiredPosts();
+      await cronService.closeExpiredRecruitmentDrives();
     } catch (error) {
-      logger.error('CRON: Post closure failed:', error);
+      logger.error('CRON: Recruitment drive closure failed:', error);
     }
   }, {
     scheduled: true,
@@ -170,7 +170,7 @@ function initCronJobs() {
   });
 
   logger.info('CRON: Scheduled jobs initialized');
-  logger.info(`CRON: - Post auto-close: ${postCloseCron} (IST)`);
+  logger.info(`CRON: - Recruitment drive auto-close: ${postCloseCron} (IST)`);
   logger.info(`CRON: - Email processing: ${resolvedAllotmentCron} (IST)`);
   logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
   logger.info('CRON: - Attendance reminders: 0 * * * * (Every hour, IST)');

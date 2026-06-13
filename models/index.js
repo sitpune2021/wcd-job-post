@@ -27,6 +27,10 @@ db.ApplicantExperience = require('./ApplicantExperience');
 db.ApplicantSkill = require('./ApplicantSkill');
 db.ApplicantDocument = require('./ApplicantDocument');
 db.Application = require('./Application');
+db.RecruitmentDrive = require('./RecruitmentDrive');
+db.RecruitmentDriveHistory = require('./RecruitmentDriveHistory');
+db.ApplicationPreference = require('./ApplicationPreference');
+db.MeritGenerationRun = require('./MeritGenerationRun');
 db.EligibilityResult = require('./EligibilityResult');
 db.MeritList = require('./MeritList');
 db.ApplicationStatusHistory = require('./ApplicationStatusHistory');
@@ -40,6 +44,7 @@ db.ApplicationStatus = require('./ApplicationStatus');
 db.EducationLevel = require('./EducationLevel');
 db.AuditLog = require('./AuditLog');
 db.NotificationLog = require('./NotificationLog');
+db.PortalSetting = require('./PortalSetting');
 db.OtpLog = require('./OtpLog');
 db.RefreshToken = require('./RefreshToken');
 db.LoginAttempt = require('./LoginAttempt');
@@ -144,6 +149,7 @@ db.ApplicantMaster.hasMany(db.ApplicantExperience, { foreignKey: 'applicant_id',
 db.ApplicantMaster.hasMany(db.ApplicantSkill, { foreignKey: 'applicant_id', as: 'skills' });
 db.ApplicantMaster.hasMany(db.ApplicantDocument, { foreignKey: 'applicant_id', as: 'documents' });
 db.ApplicantMaster.hasMany(db.Application, { foreignKey: 'applicant_id', as: 'applications' });
+db.ApplicantMaster.hasMany(db.ApplicationPreference, { foreignKey: 'applicant_id', as: 'applicationPreferences' });
 
 // ApplicantSkill -> ApplicantMaster
 db.ApplicantSkill.belongsTo(db.ApplicantMaster, { foreignKey: 'applicant_id', as: 'applicant' });
@@ -154,6 +160,11 @@ db.Application.belongsTo(db.PostMaster, { foreignKey: 'post_id', as: 'post' });
 db.Application.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
 db.DistrictMaster.hasMany(db.Application, { foreignKey: 'district_id', as: 'applications' });
 db.Application.belongsTo(db.AdminUser, { foreignKey: 'verified_by', as: 'verifier' });
+db.Application.belongsTo(db.RecruitmentDrive, { foreignKey: 'recruitment_drive_id', as: 'recruitmentDrive' });
+db.Application.hasOne(db.ApplicationPreference, { foreignKey: 'application_id', as: 'preference' });
+db.ApplicationPreference.belongsTo(db.Application, { foreignKey: 'application_id', as: 'application' });
+db.ApplicationPreference.belongsTo(db.ApplicantMaster, { foreignKey: 'applicant_id', as: 'applicant' });
+db.ApplicationPreference.belongsTo(db.RecruitmentDrive, { foreignKey: 'recruitment_drive_id', as: 'recruitmentDrive' });
 db.Application.hasOne(db.EligibilityResult, { foreignKey: 'application_id', as: 'eligibility' });
 db.Application.hasOne(db.MeritList, { foreignKey: 'application_id', as: 'merit' });
 db.Application.hasMany(db.ApplicationStatusHistory, { foreignKey: 'application_id', as: 'statusHistory' });
@@ -163,6 +174,11 @@ db.ApplicationStatusHistory.belongsTo(db.AdminUser, { foreignKey: 'changed_by', 
 
 // PostMaster -> EducationLevel (min education requirement)
 db.PostMaster.belongsTo(db.EducationLevel, { foreignKey: 'min_education_level_id', as: 'minEducationLevel' });
+db.PostMaster.belongsTo(db.RecruitmentDrive, { foreignKey: 'recruitment_drive_id', as: 'recruitmentDrive' });
+db.RecruitmentDrive.hasMany(db.PostMaster, { foreignKey: 'recruitment_drive_id', as: 'posts' });
+db.RecruitmentDrive.hasMany(db.Application, { foreignKey: 'recruitment_drive_id', as: 'applications' });
+db.RecruitmentDrive.hasMany(db.RecruitmentDriveHistory, { foreignKey: 'recruitment_drive_id', as: 'history' });
+db.RecruitmentDriveHistory.belongsTo(db.RecruitmentDrive, { foreignKey: 'recruitment_drive_id', as: 'recruitmentDrive' });
 db.EducationLevel.hasMany(db.PostMaster, { foreignKey: 'min_education_level_id', as: 'posts' });
 
 // EducationLevel -> DocumentType (optional)
@@ -266,6 +282,13 @@ db.Application.hasMany(db.ApplicantAcknowledgement, { foreignKey: 'application_i
 
 // MeritList -> DistrictMaster
 db.MeritList.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'district' });
+db.MeritList.belongsTo(db.Application, { foreignKey: 'application_id', as: 'application' });
+db.Application.hasMany(db.MeritList, { foreignKey: 'application_id', as: 'meritEntries' });
+db.MeritList.belongsTo(db.PostMaster, { foreignKey: 'post_id', as: 'post' });
+db.PostMaster.hasMany(db.MeritList, { foreignKey: 'post_id', as: 'meritEntries' });
+db.MeritList.belongsTo(db.RecruitmentDrive, { foreignKey: 'recruitment_drive_id', as: 'recruitmentDrive' });
+db.MeritList.belongsTo(db.MeritGenerationRun, { foreignKey: 'merit_run_id', as: 'generationRun' });
+db.MeritGenerationRun.hasMany(db.MeritList, { foreignKey: 'merit_run_id', as: 'entries' });
 db.DistrictMaster.hasMany(db.MeritList, { foreignKey: 'district_id', as: 'meritLists' });
 
 // DocumentVerification associations

@@ -103,6 +103,14 @@ const ApplicantMaster = sequelize.define('ApplicantMaster', {
     allowNull: false,
     comment: 'When true, OCR is disabled for this applicant and they must fill forms manually'
   },
+  profile_edit_override: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false
+  },
+  profile_edit_override_reason: DataTypes.TEXT,
+  profile_edit_override_by: DataTypes.INTEGER,
+  profile_edit_override_at: DataTypes.DATE,
   last_login_ip: {
     type: DataTypes.STRING(45),
     allowNull: true

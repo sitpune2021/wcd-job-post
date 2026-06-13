@@ -27,13 +27,23 @@ const {
   EducationLevel,
   ExperienceDomain,
   SkillMaster,
-  DocumentType
+  DocumentType,
+  RecruitmentDrive
 } = db;
+
+const runAfterCommit = async (transaction, callback) => {
+  if (transaction) {
+    transaction.afterCommit(callback);
+    return;
+  }
+  await callback();
+};
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
 const { APPLICATION_STATUS } = require('../../constants/applicationStatus');
-const { Op } = require('sequelize');
+const { Op, QueryTypes } = require('sequelize');
 const applicationRestrictionService = require('../applicationRestrictionService');
+const recruitmentDriveService = require('../recruitmentDriveService');
 
 // NOTE: Max applications are now controlled by applicationRestrictionService (ENV-driven)
 
@@ -46,10 +56,12 @@ const applicationRestrictionService = require('../applicationRestrictionService'
  */
 const getEligiblePosts = async (applicantId) => {
   try {
+    const drive = await recruitmentDriveService.requireActiveDrive();
     // Get all active posts
     const posts = await PostMaster.findAll({
       where: {
         is_active: true,
+        recruitment_drive_id: drive.recruitment_drive_id,
         is_deleted: false
       },
       include: [{ 
@@ -83,8 +95,12 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
     const statusFilter = (query.status || '').toString().trim();
     const year = query.year ? parseInt(query.year, 10) : null;
     const postId = query.post_id ? parseInt(query.post_id, 10) : null;
-    const districtId = query.district_id ? parseInt(query.district_id, 10) : null;
-    const sortDir = (query.sort_dir || 'DESC').toString().toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const districtId = query.district_id ? parseInt(query.district_id, 10) : null;
+      const sortDir = (query.sort_dir || 'DESC').toString().toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const includeHistory = String(query.include_history || '').toLowerCase() === 'true';
+      const recruitmentDriveId = query.recruitment_drive_id
+        ? parseInt(query.recruitment_drive_id, 10)
+        : null;
 
     const normalizeStatus = (raw) => {
       if (!raw) return null;
@@ -97,8 +113,16 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
       return s;
     };
 
-    const where = { applicant_id: applicantId };
-    const andConditions = [];
+      const where = { applicant_id: applicantId };
+      let activeDrive = null;
+      const andConditions = [];
+      if (Number.isFinite(recruitmentDriveId)) {
+        where.recruitment_drive_id = recruitmentDriveId;
+      } else if (!includeHistory) {
+          activeDrive = await recruitmentDriveService.getActiveDrive();
+          if (activeDrive) where.recruitment_drive_id = activeDrive.recruitment_drive_id;
+          else where.recruitment_drive_id = -1;
+      }
     if (statusFilter) {
       const statuses = statusFilter
         .split(',')
@@ -127,7 +151,7 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
         model: PostMaster,
         as: 'post',
         required: true,
-        attributes: ['post_id', 'post_code', 'post_name', 'post_name_mr'],
+          attributes: ['post_id', 'post_code', 'post_name', 'post_name_mr', 'merit_published_at'],
         include: [
           {
             model: Scheme,
@@ -148,6 +172,12 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
         as: 'district',
         required: false,
         attributes: ['district_id', 'district_name', 'district_name_mr']
+      },
+      {
+        model: RecruitmentDrive,
+        as: 'recruitmentDrive',
+        required: false,
+        attributes: ['recruitment_drive_id', 'drive_code', 'drive_name', 'status', 'is_active']
       }
     ];
 
@@ -199,6 +229,7 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
       include,
       attributes: [
         'application_id',
+        'recruitment_drive_id',
         'application_no',
         'post_id',
         'district_id',
@@ -223,6 +254,7 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
     const applicationIds = items.map((a) => a.application_id);
 
     const latestStatusByAppId = new Map();
+    const preferenceByAppId = new Map();
     if (applicationIds.length > 0) {
       const historyRows = await ApplicationStatusHistory.findAll({
         where: { application_id: { [Op.in]: applicationIds } },
@@ -236,16 +268,44 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
           latestStatusByAppId.set(json.application_id, json);
         }
       }
+      const preferenceRows = await db.ApplicationPreference.findAll({
+        where: { applicant_id: applicantId, application_id: { [Op.in]: applicationIds } },
+        attributes: ['application_id', 'preference_rank']
+      });
+      preferenceRows.forEach((preference) => {
+        preferenceByAppId.set(preference.application_id, preference.preference_rank);
+      });
     }
 
     items.forEach((a) => {
       a.latest_status_event = latestStatusByAppId.get(a.application_id) || null;
+      a.preference_rank = preferenceByAppId.get(a.application_id) || null;
     });
 
     const totalPages = Math.max(1, Math.ceil((count || 0) / limit));
+    const availableDrives = await db.sequelize.query(`
+      SELECT DISTINCT
+        rd.recruitment_drive_id,
+        rd.drive_code,
+        rd.drive_name,
+        rd.status,
+        rd.is_active,
+        rd.created_at
+      FROM ms_applications a
+      JOIN ms_recruitment_drives rd
+        ON rd.recruitment_drive_id = a.recruitment_drive_id
+      WHERE a.applicant_id = :applicantId
+        AND a.is_deleted IS NOT TRUE
+      ORDER BY rd.created_at DESC, rd.recruitment_drive_id DESC
+    `, {
+      replacements: { applicantId },
+      type: QueryTypes.SELECT
+    });
 
     return {
       applications: items,
+      active_drive: activeDrive,
+      available_drives: availableDrives,
       pagination: {
         total: count || 0,
         page,
@@ -257,6 +317,8 @@ const getApplicationStatusList = async (applicantId, query = {}) => {
         status: statusFilter || null,
         post_id: Number.isFinite(postId) ? postId : null,
         district_id: Number.isFinite(districtId) ? districtId : null,
+        recruitment_drive_id: Number.isFinite(recruitmentDriveId) ? recruitmentDriveId : null,
+        include_history: includeHistory,
         year: Number.isFinite(year) ? year : null,
         sort_dir: sortDir
       }
@@ -278,10 +340,13 @@ const createApplication = async (applicantId, data, transaction = null) => {
   const { post_id, district_id, eligibility } = data;
 
   try {
-    // If applicant is already selected in any post, do not allow applying to any other post
+    const drive = await recruitmentDriveService.assertApplicationsOpen();
+
+    // A final selection blocks only other applications in this recruitment.
     const alreadySelected = await Application.findOne({
       where: {
         applicant_id: applicantId,
+        recruitment_drive_id: drive.recruitment_drive_id,
         is_deleted: false,
         [Op.or]: [
           { selection_status: APPLICATION_STATUS.SELECTED },
@@ -308,7 +373,11 @@ const createApplication = async (applicantId, data, transaction = null) => {
     // });
     // unscope just like canappltopost function
     const post = await PostMaster.unscoped().findOne({
-      where: { post_id: post_id , is_deleted: false },
+      where: {
+        post_id: post_id,
+        recruitment_drive_id: drive.recruitment_drive_id,
+        is_deleted: false
+      },
       include: [{ 
         model: Scheme, 
         as: 'scheme', 
@@ -354,7 +423,11 @@ const createApplication = async (applicantId, data, transaction = null) => {
     // Generate application number
     // Check if already applied for this post
     const existing = await Application.findOne({
-      where: { applicant_id: applicantId, post_id: post_id }
+      where: {
+        applicant_id: applicantId,
+        post_id: post_id,
+        recruitment_drive_id: drive.recruitment_drive_id
+      }
     });
 
     if (existing) {
@@ -377,6 +450,7 @@ const createApplication = async (applicantId, data, transaction = null) => {
     // Create draft application
     const application = await Application.create({
       applicant_id: applicantId,
+      recruitment_drive_id: drive.recruitment_drive_id,
       post_id,
       district_id: finalDistrictId,
       status: 'DRAFT',
@@ -392,7 +466,20 @@ const createApplication = async (applicantId, data, transaction = null) => {
       is_local_resident: personal.domicile_maharashtra,
       // Store eligibility result
       system_eligibility: eligibility?.isEligible || null,
-      system_eligibility_reason: eligibility?.failedChecks?.join('; ') || null
+      system_eligibility_reason: eligibility?.failedChecks?.join('; ') || null,
+      profile_snapshot: {
+        personal: {
+          gender: personal.gender,
+          date_of_birth: personal.dob,
+          aadhaar_number: personal.aadhar_no
+        },
+        address: {
+          address_line1: address.address_line,
+          city: address.city,
+          pincode: address.pincode
+        },
+        captured_at: new Date()
+      }
     }, transaction ? { transaction } : {});
 
     logger.info(`Draft application created for applicant: ${applicantId}, post: ${post_id}`);
@@ -566,6 +653,23 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
 
     logger.info(`Application ${applicationNo} submitted and processed: ${finalStatus} by applicant: ${applicantId}`);
 
+    const submittedNotification = {
+      title: 'Application submitted',
+      title_mr: 'अर्ज सादर झाला',
+      message: `Application ${applicationNo} has been submitted successfully.`,
+      message_mr: `अर्ज ${applicationNo} यशस्वीरित्या सादर झाला आहे.`,
+      notification_type: 'APPLICATION',
+      event_code: 'APPLICATION_SUBMITTED',
+      action_url: '/dashboard/applied-posts',
+      recruitment_drive_id: application.recruitment_drive_id,
+      application_id: application.application_id,
+      post_id: application.post_id,
+      metadata: { status: finalStatus }
+    };
+    await runAfterCommit(transaction, () =>
+      require('../notificationService').notifyApplicant(applicantId, submittedNotification)
+    );
+
     // Fetch with full relations
     const submittedApp = await Application.findByPk(application.application_id, {
       include: [
@@ -589,6 +693,23 @@ const finalSubmitApplication = async (applicantId, applicationId, declarationAcc
       ],
       transaction
     });
+
+    const adminNotification = {
+      title: 'New application received',
+      message: `Application ${applicationNo} was submitted for ${submittedApp.post?.post_name || 'a recruitment post'}.`,
+      notification_type: 'APPLICATION',
+      event_code: 'APPLICATION_RECEIVED',
+      action_url: `/applications/${application.application_id}`,
+      recruitment_drive_id: application.recruitment_drive_id,
+      application_id: application.application_id,
+      post_id: application.post_id
+    };
+    await runAfterCommit(transaction, () =>
+      require('../notificationService').notifyRelevantAdmins({
+        districtId: application.district_id,
+        schemeId: submittedApp.post?.scheme?.scheme_id
+      }, adminNotification)
+    );
 
     return {
       message: isEligible

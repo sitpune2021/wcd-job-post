@@ -90,7 +90,7 @@ const errorHandler = (err, req, res, next) => {
     case 'SequelizeUniqueConstraintError':
       statusCode = 409;
       errors = err.errors?.map(e => ({ field: e.path, message: `${e.path} already exists` })) || null;
-      message = 'Resource already exists';
+      message = errors?.[0]?.message || 'A record with the same value already exists';
       break;
 
     case 'SequelizeForeignKeyConstraintError':

@@ -13,6 +13,7 @@ const logger = require('../config/logger');
 // Send registration OTP
 router.post('/send-otp', otpRateLimiter, async (req, res) => {
   try {
+    await require('../services/recruitmentDriveService').assertRegistrationOpen();
     const result = await authService.sendRegistrationOTP(req.body.email);
     res.json(result);
   } catch (error) {
@@ -35,6 +36,7 @@ router.post('/send-otp', otpRateLimiter, async (req, res) => {
 // Register applicant
 router.post('/register', async (req, res) => {
   try {
+    await require('../services/recruitmentDriveService').assertRegistrationOpen();
     const result = await authService.registerApplicant(req.body);
     res.status(201).json({ 
       success: true, 

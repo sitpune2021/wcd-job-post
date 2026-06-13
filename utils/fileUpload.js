@@ -69,13 +69,27 @@ const storage = multer.diskStorage({
         return cb(new Error('applicantId is required'));
       }
 
-      // Create folder structure: uploads/applicants/{applicant_id}/{doc_type}/
+      const { ApplicantMaster } = require('../models');
+      const applicant = await ApplicantMaster.findByPk(applicantId, {
+        attributes: ['applicant_no', 'email']
+      });
+      const applicantFolder = sanitizePathSegment(
+        applicant?.applicant_no || applicant?.email || 'APPLICANT_PENDING',
+        'APPLICANT_PENDING'
+      );
+      const now = new Date();
+      const year = String(now.getFullYear());
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+
+      // New uploads: uploads/applicants/YYYY/MM/{applicant_no}/{doc_type}/
       const uploadPath = path.join(
         __dirname,
         '..',
         'uploads',
         'applicants',
-        applicantId.toString(),
+        year,
+        month,
+        applicantFolder,
         docType
       );
 
@@ -274,6 +288,55 @@ const compressImage = async (filePath, quality = 80) => {
   }
 };
 
+const optimizeUploadedImage = async (fileData) => {
+  if (!fileData?.path || !fileData?.mimetype?.startsWith('image/')) return fileData;
+
+  const ext = path.extname(fileData.path).toLowerCase();
+  if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) return fileData;
+  const dir = path.dirname(fileData.path);
+  const name = path.basename(fileData.path, ext);
+  const optimizedDir = path.join(dir, 'OPTIMIZED');
+  await ensureDir(optimizedDir);
+  let optimizedPath;
+  let pipeline = sharp(fileData.path).rotate().resize(2400, 2400, {
+    fit: 'inside',
+    withoutEnlargement: true
+  });
+
+  if (ext === '.png') {
+    optimizedPath = path.join(optimizedDir, `${name}_optimized.png`);
+    pipeline = pipeline.png({ compressionLevel: 9, adaptiveFiltering: true });
+  } else if (ext === '.webp') {
+    optimizedPath = path.join(optimizedDir, `${name}_optimized.webp`);
+    pipeline = pipeline.webp({ lossless: true, effort: 6 });
+  } else {
+    optimizedPath = path.join(optimizedDir, `${name}_optimized.jpg`);
+    pipeline = pipeline.jpeg({ quality: 95, mozjpeg: true });
+  }
+
+  await pipeline.toFile(optimizedPath);
+  const originalStats = await fs.stat(fileData.path);
+  const optimizedStats = await fs.stat(optimizedPath);
+  if (optimizedStats.size >= originalStats.size) {
+    await fs.unlink(optimizedPath).catch(() => {});
+    return fileData;
+  }
+
+  logger.info('Applicant image optimized', {
+    original: fileData.path,
+    optimized: optimizedPath,
+    original_size: originalStats.size,
+    optimized_size: optimizedStats.size
+  });
+  return {
+    ...fileData,
+    path: optimizedPath,
+    filename: path.basename(optimizedPath),
+    size: optimizedStats.size,
+    mimetype: ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+  };
+};
+
 /**
  * Generate thumbnail for image
  * @param {string} filePath - Path to original image
@@ -392,6 +455,7 @@ module.exports = {
   uploadSingle,
   uploadHrmFile,
   compressImage,
+  optimizeUploadedImage,
   generateThumbnail,
   deleteFile,
   getRelativePath,

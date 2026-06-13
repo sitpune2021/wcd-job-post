@@ -9,6 +9,7 @@ const db = require('../../models');
 const { BannerMaster, sequelize } = db;
 const logger = require('../../config/logger');
 const { paginatedQuery } = require('../../utils/pagination');
+const { fileExists, getAbsolutePath } = require('../../utils/fileUpload');
 
 // ==================== TRANSFORM FUNCTIONS ====================
 
@@ -69,7 +70,25 @@ const getActiveBanners = async () => {
       order: [['display_order', 'ASC'], ['banner_id', 'DESC']]
     });
 
-    return banners.map(transformBanner());
+    const transformed = banners.map(transformBanner());
+    const available = [];
+    for (const banner of transformed) {
+      const englishExists = banner.banner_image_path
+        && await fileExists(getAbsolutePath(banner.banner_image_path));
+      if (!englishExists) {
+        logger.warn('Skipping active banner with missing image', {
+          banner_id: banner.banner_id,
+          banner_image_path: banner.banner_image_path
+        });
+        continue;
+      }
+      if (banner.banner_image_path_mr
+        && !await fileExists(getAbsolutePath(banner.banner_image_path_mr))) {
+        banner.banner_image_path_mr = null;
+      }
+      available.push(banner);
+    }
+    return available;
   } catch (error) {
     logger.error('Error fetching active banners:', error);
     throw error;

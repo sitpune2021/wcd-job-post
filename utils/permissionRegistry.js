@@ -753,6 +753,20 @@ registerPermission({
   module: 'hrm'
 });
 
+registerPermission({
+  code: 'portal.settings.view',
+  name: 'View Portal Settings',
+  description: 'View applicant portal settings',
+  module: 'portal'
+});
+
+registerPermission({
+  code: 'portal.settings.edit',
+  name: 'Edit Portal Settings',
+  description: 'Edit applicant portal settings',
+  module: 'portal'
+});
+
 // HRM Performance
 registerPermission({
   code: 'hrm.performance.view',

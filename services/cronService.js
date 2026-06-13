@@ -8,6 +8,97 @@ const logger = require('../config/logger');
 const { APPLICATION_STATUS, ACTOR_TYPE } = require('../constants/applicationStatus');
 
 class CronService {
+
+  async closeExpiredRecruitmentDrives() {
+    const now = new Date();
+    const applicationDrivesToOpen = await db.RecruitmentDrive.findAll({
+      where: {
+        is_active: true,
+        status: 'OPEN',
+        applications_open: false,
+        application_start_at: { [Op.lte]: now },
+        application_end_at: { [Op.gt]: now }
+      },
+      attributes: ['recruitment_drive_id', 'drive_code', 'drive_name']
+    });
+    const registrationDrives = await db.RecruitmentDrive.findAll({
+      where: {
+        is_active: true,
+        status: 'OPEN',
+        registration_open: true,
+        registration_end_at: { [Op.lt]: now }
+      },
+      attributes: ['recruitment_drive_id', 'drive_code', 'drive_name']
+    });
+    const drives = await db.RecruitmentDrive.findAll({
+      where: {
+        is_active: true,
+        status: 'OPEN',
+        application_end_at: { [Op.lt]: now }
+      },
+      attributes: ['recruitment_drive_id', 'drive_code', 'drive_name']
+    });
+
+    const recruitmentDriveService = require('./recruitmentDriveService');
+    const results = [];
+    const openedResults = [];
+    const registrationResults = [];
+    for (const drive of applicationDrivesToOpen) {
+      try {
+        await recruitmentDriveService.transitionDrive(
+          drive.recruitment_drive_id,
+          'OPEN_APPLICATIONS',
+          null,
+          'Automatically opened at application_start_at'
+        );
+        openedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: true });
+      } catch (error) {
+        logger.error(`CRON: Failed to open applications for drive ${drive.recruitment_drive_id}`, error);
+        openedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
+      }
+    }
+    for (const drive of registrationDrives) {
+      try {
+        await recruitmentDriveService.transitionDrive(
+          drive.recruitment_drive_id,
+          'CLOSE_REGISTRATION',
+          null,
+          'Automatically closed after registration_end_at'
+        );
+        registrationResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: true });
+      } catch (error) {
+        logger.error(`CRON: Failed to close registration for drive ${drive.recruitment_drive_id}`, error);
+        registrationResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
+      }
+    }
+    for (const drive of drives) {
+      try {
+        const result = await recruitmentDriveService.transitionDrive(
+          drive.recruitment_drive_id,
+          'CLOSE_APPLICATIONS',
+          null,
+          'Automatically closed after application_end_at'
+        );
+        results.push({
+          recruitment_drive_id: drive.recruitment_drive_id,
+          success: true,
+          merit_generation_summary: result.getDataValue('merit_generation_summary')
+        });
+      } catch (error) {
+        logger.error(`CRON: Failed to close recruitment drive ${drive.recruitment_drive_id}`, error);
+        results.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
+      }
+    }
+    return {
+      success: [...openedResults, ...registrationResults, ...results].every((item) => item.success),
+      openedCount: openedResults.filter((item) => item.success).length,
+      registrationClosedCount: registrationResults.filter((item) => item.success).length,
+      closedCount: results.filter((item) => item.success).length,
+      openedResults,
+      registrationResults,
+      results
+    };
+  }
   
   /**
    * Close posts that have passed their closing date
@@ -90,10 +181,14 @@ class CronService {
    */
   async autoRejectOtherApplications(applicantId, selectedApplicationId, selectedPostId) {
     try {
+      const selectedApplication = await db.Application.findByPk(selectedApplicationId, {
+        attributes: ['recruitment_drive_id']
+      });
       // Find all other pending/submitted applications for this applicant
       const otherApplications = await db.Application.findAll({
         where: {
           applicant_id: applicantId,
+          recruitment_drive_id: selectedApplication?.recruitment_drive_id || null,
           application_id: { [Op.ne]: selectedApplicationId },
           is_deleted: false,
           selection_status: { [Op.or]: [null, 'PENDING'] }
@@ -168,13 +263,13 @@ class CronService {
    * @returns {Promise<Object>} - { canApply: boolean, currentCount: number, maxAllowed: number }
    */
   async checkApplicationLimit(applicantId) {
-    const MAX_APPLICATIONS = 2;
-    
     try {
+      const drive = await require('./recruitmentDriveService').requireActiveDrive();
       // Count active applications (not deleted, not auto-rejected due to selection in other post)
       const count = await db.Application.count({
         where: {
           applicant_id: applicantId,
+          recruitment_drive_id: drive.recruitment_drive_id,
           is_deleted: false,
           [Op.and]: [
             {
@@ -188,10 +283,11 @@ class CronService {
       });
       
       return {
-        canApply: count < MAX_APPLICATIONS,
+        canApply: drive.applications_open,
         currentCount: count,
-        maxAllowed: MAX_APPLICATIONS,
-        remainingSlots: Math.max(0, MAX_APPLICATIONS - count)
+        maxAllowed: null,
+        remainingSlots: null,
+        unlimitedApplications: true
       };
     } catch (error) {
       logger.error('Error checking application limit:', error);
@@ -222,19 +318,43 @@ class CronService {
         throw new Error('Application is already marked as SELECTED');
       }
 
+      const meritEntry = await db.MeritList.findOne({
+        where: {
+          application_id: applicationId,
+          recruitment_drive_id: application.recruitment_drive_id
+        },
+        include: [{
+          model: db.MeritGenerationRun,
+          as: 'generationRun',
+          required: true,
+          where: { status: { [Op.in]: ['COMPLETED', 'PUBLISHED'] } }
+        }],
+        transaction
+      });
+      if (!meritEntry) {
+        throw new Error('Generate the merit list before selecting this application');
+      }
+      const drive = await db.RecruitmentDrive.findByPk(application.recruitment_drive_id, { transaction });
+      if (!drive || !['APPLICATION_CLOSED', 'MERIT_GENERATED', 'SELECTION'].includes(drive.status)) {
+        throw new Error('Close applications before selecting candidates');
+      }
+      if (!application.document_verified) {
+        throw new Error('Verify applicant documents before final selection');
+      }
+
       const post = await db.PostMaster.findByPk(application.post_id, {
         transaction,
         lock: transaction.LOCK.UPDATE
       });
 
-      if (!post || post.is_deleted) {
-        throw new Error('Post not found');
-      }
+        if (!post || post.is_deleted) {
+          throw new Error('Post not found');
+        }
 
-      // Check if post is active and not closed
-      if (!post.is_active) {
-        throw new Error('Post is not active for applications');
-      }
+        const activeDrive = await require('./recruitmentDriveService').requireActiveDrive({ transaction });
+        if (post.recruitment_drive_id !== activeDrive.recruitment_drive_id) {
+          throw new Error('Post does not belong to the active recruitment drive');
+        }
 
       // Simple logic: use filled_positions from post master
       const totalPositions = post.total_positions || 0;
@@ -334,10 +454,10 @@ class CronService {
     };
     
     try {
-      // Task 1: Close expired posts
-      results.tasks.closeExpiredPosts = await this.closeExpiredPosts();
+      // Normal recruitment lifecycle is controlled by the drive schedule.
+      results.tasks.closeExpiredRecruitmentDrives = await this.closeExpiredRecruitmentDrives();
     } catch (error) {
-      results.tasks.closeExpiredPosts = { success: false, error: error.message };
+      results.tasks.closeExpiredRecruitmentDrives = { success: false, error: error.message };
     }
     
     logger.info('CRON: Scheduled tasks completed', results);

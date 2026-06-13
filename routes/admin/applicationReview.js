@@ -79,6 +79,55 @@ const stageReportColumns = [
 // All routes require authentication
 router.use(authenticate);
 
+const assertAssignedScope = (req, resource, resourceLabel) => {
+  const assignedDistrictId = req.user?.district_id;
+  const assignedSchemeId = req.user?.scheme_id;
+  if (assignedDistrictId && Number(resource?.district_id) !== Number(assignedDistrictId)) {
+    throw new ApiError(403, `${resourceLabel} is outside your assigned district`);
+  }
+  if (assignedSchemeId && Number(resource?.scheme_id) !== Number(assignedSchemeId)) {
+    throw new ApiError(403, `${resourceLabel} is outside your assigned scheme`);
+  }
+};
+
+router.param('postId', async (req, _res, next, postId) => {
+  try {
+    const post = await require('../../models').PostMaster.findOne({
+      where: { post_id: postId, is_deleted: false },
+      attributes: ['post_id', 'district_id', 'scheme_id']
+    });
+    if (!post) throw new ApiError(404, 'Post not found');
+    assertAssignedScope(req, post, 'Post');
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.param('id', async (req, _res, next, applicationId) => {
+  try {
+    const models = require('../../models');
+    const application = await models.Application.findOne({
+      where: { application_id: applicationId, is_deleted: false },
+      attributes: ['application_id', 'district_id'],
+      include: [{
+        model: models.PostMaster,
+        as: 'post',
+        attributes: ['scheme_id'],
+        required: true
+      }]
+    });
+    if (!application) throw new ApiError(404, 'Application not found');
+    assertAssignedScope(req, {
+      district_id: application.district_id,
+      scheme_id: application.post?.scheme_id
+    }, 'Application');
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ==================== POSTS FOR MERIT REVIEW ====================
 
 /**
@@ -90,7 +139,9 @@ router.get('/posts', requirePermission('applications.view'), auditLog('VIEW_POST
   try {
     const {
       scheme_id,
+      scheme_type_id,
       district_id,
+      recruitment_drive_id,
       search,
       page = 1,
       limit = 20
@@ -103,8 +154,11 @@ router.get('/posts', requirePermission('applications.view'), auditLog('VIEW_POST
     // Get all posts with counts (this function doesn't support pagination natively)
     const allPosts = await applicationReviewService.getActivePostsWithCounts({
       scheme_id,
+      scheme_type_id,
       district_id,
-      search
+      recruitment_drive_id,
+      search,
+      adminUser: req.user
     });
 
     // Apply pagination manually
@@ -142,6 +196,8 @@ router.get('/posts/:postId/applications', requirePermission('applications.view')
     const result = await applicationReviewService.getApplicationsForPost(req.params.postId, {
       status: req.query.status,
       district_id: req.query.district_id,
+      recruitment_drive_id: req.query.recruitment_drive_id,
+      all_drives: req.query.all_drives,
       search: req.query.search,
       page: req.query.page,
       limit: req.query.limit,
@@ -153,6 +209,7 @@ router.get('/posts/:postId/applications', requirePermission('applications.view')
         applications: result.applications,
         statusSummary: result.statusSummary,
         post: result.post,
+        generationRun: result.generationRun,
         batchInfo: result.batchInfo // Include batch info in response
       },
       result.pagination,
@@ -176,9 +233,11 @@ router.get('/applications', requirePermission('applications.view'), auditLog('VI
       status: req.query.status,
       post_id: req.query.post_id,
       district_id: req.query.district_id,
+      recruitment_drive_id: req.query.recruitment_drive_id,
       search: req.query.search,
       page: req.query.page,
-      limit: req.query.limit
+      limit: req.query.limit,
+      adminUser: req.user
     });
     return ApiResponse.success(res, result, 'Applications retrieved successfully');
   } catch (error) {
@@ -370,13 +429,9 @@ router.post('/posts/:postId/generate-merit', requirePermission('applications.edi
   try {
     const { district_id } = req.body;
     
-    if (!district_id) {
-      throw ApiError.badRequest('district_id is required');
-    }
-    
     const result = await meritListService.generateMeritList(
       parseInt(req.params.postId),
-      parseInt(district_id),
+      district_id ? parseInt(district_id) : null,
       req.user.admin_id
     );
     
@@ -395,13 +450,9 @@ router.get('/posts/:postId/merit-list', requirePermission('applications.view'), 
   try {
     const { district_id, page, limit } = req.query;
     
-    if (!district_id) {
-      throw ApiError.badRequest('district_id query parameter is required');
-    }
-    
     const result = await meritListService.getMeritList(
       parseInt(req.params.postId),
-      parseInt(district_id),
+      district_id ? parseInt(district_id) : null,
       { 
         page: parseInt(page) || 1, 
         limit: parseInt(limit) || 50,
@@ -410,6 +461,19 @@ router.get('/posts/:postId/merit-list', requirePermission('applications.view'), 
     );
     
     return ApiResponse.success(res, result, 'Merit list retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+  });
+
+router.post('/posts/:postId/publish-merit', requirePermission('applications.edit'), auditLog('PUBLISH_MERIT_LIST'), async (req, res, next) => {
+  try {
+    const result = await meritListService.publishLatestMeritList(
+      parseInt(req.params.postId),
+      req.body.district_id ? parseInt(req.body.district_id) : null,
+      req.user.admin_id
+    );
+    return ApiResponse.success(res, result, 'Merit list published');
   } catch (error) {
     next(error);
   }
