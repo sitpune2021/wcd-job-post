@@ -46,12 +46,12 @@ const PostMaster = sequelize.define('PostMaster', {
   },
   scheme_id: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
     references: {
       model: 'ms_schemes',
       key: 'scheme_id'
     },
-    comment: 'Linked scheme for the post (required)'
+    comment: 'Linked scheme for the post; nullable for legacy/unclassified posts'
   },
   amount: {
     type: DataTypes.DECIMAL(10, 2),

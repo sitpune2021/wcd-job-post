@@ -54,6 +54,13 @@ const { localizeField } = require('./helpers');
 const transformPost = (language = 'en') => (p) => ({
   post_id: p.post_id,
   recruitment_drive_id: p.recruitment_drive_id,
+  recruitment_drive: p.recruitmentDrive ? {
+    recruitment_drive_id: p.recruitmentDrive.recruitment_drive_id,
+    drive_code: p.recruitmentDrive.drive_code,
+    drive_name: p.recruitmentDrive.drive_name,
+    status: p.recruitmentDrive.status,
+    is_active: p.recruitmentDrive.is_active
+  } : null,
   source_post_id: p.source_post_id || null,
   post_code: p.post_code,
   post_name: localizeField(p, 'post_name', language),
@@ -271,6 +278,11 @@ const getPosts = async (query = {}) => {
         as: 'district',
         required: false,
         attributes: ['district_id', 'district_name', 'district_name_mr']
+      }, {
+        model: db.RecruitmentDrive,
+        as: 'recruitmentDrive',
+        required: false,
+        attributes: ['recruitment_drive_id', 'drive_code', 'drive_name', 'status', 'is_active']
       }],
       baseWhere,
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']],
@@ -343,7 +355,7 @@ const getPostById = async (postId, language = 'en') => {
   try {
     const post = await PostMaster.findByPk(postId, {
       attributes: [
-        'post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
+        'post_id', 'recruitment_drive_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
         'scheme_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
         'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
@@ -370,6 +382,11 @@ const getPostById = async (postId, language = 'en') => {
         as: 'district',
         required: false,
         attributes: ['district_id', 'district_name', 'district_name_mr']
+      }, {
+        model: db.RecruitmentDrive,
+        as: 'recruitmentDrive',
+        required: false,
+        attributes: ['recruitment_drive_id', 'drive_code', 'drive_name', 'status', 'is_active']
       }]
     });
 
@@ -389,6 +406,14 @@ const getPostById = async (postId, language = 'en') => {
 
     return {
       post_id: post.post_id,
+      recruitment_drive_id: post.recruitment_drive_id,
+      recruitment_drive: post.recruitmentDrive ? {
+        recruitment_drive_id: post.recruitmentDrive.recruitment_drive_id,
+        drive_code: post.recruitmentDrive.drive_code,
+        drive_name: post.recruitmentDrive.drive_name,
+        status: post.recruitmentDrive.status,
+        is_active: post.recruitmentDrive.is_active
+      } : null,
       post_code: post.post_code,
       post_name: localizeField(post, 'post_name', language),
       post_name_en: post.post_name,
@@ -446,11 +471,11 @@ const getPostById = async (postId, language = 'en') => {
  */
 const createPost = async (data, userId) => {
   try {
-    const recruitmentDriveService = require('../recruitmentDriveService');
     const requestedDriveId = parseOptionalInt(data.recruitment_drive_id);
-    const targetDrive = Number.isInteger(requestedDriveId)
-      ? await db.RecruitmentDrive.findByPk(requestedDriveId)
-      : await recruitmentDriveService.requireActiveDrive();
+    if (!Number.isInteger(requestedDriveId)) {
+      throw new ApiError(400, 'Select a recruitment drive before creating the post');
+    }
+    const targetDrive = await db.RecruitmentDrive.findByPk(requestedDriveId);
     if (!targetDrive) {
       throw new ApiError(404, 'Recruitment drive not found');
     }
@@ -604,6 +629,33 @@ const updatePost = async (postId, data, userId) => {
     }
     if (Object.prototype.hasOwnProperty.call(data, 'display_order')) {
       updateData.display_order = parseOptionalInt(data.display_order) || 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'recruitment_drive_id')) {
+      const targetDriveId = parseOptionalInt(data.recruitment_drive_id);
+      if (!Number.isInteger(targetDriveId)) {
+        throw new ApiError(400, 'Select a recruitment drive for the post');
+      }
+      if (targetDriveId !== post.recruitment_drive_id) {
+        const [targetDrive, applicationCount] = await Promise.all([
+          db.RecruitmentDrive.findByPk(targetDriveId),
+          db.Application.count({ where: { post_id: post.post_id, is_deleted: { [Op.ne]: true } } })
+        ]);
+        if (!targetDrive) throw new ApiError(404, 'Recruitment drive not found');
+        if (targetDrive.status === 'CLOSED') {
+          throw new ApiError(409, 'Posts cannot be moved into a closed recruitment drive');
+        }
+        if (applicationCount > 0) {
+          throw new ApiError(409, 'A post with applications cannot be moved to another recruitment drive');
+        }
+        updateData.recruitment_drive_id = targetDriveId;
+        updateData.is_active = targetDrive.is_active && targetDrive.applications_open;
+        if (targetDrive.application_start_at) {
+          updateData.opening_date = new Date(targetDrive.application_start_at).toISOString().slice(0, 10);
+        }
+        if (targetDrive.application_end_at) {
+          updateData.closing_date = new Date(targetDrive.application_end_at).toISOString().slice(0, 10);
+        }
+      }
     }
 
     // Validate dates after all updates are prepared
