@@ -397,11 +397,6 @@ const getPostById = async (postId, language = 'en') => {
     if (post.is_deleted) {
       return null;
     }
-    const drive = await db.RecruitmentDrive.findByPk(post.recruitment_drive_id);
-    if (drive?.status === 'CLOSED') {
-      throw new ApiError(409, 'Posts in a closed recruitment drive cannot be edited');
-    }
-
     const categories = await getPostCategories(postId, language);
 
     return {
@@ -472,15 +467,11 @@ const getPostById = async (postId, language = 'en') => {
 const createPost = async (data, userId) => {
   try {
     const requestedDriveId = parseOptionalInt(data.recruitment_drive_id);
-    if (!Number.isInteger(requestedDriveId)) {
-      throw new ApiError(400, 'Select a recruitment drive before creating the post');
-    }
-    const targetDrive = await db.RecruitmentDrive.findByPk(requestedDriveId);
-    if (!targetDrive) {
+    const targetDrive = Number.isInteger(requestedDriveId)
+      ? await db.RecruitmentDrive.findByPk(requestedDriveId)
+      : null;
+    if (Number.isInteger(requestedDriveId) && !targetDrive) {
       throw new ApiError(404, 'Recruitment drive not found');
-    }
-    if (targetDrive.status === 'CLOSED') {
-      throw new ApiError(409, 'Posts cannot be added to a closed recruitment drive');
     }
     const minEducationLevelId = parseOptionalInt(data.min_education_level_id);
     const maxEducationLevelId = parseOptionalInt(data.max_education_level_id);
@@ -489,10 +480,10 @@ const createPost = async (data, userId) => {
     const districtId = parseOptionalInt(data.district_id);
 
     // Validate dates
-    const driveOpeningDate = targetDrive.application_start_at
+    const driveOpeningDate = targetDrive?.application_start_at
       ? new Date(targetDrive.application_start_at).toISOString().slice(0, 10)
       : null;
-    const driveClosingDate = targetDrive.application_end_at
+    const driveClosingDate = targetDrive?.application_end_at
       ? new Date(targetDrive.application_end_at).toISOString().slice(0, 10)
       : null;
     const openingDate = driveOpeningDate ?? parseOptionalDate(data.opening_date);
@@ -510,7 +501,7 @@ const createPost = async (data, userId) => {
     }
 
     const post = await PostMaster.create({
-      recruitment_drive_id: targetDrive.recruitment_drive_id,
+      recruitment_drive_id: targetDrive?.recruitment_drive_id || null,
       source_post_id: parseOptionalInt(data.source_post_id),
       post_code: data.post_code,
       post_name: data.post_name,
@@ -537,7 +528,11 @@ const createPost = async (data, userId) => {
       male_only: parseOptionalBool(data.male_only) || false,
       display_order: parseOptionalInt(data.display_order) || 0,
       amount: parseFloat(data.amount) || null,
-      is_active: targetDrive.is_active && targetDrive.applications_open,
+      is_active: Boolean(
+        targetDrive
+          ? targetDrive.status !== 'CLOSED' && targetDrive.is_active && targetDrive.applications_open
+          : false
+      ),
       is_deleted: parseOptionalBool(data.is_deleted) || false,
       created_by: userId
     });
@@ -632,27 +627,30 @@ const updatePost = async (postId, data, userId) => {
     }
     if (Object.prototype.hasOwnProperty.call(data, 'recruitment_drive_id')) {
       const targetDriveId = parseOptionalInt(data.recruitment_drive_id);
-      if (!Number.isInteger(targetDriveId)) {
-        throw new ApiError(400, 'Select a recruitment drive for the post');
-      }
       if (targetDriveId !== post.recruitment_drive_id) {
         const [targetDrive, applicationCount] = await Promise.all([
-          db.RecruitmentDrive.findByPk(targetDriveId),
+          Number.isInteger(targetDriveId) ? db.RecruitmentDrive.findByPk(targetDriveId) : null,
           db.Application.count({ where: { post_id: post.post_id, is_deleted: { [Op.ne]: true } } })
         ]);
-        if (!targetDrive) throw new ApiError(404, 'Recruitment drive not found');
-        if (targetDrive.status === 'CLOSED') {
-          throw new ApiError(409, 'Posts cannot be moved into a closed recruitment drive');
+        if (Number.isInteger(targetDriveId) && !targetDrive) {
+          throw new ApiError(404, 'Recruitment drive not found');
         }
         if (applicationCount > 0) {
           throw new ApiError(409, 'A post with applications cannot be moved to another recruitment drive');
         }
-        updateData.recruitment_drive_id = targetDriveId;
-        updateData.is_active = targetDrive.is_active && targetDrive.applications_open;
-        if (targetDrive.application_start_at) {
+        updateData.recruitment_drive_id = targetDrive?.recruitment_drive_id || null;
+        updateData.is_active = Boolean(
+          targetDrive
+            ? targetDrive.status !== 'CLOSED' && targetDrive.is_active && targetDrive.applications_open
+            : false
+        );
+        if (!targetDrive) {
+          updateData.opening_date = null;
+          updateData.closing_date = null;
+        } else if (targetDrive.application_start_at) {
           updateData.opening_date = new Date(targetDrive.application_start_at).toISOString().slice(0, 10);
         }
-        if (targetDrive.application_end_at) {
+        if (targetDrive?.application_end_at) {
           updateData.closing_date = new Date(targetDrive.application_end_at).toISOString().slice(0, 10);
         }
       }
