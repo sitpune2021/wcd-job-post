@@ -21,7 +21,17 @@ class CronService {
       },
       attributes: ['recruitment_drive_id', 'drive_code', 'drive_name']
     });
-    const registrationDrives = await db.RecruitmentDrive.findAll({
+    const registrationDrivesToOpen = await db.RecruitmentDrive.findAll({
+      where: {
+        is_active: true,
+        status: 'OPEN',
+        registration_open: false,
+        registration_start_at: { [Op.lte]: now },
+        registration_end_at: { [Op.gt]: now }
+      },
+      attributes: ['recruitment_drive_id', 'drive_code', 'drive_name']
+    });
+    const registrationDrivesToClose = await db.RecruitmentDrive.findAll({
       where: {
         is_active: true,
         status: 'OPEN',
@@ -42,7 +52,8 @@ class CronService {
     const recruitmentDriveService = require('./recruitmentDriveService');
     const results = [];
     const openedResults = [];
-    const registrationResults = [];
+    const registrationOpenedResults = [];
+    const registrationClosedResults = [];
     for (const drive of applicationDrivesToOpen) {
       try {
         await recruitmentDriveService.transitionDrive(
@@ -57,7 +68,21 @@ class CronService {
         openedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
       }
     }
-    for (const drive of registrationDrives) {
+    for (const drive of registrationDrivesToOpen) {
+      try {
+        await recruitmentDriveService.transitionDrive(
+          drive.recruitment_drive_id,
+          'OPEN_REGISTRATION',
+          null,
+          'Automatically opened at registration_start_at'
+        );
+        registrationOpenedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: true });
+      } catch (error) {
+        logger.error(`CRON: Failed to open registration for drive ${drive.recruitment_drive_id}`, error);
+        registrationOpenedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
+      }
+    }
+    for (const drive of registrationDrivesToClose) {
       try {
         await recruitmentDriveService.transitionDrive(
           drive.recruitment_drive_id,
@@ -65,10 +90,10 @@ class CronService {
           null,
           'Automatically closed after registration_end_at'
         );
-        registrationResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: true });
+        registrationClosedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: true });
       } catch (error) {
         logger.error(`CRON: Failed to close registration for drive ${drive.recruitment_drive_id}`, error);
-        registrationResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
+        registrationClosedResults.push({ recruitment_drive_id: drive.recruitment_drive_id, success: false, error: error.message });
       }
     }
     for (const drive of drives) {
@@ -90,12 +115,14 @@ class CronService {
       }
     }
     return {
-      success: [...openedResults, ...registrationResults, ...results].every((item) => item.success),
+      success: [...openedResults, ...registrationOpenedResults, ...registrationClosedResults, ...results].every((item) => item.success),
       openedCount: openedResults.filter((item) => item.success).length,
-      registrationClosedCount: registrationResults.filter((item) => item.success).length,
+      registrationOpenedCount: registrationOpenedResults.filter((item) => item.success).length,
+      registrationClosedCount: registrationClosedResults.filter((item) => item.success).length,
       closedCount: results.filter((item) => item.success).length,
       openedResults,
-      registrationResults,
+      registrationOpenedResults,
+      registrationClosedResults,
       results
     };
   }

@@ -54,6 +54,7 @@ const { localizeField } = require('./helpers');
 const transformPost = (language = 'en') => (p) => ({
   post_id: p.post_id,
   recruitment_drive_id: p.recruitment_drive_id,
+  source_post_id: p.source_post_id || null,
   post_code: p.post_code,
   post_name: localizeField(p, 'post_name', language),
   post_name_en: p.post_name,
@@ -243,7 +244,7 @@ const getPosts = async (query = {}) => {
         district_id: { field: 'district_id', type: 'number' }
       },
       attributes: [
-        'post_id', 'recruitment_drive_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
+        'post_id', 'recruitment_drive_id', 'source_post_id', 'post_code', 'post_name', 'post_name_mr', 'description', 'description_mr',
         'scheme_id', 'experience_domain_id', 'min_qualification', 'min_experience_months',
         'min_age', 'max_age', 'district_specific', 'district_id', 'required_domains', 'eligibility_criteria',
         'opening_date', 'closing_date', 'total_positions', 'filled_positions', 'female_only', 'male_only',
@@ -252,12 +253,12 @@ const getPosts = async (query = {}) => {
       include: [{
         model: Scheme,
         as: 'scheme',
-        required: true,
+        required: false,
         include: [{
           model: db.SchemeType,
           as: 'schemeType',
           attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-          required: true
+          required: false
         }],
         attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr']
       }, {
@@ -265,6 +266,11 @@ const getPosts = async (query = {}) => {
         as: 'experienceDomain',
         required: false,
         attributes: ['id', 'domain_code', 'domain_name', 'domain_name_mr']
+      }, {
+        model: db.DistrictMaster,
+        as: 'district',
+        required: false,
+        attributes: ['district_id', 'district_name', 'district_name_mr']
       }],
       baseWhere,
       order: [['updated_at', 'DESC'], ['created_at', 'DESC'], ['post_id', 'DESC']],
@@ -346,12 +352,12 @@ const getPostById = async (postId, language = 'en') => {
       include: [{
         model: Scheme,
         as: 'scheme',
-        required: true,
+        required: false,
         include: [{
           model: db.SchemeType,
           as: 'schemeType',
           attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-          required: true
+          required: false
         }],
         attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'scheme_name_mr']
       }, {

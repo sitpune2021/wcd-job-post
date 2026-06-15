@@ -28,7 +28,7 @@ const sendRegistrationOTP = async (email) => {
     );
 
     if (existing.length > 0) {
-      const error = new Error('This email address is already registered. Please use a different email or try logging in.');
+      const error = new Error('This email address is already registered. Please sign in with your existing account, reset your password, or contact your administrator for assistance.');
       error.statusCode = 400;
       error.isClientError = true;
       throw error;
@@ -178,7 +178,7 @@ const registerApplicant = async (data) => {
     // If this came from the DB unique constraint on email
     if (error.name === 'SequelizeUniqueConstraintError' || error.original?.code === '23505') {
       logger.warn('Duplicate email during registration attempt:', { email: data?.email });
-      const duplicateError = new Error('This email address is already registered. Please use a different email or try logging in.');
+      const duplicateError = new Error('This email address is already registered. Please sign in with your existing account, reset your password, or contact your administrator for assistance.');
       duplicateError.statusCode = 400;
       duplicateError.isClientError = true;
       throw duplicateError;

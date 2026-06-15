@@ -4,8 +4,31 @@ const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../config/logger');
 
 const ACTIVE_STATUSES = ['OPEN', 'APPLICATION_CLOSED', 'MERIT_GENERATED', 'SELECTION'];
+const IST_OFFSET_MS = 330 * 60 * 1000;
 const followsRegistrationWindow = async () =>
   (await require('./portalSettingService').getRegistrationMode()) === 'DRIVE_SCHEDULE';
+
+const parseScheduleDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const text = String(value).trim();
+  const localMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+  if (localMatch) {
+    const [, year, month, day, hour, minute, second = '0', millisecond = '0'] = localMatch;
+    return new Date(Date.UTC(
+      Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute),
+      Number(second), Number(millisecond.padEnd(3, '0'))
+    ) - IST_OFFSET_MS);
+  }
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) throw new ApiError(400, 'Invalid recruitment schedule date');
+  return parsed;
+};
+
+const scheduleDateOnlyInIst = (value) => {
+  const parsed = parseScheduleDate(value);
+  return parsed ? new Date(parsed.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10) : null;
+};
 
 const getActiveDrive = async (options = {}) => {
   return db.RecruitmentDrive.findOne({
@@ -140,17 +163,21 @@ const createDrive = async (data, adminId) => {
   const transaction = await db.sequelize.transaction();
   try {
     const requestedActive = data.is_active === true;
+    const registrationStart = parseScheduleDate(data.registration_start_at);
+    const registrationEnd = parseScheduleDate(data.registration_end_at);
+    const applicationStart = parseScheduleDate(data.application_start_at);
+    const applicationEnd = parseScheduleDate(data.application_end_at);
     if (
-      data.application_start_at &&
-      data.application_end_at &&
-      new Date(data.application_end_at) <= new Date(data.application_start_at)
+      applicationStart &&
+      applicationEnd &&
+      applicationEnd <= applicationStart
     ) {
       throw new ApiError(400, 'Application end time must be after application start time');
     }
     if (
-      data.registration_start_at &&
-      data.registration_end_at &&
-      new Date(data.registration_end_at) <= new Date(data.registration_start_at)
+      registrationStart &&
+      registrationEnd &&
+      registrationEnd <= registrationStart
     ) {
       throw new ApiError(400, 'Registration end time must be after registration start time');
     }
@@ -166,10 +193,10 @@ const createDrive = async (data, adminId) => {
       is_active: requestedActive,
       registration_open: requestedActive && data.registration_open === true,
       applications_open: requestedActive && data.applications_open === true,
-      registration_start_at: data.registration_start_at || null,
-      registration_end_at: data.registration_end_at || null,
-      application_start_at: data.application_start_at || null,
-      application_end_at: data.application_end_at || null,
+      registration_start_at: registrationStart,
+      registration_end_at: registrationEnd,
+      application_start_at: applicationStart,
+      application_end_at: applicationEnd,
       created_by: adminId,
       updated_by: adminId,
       created_at: new Date(),
@@ -217,16 +244,16 @@ const updateDrive = async (driveId, data, adminId) => {
       throw new ApiError(409, 'Schedule is locked after the recruitment drive is activated');
     }
     const nextApplicationStart = data.application_start_at !== undefined
-      ? data.application_start_at
+      ? parseScheduleDate(data.application_start_at)
       : drive.application_start_at;
     const nextApplicationEnd = data.application_end_at !== undefined
-      ? data.application_end_at
+      ? parseScheduleDate(data.application_end_at)
       : drive.application_end_at;
     const nextRegistrationStart = data.registration_start_at !== undefined
-      ? data.registration_start_at
+      ? parseScheduleDate(data.registration_start_at)
       : drive.registration_start_at;
     const nextRegistrationEnd = data.registration_end_at !== undefined
-      ? data.registration_end_at
+      ? parseScheduleDate(data.registration_end_at)
       : drive.registration_end_at;
     if (
       nextApplicationStart &&
@@ -249,7 +276,7 @@ const updateDrive = async (driveId, data, adminId) => {
     ];
     const changes = { updated_by: adminId, updated_at: new Date() };
     allowed.forEach((field) => {
-      if (data[field] !== undefined) changes[field] = data[field] || null;
+      if (data[field] !== undefined) changes[field] = parseScheduleDate(data[field]);
     });
     await drive.update(changes, { transaction });
 
@@ -261,12 +288,12 @@ const updateDrive = async (driveId, data, adminId) => {
       const postChanges = { updated_by: adminId, updated_at: new Date() };
       if (data.application_start_at !== undefined) {
         postChanges.opening_date = data.application_start_at
-          ? new Date(data.application_start_at).toISOString().slice(0, 10)
+          ? scheduleDateOnlyInIst(data.application_start_at)
           : null;
       }
       if (data.application_end_at !== undefined) {
         postChanges.closing_date = data.application_end_at
-          ? new Date(data.application_end_at).toISOString().slice(0, 10)
+          ? scheduleDateOnlyInIst(data.application_end_at)
           : null;
       }
       await db.PostMaster.update(postChanges, {
@@ -329,9 +356,13 @@ const transitionDrive = async (driveId, action, adminId, remarks = null) => {
         }
         const applicationWindowOpen = new Date(drive.application_start_at) <= now
           && new Date(drive.application_end_at) > now;
+        const registrationWindowOpen = drive.registration_start_at && drive.registration_end_at
+          ? new Date(drive.registration_start_at) <= now && new Date(drive.registration_end_at) > now
+          : false;
         Object.assign(changes, {
           is_active: true,
           status: 'OPEN',
+          registration_open: registrationWindowOpen,
           applications_open: applicationWindowOpen
         });
         await db.PostMaster.update({
@@ -339,8 +370,8 @@ const transitionDrive = async (driveId, action, adminId, remarks = null) => {
           is_closed: false,
           closed_at: null,
           closed_by: null,
-          opening_date: new Date(drive.application_start_at).toISOString().slice(0, 10),
-          closing_date: new Date(drive.application_end_at).toISOString().slice(0, 10),
+          opening_date: scheduleDateOnlyInIst(drive.application_start_at),
+          closing_date: scheduleDateOnlyInIst(drive.application_end_at),
           updated_by: adminId,
           updated_at: now
         }, {
@@ -385,7 +416,7 @@ const transitionDrive = async (driveId, action, adminId, remarks = null) => {
           closed_by: null,
           opening_date: adminId
             ? now.toISOString().slice(0, 10)
-            : new Date(drive.application_start_at).toISOString().slice(0, 10),
+            : scheduleDateOnlyInIst(drive.application_start_at),
           updated_by: adminId,
           updated_at: now
         }, {

@@ -11,6 +11,29 @@ const cronService = require('./cronService');
 const documentVerificationService = require('./documentVerificationService');
 
 class ProvisionalSelectionService {
+  selectPreferredMeritEntry(entries = []) {
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    return [...entries].sort((left, right) => {
+      if (Boolean(right.is_official) !== Boolean(left.is_official)) {
+        return Number(Boolean(right.is_official)) - Number(Boolean(left.is_official));
+      }
+      const versionDiff = Number(right.generation_version || 0) - Number(left.generation_version || 0);
+      if (versionDiff !== 0) return versionDiff;
+      return new Date(right.generated_at || 0) - new Date(left.generated_at || 0);
+    })[0];
+  }
+
+  attachPreferredMerit(target) {
+    if (!target?.application) return target;
+    const meritEntries = target.application.meritEntries;
+    if (Array.isArray(meritEntries) && meritEntries.length > 0) {
+      target.application.setDataValue('merit', this.selectPreferredMeritEntry(meritEntries));
+    } else if (!target.application.merit) {
+      target.application.setDataValue('merit', null);
+    }
+    return target;
+  }
+
 
   async assertGeneratedMerit(application, transaction) {
     const meritEntry = await db.MeritList.findOne({
@@ -457,7 +480,7 @@ class ProvisionalSelectionService {
                 }
               ]
             },
-            { model: db.MeritList, as: 'merit' },
+            { model: db.MeritList, as: 'meritEntries', required: false },
             { model: db.DistrictMaster, as: 'district' },
             { model: db.PostMaster, as: 'post' }
           ],
@@ -469,7 +492,7 @@ class ProvisionalSelectionService {
         });
 
         // Convert to format expected by frontend
-        return applications.map(app => ({
+        return applications.map(app => this.attachPreferredMerit({
           application_id: app.application_id,
           application: app,
           stage: 'ELIGIBLE',
@@ -477,7 +500,7 @@ class ProvisionalSelectionService {
           entered_by: null,
           entered_by_type: null,
           metadata: null
-        }));
+        })).sort(sortByMerit);
       }
 
       // For other stages, check ApplicationStageHistory
@@ -507,7 +530,7 @@ class ProvisionalSelectionService {
                   }
                 ]
               },
-              { model: db.MeritList, as: 'merit' },
+              { model: db.MeritList, as: 'meritEntries', required: false },
               { model: db.DistrictMaster, as: 'district' },
               { model: db.PostMaster, as: 'post' }
             ]
@@ -517,7 +540,32 @@ class ProvisionalSelectionService {
         order: [['entered_at', 'ASC']]
       });
 
-      return stageHistory.sort(sortByMerit);
+      const deduped = new Map();
+      for (const entry of stageHistory) {
+        const normalized = this.attachPreferredMerit(entry);
+        const existing = deduped.get(normalized.stage_history_id);
+        if (!existing) {
+          deduped.set(normalized.stage_history_id, normalized);
+          continue;
+        }
+        const currentMerit = normalized.application?.merit;
+        const existingMerit = existing.application?.merit;
+        const currentOfficial = Boolean(currentMerit?.is_official);
+        const existingOfficial = Boolean(existingMerit?.is_official);
+        if (currentOfficial && !existingOfficial) {
+          deduped.set(normalized.stage_history_id, normalized);
+          continue;
+        }
+        if (currentOfficial === existingOfficial) {
+          const currentVersion = Number(currentMerit?.generation_version || 0);
+          const existingVersion = Number(existingMerit?.generation_version || 0);
+          if (currentVersion > existingVersion) {
+            deduped.set(normalized.stage_history_id, normalized);
+          }
+        }
+      }
+
+      return [...deduped.values()].sort(sortByMerit);
     } catch (error) {
       logger.error('Error getting applications by stage:', error);
       throw error;

@@ -40,9 +40,9 @@ const WeeklyOffClaim = sequelize.define('HrmWeeklyOffClaim', {
     allowNull: false,
     defaultValue: 'PENDING',
     validate: {
-      isIn: [['PENDING', 'APPROVED', 'EXPIRED']]
+      isIn: [['ELIGIBLE', 'PENDING', 'APPROVED', 'EXPIRED', 'USED']]
     },
-    comment: 'PENDING = not yet approved, APPROVED = approved and used'
+    comment: 'Tracks weekly-off entitlement and claim processing state'
   },
   requested_at: {
     type: DataTypes.DATE,

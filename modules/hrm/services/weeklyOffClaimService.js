@@ -396,20 +396,49 @@ async function autoApproveWeeklyOffClaims() {
           lock: transaction.LOCK.UPDATE
         });
         if (existingAttendance) {
+          if (['ABSENT', 'WEEKLY_OFF'].includes(existingAttendance.status)) {
+            await existingAttendance.update({
+              status: 'WEEKLY_OFF',
+              remarks: `Weekly Off Claim - Auto Approved (Week: ${claim.entitlement_week_start} to ${claim.entitlement_week_end})`,
+              updated_by: null
+            }, { transaction });
+
+            await claim.update({
+              claim_status: 'APPROVED',
+              approved_by: null,
+              approved_at: new Date(),
+              admin_remarks: 'Auto-approved after 24 hours',
+              auto_approved: true,
+              attendance_id: existingAttendance.attendance_id,
+              updated_by: null
+            }, { transaction });
+
+            await transaction.commit();
+            approved++;
+
+            logger.info('Weekly off claim auto-approved using existing attendance', {
+              claimId: claim.claim_id,
+              employeeId: claim.employee_id,
+              attendanceId: existingAttendance.attendance_id,
+              previousAttendanceStatus: existingAttendance.status
+            });
+            continue;
+          }
+
           await claim.update({
-            claim_status: 'REJECTED',
             approved_by: null,
-            approved_at: new Date(),
-            admin_remarks: 'Auto-rejected because attendance already exists for the claimed date',
+            approved_at: null,
+            admin_remarks: 'Attendance already exists for the claimed date. Weekly off claim kept pending for review.',
             auto_approved: false,
             attendance_id: existingAttendance.attendance_id,
             updated_by: null
           }, { transaction });
           await transaction.commit();
-          logger.warn('Weekly off claim auto-rejected because attendance exists', {
+          logger.warn('Weekly off claim kept pending because attendance already exists', {
             claimId: claim.claim_id,
             employeeId: claim.employee_id,
-            attendanceId: existingAttendance.attendance_id
+            attendanceId: existingAttendance.attendance_id,
+            attendanceStatus: existingAttendance.status
           });
           continue;
         }
