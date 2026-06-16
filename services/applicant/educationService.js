@@ -10,18 +10,12 @@ const { ApplicantEducation, EducationLevel, ApplicantMaster, ApplicantPersonal }
 const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
 const { getRelativePath, optimizeUploadedImage } = require('../../utils/fileUpload');
-const crypto = require('crypto');
-const fs = require('fs').promises;
+const educationOcrVerifier = require('../ocr/educationOcrVerifier');
 
 const toPublicUploadPath = (filePath) => {
   if (!filePath) return null;
   const rel = getRelativePath(filePath).replace(/\\/g, '/');
   return '/' + rel.replace(/^\/+/, '');
-};
-
-const isOcrEnabled = () => {
-  const enabled = process.env.OCR_VERIFICATION_ENABLED;
-  return enabled === 'true' || enabled === '1';
 };
 
 const { assertProfileEditable } = require('./profileEditPolicy');
@@ -34,135 +28,6 @@ const isCgpaColumnWriteError = (error) => {
     (code === '42703' || code === '22003')
   );
 };
-
-/**
- * Relaxed name match: any single word match is allowed
- * This handles cases where names might be rearranged or have spelling variations
- */
-const checkNameMatch = (certificateName, applicantFullName) => {
-  if (!certificateName || !applicantFullName) return false;
-
-  const norm = (str) => String(str).toLowerCase().trim().replace(/\s+/g, ' ');
-  const certParts = norm(certificateName).split(' ').filter(Boolean);
-  const appParts = norm(applicantFullName).split(' ').filter(Boolean);
-
-  if (certParts.length === 0 || appParts.length === 0) return false;
-
-  // Check if any word from certificate matches any word from applicant name
-  for (const certWord of certParts) {
-    // Skip very short words (like initials) unless it's the only word
-    if (certWord.length < 2 && certParts.length > 1) continue;
-    
-    for (const appWord of appParts) {
-      // Skip very short words (like initials) unless it's the only word
-      if (appWord.length < 2 && appParts.length > 1) continue;
-      
-      // Exact match
-      if (certWord === appWord) {
-        return true;
-      }
-      
-      // Fuzzy match for words with length >= 3 (handles minor spelling variations)
-      if (certWord.length >= 3 && appWord.length >= 3) {
-        // Check if one word contains the other (handles abbreviations or partial matches)
-        if (certWord.includes(appWord) || appWord.includes(certWord)) {
-          return true;
-        }
-        
-        // Simple Levenshtein distance for minor spelling errors
-        if (calculateLevenshteinDistance(certWord, appWord) <= 1) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-};
-
-/**
- * Calculate Levenshtein distance between two strings
- * Used for fuzzy matching of names with minor spelling variations
- */
-const calculateLevenshteinDistance = (str1, str2) => {
-  const matrix = [];
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  
-  return matrix[str2.length][str1.length];
-};
-
-// Simple in-memory cache to avoid repeated OCR name extraction per file hash
-const candidateNameCache = new Map(); // key: fileHash, value: candidate_name string
-const MAX_CACHE_SIZE = 50;
-
-const getFileHash = async (filePath) => {
-  try {
-    const buffer = await fs.readFile(filePath);
-    return crypto.createHash('sha256').update(buffer).digest('hex');
-  } catch (err) {
-    logger.warn(`Failed to hash file for cache: ${err.message}`);
-    return null;
-  }
-};
-
-const getCandidateNameFromCertificate = async (filePath) => {
-  // Check if OCR is enabled at the global level
-  if (!isOcrEnabled()) {
-    logger.info('OCR is disabled, skipping candidate name extraction from certificate');
-    return null;
-  }
-
-  try {
-    const fileHash = await getFileHash(filePath);
-    if (fileHash && candidateNameCache.has(fileHash)) {
-      return candidateNameCache.get(fileHash);
-    }
-
-    const { analyzeEducationDocument } = require('../../utils/ocr/openaiClient');
-    const ocrResult = await analyzeEducationDocument(filePath);
-
-    if (ocrResult?.success && ocrResult.data?.candidate_name?.value) {
-      const name = ocrResult.data.candidate_name.value;
-      if (fileHash) {
-        if (candidateNameCache.size >= MAX_CACHE_SIZE) {
-          // Simple eviction: remove first inserted
-          const firstKey = candidateNameCache.keys().next().value;
-          candidateNameCache.delete(firstKey);
-        }
-        candidateNameCache.set(fileHash, name);
-      }
-      return name;
-    }
-
-    return null;
-  } catch (error) {
-    logger.error('Error extracting candidate name from certificate:', error);
-    // Don't throw error - just return null so education can still be saved
-    return null;
-  }
-};
-
 
 // ==================== EDUCATION CRUD OPERATIONS ====================
 
@@ -200,10 +65,9 @@ const addEducation = async (applicantId, data, fileData = null) => {
       throw new ApiError(400, 'Percentage must be between 0 and 100');
     }
 
-    // 2. Check if certificate name matches applicant's name
+    let personal = null;
     if (fileData?.path) {
-      // Get applicant's full name from personal table
-      const personal = await ApplicantPersonal.findOne({
+      personal = await ApplicantPersonal.findOne({
         where: { applicant_id: applicantId, is_deleted: false },
         attributes: ['full_name']
       });
@@ -211,21 +75,18 @@ const addEducation = async (applicantId, data, fileData = null) => {
       if (!personal || !personal.full_name) {
         throw new ApiError(400, 'Personal details are incomplete. Please fill your full name before uploading certificates.');
       }
-      
-      // Extract name from certificate using OCR (cached)
-      const certificateName = await getCandidateNameFromCertificate(fileData.path);
 
-      if (certificateName) {
-        const nameMatch = checkNameMatch(certificateName, personal.full_name);
-        
-        if (!nameMatch) {
-          logger.warn(`Name mismatch detected for applicant ${applicantId}: Certificate="${certificateName}" vs Profile="${personal.full_name}"`);
-          throw new ApiError(400, 
-            `The name on the certificate (${certificateName}) does not match your profile name (${personal.full_name}). Please upload your own certificate.`);
-        }
-        
-        logger.info(`Name validation passed for applicant ${applicantId}`);
-      }
+      await educationOcrVerifier.verifyEducationDocument({
+        full_name: personal.full_name,
+        degree_name,
+        university_board,
+        seat_number: seatNumber || seat_number,
+        passing_year,
+        percentage: normalizedPercentage,
+        cgpa: normalizedCgpa
+      }, fileData.path, applicantId, {
+        preverifiedToken: data.ocr_verification_token
+      });
     }
     fileData = await optimizeUploadedImage(fileData);
     const certificatePath = fileData?.path
@@ -304,6 +165,27 @@ const updateEducation = async (applicantId, educationId, data, fileData = null) 
     
     // 1. Update certificate path if new file provided
     if (fileData?.path) {
+      const personal = await ApplicantPersonal.findOne({
+        where: { applicant_id: applicantId, is_deleted: false },
+        attributes: ['full_name']
+      });
+
+      if (!personal || !personal.full_name) {
+        throw new ApiError(400, 'Personal details are incomplete. Please fill your full name before uploading certificates.');
+      }
+
+      await educationOcrVerifier.verifyEducationDocument({
+        full_name: personal.full_name,
+        degree_name: data.degree_name ?? education.degree_name,
+        university_board: data.university_board ?? education.university_board,
+        seat_number: data.seat_number ?? data.seatNumber ?? education.seatnumber,
+        passing_year: data.passing_year ?? education.passing_year,
+        percentage: data.percentage ?? education.percentage,
+        cgpa: data.cgpa ?? education.cgpa
+      }, fileData.path, applicantId, {
+        preverifiedToken: data.ocr_verification_token
+      });
+
       fileData = await optimizeUploadedImage(fileData);
       data.certificate_path = getRelativePath(fileData.path).replace(/\\/g, '/');
     }

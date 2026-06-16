@@ -30,6 +30,7 @@ const cache = require('../../utils/cache');
 const path = require('path');
 const fs = require('fs');
 const EducationLevel = require('../../models/EducationLevel');
+const educationOcrVerifier = require('../ocr/educationOcrVerifier');
 
 const { isProfileLocked, assertProfileEditable } = require('./profileEditPolicy');
 
@@ -505,6 +506,10 @@ const getProfile = async (applicantId) => {
     delete json.password_reset_token_expires_at;
 
     json.profile_locked = await isProfileLocked(applicantId);
+    const ocrState = await educationOcrVerifier.getEffectiveOcrEnabled(applicantId);
+    json.ocr_global_enabled = ocrState.global_enabled;
+    json.ocr_effective_enabled = ocrState.enabled;
+    json.ocr_disabled = ocrState.applicant_disabled;
 
     if (json.personal) {
       // PAN temporarily disabled

@@ -222,6 +222,7 @@ const getApplicantById = async (applicantId) => {
         am.applicant_no,
         am.email,
         am.mobile_no,
+        am.ocr_disabled,
         am.created_at
       FROM ms_applicant_master am
       WHERE am.applicant_id = :applicantId AND am.is_deleted = false

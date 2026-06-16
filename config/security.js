@@ -125,8 +125,13 @@ const securityHeaders = (req, res, next) => {
 
 // Request timeout middleware
 const requestTimeout = (timeoutMs = 30000) => (req, res, next) => {
-  // Let Node handle the socket timeout; respond with a clear message
-  req.setTimeout(timeoutMs, () => {
+  // Increase timeout to 2 minutes for heavy endpoints like OCR verification or PDF generation
+  const path = req.path || '';
+  const currentTimeout = (path.includes('/education/verify') || path.includes('/pdf'))
+    ? 120000 
+    : timeoutMs;
+
+  req.setTimeout(currentTimeout, () => {
     if (!res.headersSent) {
       res.status(503).json({ error: 'Request timed out' });
     }

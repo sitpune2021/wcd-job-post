@@ -1,27 +1,28 @@
 /**
  * Weekly Off Claim Cron Jobs
- * Handles automatic entitlement generation, auto-approval, and expiry
+ * Handles automatic monthly entitlement generation, auto-approval, and expiry
  */
 
 const weeklyOffClaimService = require('../services/weeklyOffClaimService');
 const logger = require('../../../config/logger');
 
 /**
- * Generate weekly off entitlements for all active employees
- * Should run: Every Sunday at 11:59 PM or Monday at 12:01 AM
+ * Generate monthly weekly off entitlements for all active employees
+ * Creates 4 entitlements per employee per month
+ * Should run: On 1st of every month at 12:01 AM
  */
 async function generateWeeklyEntitlementsJob() {
   try {
-    logger.info('Starting weekly off entitlement generation job');
+    logger.info('Starting monthly weekly off entitlement generation job');
     const result = await weeklyOffClaimService.generateWeeklyOffEntitlements();
-    logger.info('Weekly off entitlement generation job completed', {
+    logger.info('Monthly weekly off entitlement generation job completed', {
       created: result.created,
       skipped: result.skipped,
       total: result.total
     });
     return result;
   } catch (error) {
-    logger.error('Weekly off entitlement generation job failed:', error);
+    logger.error('Monthly weekly off entitlement generation job failed:', error);
     throw error;
   }
 }

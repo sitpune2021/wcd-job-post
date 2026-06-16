@@ -41,16 +41,16 @@ function getMonthCode(date) {
 }
 
 /**
- * Generate rolling weekly off entitlements for all active employees
- * Creates 1 entitlement per employee based on their last claim date
- * Rolling 7-day cycle: new eligibility starts 7 days after last claim
+ * Generate monthly weekly off entitlements for all active employees
+ * Creates 4 entitlements per employee per month
+ * Monthly quota system: 4 per month, can be used anytime within the month
  */
 async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) {
   try {
     const currentDate = new Date();
     const monthCode = getMonthCode(currentDate);
 
-    logger.info('Generating rolling weekly off entitlements', {
+    logger.info('Generating monthly weekly off entitlements', {
       currentDate: formatDate(currentDate),
       monthCode,
       employeeId: employeeId || 'all',
@@ -77,104 +77,38 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
     let skipped = 0;
 
     for (const employee of employees) {
-      // Check if employee has any approved weekly off claims
-      const lastApprovedClaim = await WeeklyOffClaim.findOne({
+      // Check if employee already has entitlements for current month
+      const existingEntitlements = await WeeklyOffClaim.findAll({
         where: {
           employee_id: employee.employee_id,
-          claim_status: 'APPROVED',
-          claimed_off_date: { [Op.not]: null }
-        },
-        order: [['claimed_off_date', 'DESC']],
-        limit: 1
-      });
-
-      let entitlementStart, entitlementEnd;
-      
-      if (lastApprovedClaim && lastApprovedClaim.claimed_off_date) {
-        // Rolling cycle: generate entitlements for all missed weeks since last claim
-        const lastClaimDate = new Date(lastApprovedClaim.claimed_off_date);
-        const weekStarts = [];
-        
-        // Generate all week starts since last claim (7-day intervals)
-        let currentWeekStart = new Date(lastClaimDate);
-        currentWeekStart.setDate(currentWeekStart.getDate() + 7); // First entitlement starts 7 days after last claim
-        
-        while (currentWeekStart <= currentDate) {
-          weekStarts.push(new Date(currentWeekStart));
-          currentWeekStart.setDate(currentWeekStart.getDate() + 7); // Next week
-        }
-        
-        // Process each missed week
-        for (const weekStart of weekStarts) {
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekEnd.getDate() + 6); // 7-day window
-          
-          // Check if entitlement already exists for this period
-          const existing = await WeeklyOffClaim.findOne({
-            where: {
-              employee_id: employee.employee_id,
-              entitlement_week_start: formatDate(weekStart),
-              entitlement_week_end: formatDate(weekEnd)
-            }
-          });
-
-          if (existing) {
-            skipped++;
-            continue;
-          }
-
-          // Create pending entitlement for this week
-          await WeeklyOffClaim.create({
-            employee_id: employee.employee_id,
-            entitlement_week_start: formatDate(weekStart),
-            entitlement_week_end: formatDate(weekEnd),
-            entitlement_month: getMonthCode(weekStart),
-            claim_status: 'PENDING', // Available to claim
-            created_by: null // System generated
-          });
-
-          created++;
-        }
-        
-        continue; // Skip to next employee
-      } else {
-        // First-time employee: start from current week
-        entitlementStart = getWeekStart();
-        entitlementEnd = getWeekEnd(entitlementStart);
-      }
-
-      // Check if entitlement already exists for this period
-      const existing = await WeeklyOffClaim.findOne({
-        where: {
-          employee_id: employee.employee_id,
-          entitlement_week_start: formatDate(entitlementStart),
-          entitlement_week_end: formatDate(entitlementEnd)
+          entitlement_month: monthCode,
+          claim_status: 'PENDING'
         }
       });
 
-      if (existing) {
+      // If employee already has 4 pending entitlements for this month, skip
+      if (existingEntitlements.length >= 4) {
         skipped++;
         continue;
       }
 
-      // Only create if entitlement period is in the future or current
-      if (entitlementStart <= currentDate) {
+      // Create remaining entitlements to reach 4 per month
+      const entitlementsNeeded = 4 - existingEntitlements.length;
+      
+      for (let i = 0; i < entitlementsNeeded; i++) {
         await WeeklyOffClaim.create({
           employee_id: employee.employee_id,
-          entitlement_week_start: formatDate(entitlementStart),
-          entitlement_week_end: formatDate(entitlementEnd),
           entitlement_month: monthCode,
+          monthly_quota: 4,
           claim_status: 'PENDING', // Available to claim
           created_by: null // System generated
         });
 
         created++;
-      } else {
-        skipped++; // Future entitlement, skip for now
       }
     }
 
-    logger.info('Weekly off entitlements generation completed', {
+    logger.info('Monthly weekly off entitlements generation completed', {
       created,
       skipped,
       totalEmployees: employees.length
@@ -182,11 +116,11 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
 
     return { created, skipped, total: employees.length };
   } catch (error) {
-    logger.error('Error generating weekly off entitlements:', error);
+    logger.error('Error generating monthly weekly off entitlements:', error);
     
     // Retry logic for failed generations
     if (retryCount < 2) {
-      logger.warn(`Retrying weekly off entitlement generation (attempt ${retryCount + 2})`);
+      logger.warn(`Retrying monthly weekly off entitlement generation (attempt ${retryCount + 2})`);
       return await generateWeeklyOffEntitlements(employeeId, retryCount + 1);
     }
     
@@ -200,25 +134,19 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
 async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
   try {
     const { status, monthCode } = filters;
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    const currentDate = new Date();
+    const currentMonthCode = getMonthCode(currentDate);
 
     const whereClause = {
       employee_id: employeeId
     };
 
-    // Include claims from current month OR recent pending claims from last 14 days
+    // Include claims from current month OR recent pending claims from current month
     if (monthCode) {
-      whereClause[Op.or] = [
-        { entitlement_month: monthCode },
-        {
-          claim_status: 'PENDING',
-          entitlement_week_start: { [Op.gte]: fourteenDaysAgo }
-        }
-      ];
+      whereClause.entitlement_month = monthCode;
     } else {
-      // If no month filter, include all claims from last 14 days
-      whereClause.entitlement_week_start = { [Op.gte]: fourteenDaysAgo };
+      // If no month filter, include all claims from current month
+      whereClause.entitlement_month = currentMonthCode;
     }
 
     if (status) {
@@ -227,7 +155,7 @@ async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
 
     const claims = await WeeklyOffClaim.findAll({
       where: whereClause,
-      order: [['entitlement_week_start', 'DESC']],
+      order: [['created_at', 'DESC']],
       include: [
         {
           model: db.AdminUser,
@@ -238,12 +166,21 @@ async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
       ]
     });
 
-    // Calculate stats
+    // Calculate stats based on monthly quota
+    const pendingClaims = claims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date);
+    const approvedClaims = claims.filter(c => c.claim_status === 'APPROVED');
+    const usedClaims = claims.filter(c => c.claimed_off_date);
+    
+    // Get monthly quota (default 4)
+    const monthlyQuota = claims.length > 0 ? claims[0].monthly_quota : 4;
+    
     const stats = {
       totalEntitlements: claims.length,
-      pending: claims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date).length,
-      approved: claims.filter(c => c.claim_status === 'APPROVED').length,
-      claimed: claims.filter(c => c.claimed_off_date).length
+      monthlyQuota: monthlyQuota,
+      pending: pendingClaims.length,
+      approved: approvedClaims.length,
+      claimed: usedClaims.length,
+      remaining: monthlyQuota - usedClaims.length
     };
 
     return {
@@ -281,13 +218,27 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
       throw new Error('Cannot modify an already approved weekly off claim');
     }
 
-    // Validate claimed date is within entitlement window
+    // Validate claimed date is within the same month as entitlement
     const claimedDate = new Date(claimedOffDate);
-    const weekStart = new Date(claim.entitlement_week_start);
-    const weekEnd = new Date(claim.entitlement_week_end);
+    const entitlementMonth = claim.entitlement_month;
+    const claimedMonthCode = getMonthCode(claimedDate);
 
-    if (claimedDate < weekStart || claimedDate > weekEnd) {
-      throw new Error(`Claimed date must be between ${formatDate(weekStart)} and ${formatDate(weekEnd)}`);
+    if (claimedMonthCode !== entitlementMonth) {
+      throw new Error(`Claimed date must be within the entitlement month (${entitlementMonth})`);
+    }
+
+    // Check if employee has exceeded monthly quota
+    const usedClaimsInMonth = await WeeklyOffClaim.count({
+      where: {
+        employee_id: employeeId,
+        entitlement_month: entitlementMonth,
+        claimed_off_date: { [Op.not]: null },
+        claim_status: 'APPROVED'
+      }
+    });
+
+    if (usedClaimsInMonth >= claim.monthly_quota) {
+      throw new Error(`You have already used your monthly quota of ${claim.monthly_quota} weekly off claims`);
     }
 
     // Check if another claim exists for the same date
@@ -399,7 +350,7 @@ async function autoApproveWeeklyOffClaims() {
           if (['ABSENT', 'WEEKLY_OFF'].includes(existingAttendance.status)) {
             await existingAttendance.update({
               status: 'WEEKLY_OFF',
-              remarks: `Weekly Off Claim - Auto Approved (Week: ${claim.entitlement_week_start} to ${claim.entitlement_week_end})`,
+              remarks: `Weekly Off Claim - Auto Approved (Month: ${claim.entitlement_month})`,
               updated_by: null
             }, { transaction });
 
@@ -451,7 +402,7 @@ async function autoApproveWeeklyOffClaims() {
           check_in_time: null,
           check_out_time: null,
           total_work_hours: 0,
-          remarks: `Weekly Off Claim - Auto Approved (Week: ${claim.entitlement_week_start} to ${claim.entitlement_week_end})`,
+          remarks: `Weekly Off Claim - Auto Approved (Month: ${claim.entitlement_month})`,
           created_by: null
         }, { transaction });
 
@@ -584,9 +535,8 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
       SELECT
         w.claim_id,
         w.employee_id,
-        w.entitlement_week_start,
-        w.entitlement_week_end,
         w.entitlement_month,
+        w.monthly_quota,
         w.claimed_off_date,
         w.claim_status,
         w.requested_at,
@@ -624,9 +574,8 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
     const claims = rows.map(r => ({
       claim_id: r.claim_id,
       employee_id: r.employee_id,
-      entitlement_week_start: r.entitlement_week_start,
-      entitlement_week_end: r.entitlement_week_end,
       entitlement_month: r.entitlement_month,
+      monthly_quota: r.monthly_quota,
       claimed_off_date: r.claimed_off_date,
       claim_status: r.claim_status,
       requested_at: r.requested_at,
@@ -671,8 +620,6 @@ module.exports = {
   autoApproveWeeklyOffClaims,
   expireMonthlyWeeklyOffClaims,
   getPendingWeeklyOffClaims,
-  getWeekStart,
-  getWeekEnd,
   formatDate,
   getMonthCode
 };

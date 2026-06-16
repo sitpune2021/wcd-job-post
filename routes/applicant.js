@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs').promises;
 const { authenticate, requireRole, auditLog } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const { validate, schemas } = require('../middleware/validate');
@@ -14,6 +15,7 @@ const { upload } = require('../utils/fileUpload');
 const { uploadRateLimiter } = require('../config/rateLimiters');
 const logger = require('../config/logger');
 const notificationService = require('../services/notificationService');
+const db = require('../models');
 const {
   toBool,
   buildFileUrl,
@@ -21,8 +23,7 @@ const {
   buildApplicationPdfHtml
 } = require('../utils/applicationPdf');
 
-// OCR Verification Service (can be safely removed if OCR module is disabled)
-const ocrVerificationService = require('../services/ocr/ocrVerificationService');
+const educationOcrVerifier = require('../services/ocr/educationOcrVerifier');
 
 // All routes require authentication
 router.use(authenticate);
@@ -341,14 +342,24 @@ router.post(
  * @desc Update education record
  * @access Private (Applicant)
  */
-router.put('/profile/education/:id', auditLog('UPDATE_EDUCATION'), async (req, res, next) => {
+router.put(
+  '/profile/education/:id',
+  uploadRateLimiter,
+  (req, res, next) => {
+    req.uploadDocType = 'EDUCATION_CERT';
+    next();
+  },
+  upload.single('file'),
+  auditLog('UPDATE_EDUCATION'),
+  async (req, res, next) => {
   try {
-    const education = await applicantService.updateEducation(req.user.applicant_id, req.params.id, req.body);
+    const education = await applicantService.updateEducation(req.user.applicant_id, req.params.id, req.body, req.file);
     res.status(200).json(education);
   } catch (error) {
     next(error);
   }
-});
+  }
+);
 
 /**
  * @route DELETE /api/v1/applicant/profile/education/:id
@@ -1689,7 +1700,8 @@ router.post(
       // Validate required fields
       const {
         yearOfPassing,
-        percentage
+        percentage,
+        cgpa
       } = req.body;
 
       // Check if file was uploaded
@@ -1714,6 +1726,9 @@ router.post(
       const parsedPercentage = percentage !== undefined && percentage !== null && percentage !== ''
         ? parseFloat(percentage)
         : null;
+      const parsedCgpa = cgpa !== undefined && cgpa !== null && cgpa !== ''
+        ? parseFloat(cgpa)
+        : null;
 
       if (Number.isNaN(parsedPercentage)) {
         throw new ApiError(400, 'Percentage must be a number');
@@ -1723,35 +1738,82 @@ router.post(
         throw new ApiError(400, 'Percentage cannot be negative');
       }
 
+      if (Number.isNaN(parsedCgpa)) {
+        throw new ApiError(400, 'CGPA must be a number');
+      }
+
       const userProvidedData = {
         qualification: req.body.qualification || null,
         degreeName: req.body.degreeName || null,
         board: req.body.board || null,
         seatNumber: req.body.seatNumber || null,
         yearOfPassing: parsedYear,
-        percentage: parsedPercentage !== null ? Number(parsedPercentage.toFixed(2)) : null
+        percentage: parsedPercentage !== null ? Number(parsedPercentage.toFixed(2)) : null,
+        cgpa: parsedCgpa !== null ? Number(parsedCgpa.toFixed(2)) : null
       };
 
       logger.info('OCR verification request received', {
         applicantId: req.user.applicant_id,
         fileName: req.file.originalname,
         fileSize: req.file.size,
-        ocrEnabled: ocrVerificationService.isOcrEnabled()
+        ocrEnabled: educationOcrVerifier.isGlobalOcrEnabled()
       });
 
-      // Call OCR verification service
-      const ocrResult = await ocrVerificationService.verifyEducationDocument(
-        userProvidedData,
+      const personal = await db.ApplicantPersonal.findOne({
+        where: { applicant_id: req.user.applicant_id, is_deleted: false },
+        attributes: ['full_name']
+      });
+
+      const ocrResult = await educationOcrVerifier.verifyEducationDocument(
+        {
+          full_name: personal?.full_name || null,
+          degree_name: userProvidedData.degreeName,
+          university_board: userProvidedData.board,
+          seat_number: userProvidedData.seatNumber,
+          passing_year: userProvidedData.yearOfPassing,
+          percentage: userProvidedData.percentage,
+          cgpa: userProvidedData.cgpa
+        },
         req.file.path,
         req.user.applicant_id
       );
 
-      // Return verification result
-      res.status(200).json(ocrResult);
+      logger.info('OCR verification request succeeded', {
+        applicantId: req.user.applicant_id,
+        fileName: req.file.originalname,
+        verificationResult: ocrResult.decision,
+        matchedFields: ocrResult.matches?.map((item) => item.field) || [],
+        reasonCodes: ocrResult.reason_codes || []
+      });
+
+      res.status(200).json({
+        status: 'success',
+        verification_result: ocrResult.passed ? 'MATCHED' : 'NOT_MATCHED',
+        is_year_of_passing_valid: true,
+        is_percentage_valid: true,
+        confidence_score: ocrResult.passed ? 1 : 0,
+        extracted_data: ocrResult.ocr_response?.fields || null,
+        mismatch_fields: [],
+        matches: ocrResult.matches || [],
+        reason_codes: ocrResult.reason_codes || [],
+        bypass_mode: ocrResult.bypassed === true,
+        verification_token: ocrResult.verification_token || null,
+        message: ocrResult.message
+      });
 
     } catch (error) {
-      logger.error('OCR verification endpoint error:', error);
+      logger.error('OCR verification endpoint error', {
+        applicantId: req.user?.applicant_id,
+        fileName: req.file?.originalname,
+        message: error.message,
+        statusCode: error.statusCode || error.status || 500,
+        errors: error.errors || null
+      });
       next(error);
+    } finally {
+      if (req.file?.path) {
+        await fs.unlink(req.file.path).catch(() => {});
+      }
     }
   }
 );

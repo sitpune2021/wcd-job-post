@@ -130,9 +130,9 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
   
-  // Run daily at 12:01 AM IST to generate rolling weekly off entitlements
-  cron.schedule('1 0 * * *', async () => {
-    logger.info('CRON: Generating rolling weekly off entitlements...');
+  // Run on 1st of every month at 12:01 AM IST to generate monthly weekly off entitlements
+  cron.schedule('1 0 1 * *', async () => {
+    logger.info('CRON: Generating monthly weekly off entitlements...');
     try {
       await generateWeeklyEntitlementsJob();
     } catch (error) {
@@ -143,8 +143,8 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
 
-  // Run every hour to auto-approve weekly off claims pending for 24+ hours
-  cron.schedule('0 * * * *', async () => {
+  // Run daily at 11:00 PM IST to auto-approve weekly off claims pending for 24+ hours
+  cron.schedule('0 23 * * *', async () => {
     logger.info('CRON: Auto-approving pending weekly off claims...');
     try {
       await autoApproveWeeklyOffClaimsJob();
@@ -174,8 +174,8 @@ function initCronJobs() {
   logger.info(`CRON: - Email processing: ${resolvedAllotmentCron} (IST)`);
   logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
   logger.info('CRON: - Attendance reminders: 0 * * * * (Every hour, IST)');
-  logger.info('CRON: - Weekly off entitlements: 1 0 * * * (Daily 12:01 AM IST)');
-  logger.info('CRON: - Weekly off auto-approval: 0 * * * * (Every hour, IST)');
+  logger.info('CRON: - Weekly off entitlements: 1 0 1 * * (1st of month, 12:01 AM IST)');
+  logger.info('CRON: - Weekly off auto-approval: 0 23 * * * (Daily 11:00 PM IST)');
   logger.info('CRON: - Weekly off monthly expiry: 5 0 * * * (Daily 12:05 AM IST)');
 }
 

@@ -15,20 +15,16 @@ const WeeklyOffClaim = sequelize.define('HrmWeeklyOffClaim', {
       key: 'employee_id'
     }
   },
-  entitlement_week_start: {
-    type: DataTypes.DATEONLY,
-    allowNull: false,
-    comment: 'Start of the 7-day entitlement window (Sunday)'
-  },
-  entitlement_week_end: {
-    type: DataTypes.DATEONLY,
-    allowNull: false,
-    comment: 'End of the 7-day entitlement window (Saturday)'
-  },
   entitlement_month: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    comment: 'YYYYMM format for month-end expiry tracking'
+    comment: 'YYYYMM format for monthly quota tracking'
+  },
+  monthly_quota: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 4,
+    comment: 'Monthly quota of weekly off entitlements (default: 4 per month)'
   },
   claimed_off_date: {
     type: DataTypes.DATEONLY,
@@ -40,7 +36,7 @@ const WeeklyOffClaim = sequelize.define('HrmWeeklyOffClaim', {
     allowNull: false,
     defaultValue: 'PENDING',
     validate: {
-      isIn: [['ELIGIBLE', 'PENDING', 'APPROVED', 'EXPIRED', 'USED']]
+      isIn: [['PENDING', 'APPROVED', 'EXPIRED', 'USED']]
     },
     comment: 'Tracks weekly-off entitlement and claim processing state'
   },
@@ -123,8 +119,8 @@ const WeeklyOffClaim = sequelize.define('HrmWeeklyOffClaim', {
     },
     {
       unique: true,
-      fields: ['employee_id', 'entitlement_week_start', 'entitlement_week_end'],
-      name: 'uq_weekly_off_employee_week'
+      fields: ['employee_id', 'entitlement_month', 'claim_status', 'claimed_off_date'],
+      name: 'uq_weekly_off_employee_month_date'
     }
   ]
 });
