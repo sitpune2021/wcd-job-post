@@ -7,7 +7,17 @@ const db = require('../../models');
 
 const truthy = (value) => ['true', '1', 'yes', 'on'].includes(String(value || '').toLowerCase());
 
-const isGlobalOcrEnabled = () => truthy(process.env.OCR_ENABLED || process.env.OCR_VERIFICATION_ENABLED);
+const isGlobalOcrEnabled = async () => {
+  const portalSetting = await db.PortalSetting.findOne({
+    where: { setting_key: 'ocr_enabled' }
+  });
+
+  if (portalSetting?.setting_value === true || portalSetting?.setting_value === false) {
+    return portalSetting.setting_value === true;
+  }
+
+  return truthy(process.env.OCR_ENABLED || process.env.OCR_VERIFICATION_ENABLED);
+};
 
 const getOcrApiUrl = () => process.env.OCR_API_URL || 'http://103.39.134.85:8000/ocr';
 
@@ -306,7 +316,7 @@ const callOcrApi = async (filePath) => {
 };
 
 const getEffectiveOcrEnabled = async (applicantId) => {
-  if (!isGlobalOcrEnabled()) {
+  if (!(await isGlobalOcrEnabled())) {
     return { enabled: false, global_enabled: false, applicant_disabled: false };
   }
 
@@ -344,7 +354,7 @@ const verifyEducationDocument = async (userData, documentPath, applicantId, opti
   }
 
   const effective = options.skipApplicantCheck
-    ? { enabled: isGlobalOcrEnabled(), global_enabled: isGlobalOcrEnabled(), applicant_disabled: false }
+    ? { enabled: await isGlobalOcrEnabled(), global_enabled: await isGlobalOcrEnabled(), applicant_disabled: false }
     : await getEffectiveOcrEnabled(applicantId);
 
   if (!effective.enabled) {
