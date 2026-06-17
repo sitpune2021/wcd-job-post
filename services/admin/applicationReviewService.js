@@ -266,6 +266,19 @@ const getApplicationsForPost = async (postId, filters = {}) => {
     });
     if (!postDetails) throw new ApiError(404, 'Post not found in selected recruitment drive');
 
+    const submittedApplicationWhere = {
+      post_id: postId,
+      recruitment_drive_id: reviewDrive.recruitment_drive_id,
+      is_deleted: { [Op.ne]: true },
+      declaration_accepted: true,
+      submitted_at: { [Op.ne]: null },
+      ...(scopedDistrictId ? { district_id: scopedDistrictId } : {})
+    };
+
+    const totalSubmittedApplications = await Application.count({
+      where: submittedApplicationWhere
+    });
+
     const finalDistrictId = parseInt(scopedDistrictId, 10) || postDetails.district_id;
     const latestRun = await db.MeritGenerationRun.findOne({
       where: {
@@ -279,13 +292,19 @@ const getApplicationsForPost = async (postId, filters = {}) => {
 
     const lightPost = {
       post_name: postDetails.post_name,
+      post_name_mr: postDetails.post_name_mr,
       post_code: postDetails.post_code,
       merit_status: postDetails.merit_status,
+      application_count: totalSubmittedApplications,
       scheme: postDetails.scheme ? {
         scheme_name: postDetails.scheme.scheme_name,
+        scheme_name_mr: postDetails.scheme.scheme_name_mr,
         scheme_type: postDetails.scheme.schemeType?.scheme_code
       } : null,
-      district: postDetails.district ? { district_name: postDetails.district.district_name } : null
+      district: postDetails.district ? {
+        district_name: postDetails.district.district_name,
+        district_name_mr: postDetails.district.district_name_mr
+      } : null
     };
     if (!latestRun) {
       return {
@@ -1022,10 +1041,44 @@ const updateApplicationStatus = async (applicationId, newStatus, options = {}) =
 const getApplicationDetail = async (applicationId) => {
   try {
     const application = await Application.findByPk(applicationId, {
-      attributes: ['application_id', 'application_no', 'status', 'gender', 'date_of_birth', 'aadhaar_number', 'system_eligibility_reason', 'merit_score'],
+      attributes: [
+        'application_id',
+        'application_no',
+        'applicant_id',
+        'post_id',
+        'district_id',
+        'recruitment_drive_id',
+        'status',
+        'gender',
+        'date_of_birth',
+        'aadhaar_number',
+        'system_eligibility_reason',
+        'merit_score',
+        'selected_at',
+        'submitted_at',
+        'created_at'
+      ],
       include: [
-        { model: PostMaster, as: 'post', attributes: ['post_name'] },
-        { model: DistrictMaster, as: 'district', attributes: ['district_name'] },
+        {
+          model: PostMaster,
+          as: 'post',
+          attributes: [
+            'post_id',
+            'post_name',
+            'post_name_mr',
+            'post_code',
+            'opening_date',
+            'closing_date',
+            'scheme_id',
+            'district_id',
+            'recruitment_drive_id'
+          ],
+          include: [
+            { model: Scheme, as: 'scheme', required: false, attributes: ['scheme_id', 'scheme_name', 'scheme_name_mr'] },
+            { model: DistrictMaster, as: 'district', required: false, attributes: ['district_id', 'district_name', 'district_name_mr'] }
+          ]
+        },
+        { model: DistrictMaster, as: 'district', attributes: ['district_name', 'district_name_mr'] },
         { model: EligibilityResult, as: 'eligibility', attributes: ['is_eligible', 'checked_at', 'rejection_reasons'] },
         {
           model: ApplicationStatusHistory,

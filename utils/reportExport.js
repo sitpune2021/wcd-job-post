@@ -33,6 +33,7 @@ const sendPdfFromHtml = async (res, filename, html, options = {}) => {
       {
         format: 'A4',
         printBackground: true,
+        executablePath: process.env.CHROMIUM_PATH,
         margin: { top: '14mm', right: '12mm', bottom: '14mm', left: '12mm' },
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
       }
