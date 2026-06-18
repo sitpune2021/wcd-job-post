@@ -148,18 +148,8 @@ class SchemeService {
         return false;
       }
 
-      // Check if scheme is referenced by other records
-      const [postCount, adminCount, employeeCount] = await Promise.all([
-        require('../../models').PostMaster.count({ where: { scheme_id: schemeId, is_deleted: false } }),
-        require('../../models').AdminUser.count({ where: { scheme_id: schemeId, is_deleted: false } }),
-        require('../../models').EmployeeMaster.count({ where: { scheme_id: schemeId, is_deleted: false } })
-      ]);
-
-      if (postCount > 0 || adminCount > 0 || employeeCount > 0) {
-        throw new Error('Cannot delete scheme: it is referenced by posts, admins, or employees');
-      }
-
       await scheme.update({
+        is_active: false,
         is_deleted: true,
         deleted_by: admin_id,
         deleted_at: new Date(),
