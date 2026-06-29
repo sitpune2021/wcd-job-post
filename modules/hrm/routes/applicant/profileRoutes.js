@@ -14,6 +14,12 @@ const ApiResponse = require('../../../../utils/ApiResponse');
 const { ApiError } = require('../../../../middleware/errorHandler');
 const logger = require('../../../../config/logger');
 
+const cleanOptionalText = (value) => {
+  if (value === null || value === undefined) return null;
+  const cleaned = String(value).trim();
+  return cleaned || null;
+};
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -163,20 +169,39 @@ router.put('/bank-details', async (req, res, next) => {
     const employee = await getEmployeeFromUser(req.user, db.EmployeeMaster);
     if (!employee) throw ApiError.forbidden('Employee profile not found.');
 
-    const { bank_name, account_number, ifsc_code, aadhar_number, state, district } = req.body;
+    const {
+      bank_name,
+      account_holder_name,
+      account_number,
+      ifsc_code,
+      aadhar_number,
+      state,
+      district
+    } = req.body;
 
-    const [bankDetail, created] = await db.EmployeeBankDetail.upsert({
+    const bankDetailPayload = {
       employee_id: employee.employee_id,
       applicant_id: employee.applicant_id || null,
-      bank_name: bank_name || null,
-      account_number: account_number || null,
-      ifsc_code: ifsc_code ? ifsc_code.toUpperCase() : null,
-      aadhar_number: aadhar_number || null,
-      state: state || null,
-      district: district || null
-    }, {
-      returning: true
+      bank_name: cleanOptionalText(bank_name),
+      account_holder_name: cleanOptionalText(account_holder_name),
+      account_number: cleanOptionalText(account_number),
+      ifsc_code: cleanOptionalText(ifsc_code)?.toUpperCase() || null,
+      aadhar_number: cleanOptionalText(aadhar_number),
+      state: cleanOptionalText(state),
+      district: cleanOptionalText(district)
+    };
+
+    let bankDetail = await db.EmployeeBankDetail.findOne({
+      where: { employee_id: employee.employee_id }
     });
+
+    const created = !bankDetail;
+
+    if (bankDetail) {
+      await bankDetail.update(bankDetailPayload);
+    } else {
+      bankDetail = await db.EmployeeBankDetail.create(bankDetailPayload);
+    }
 
     const msg = created ? 'Bank details saved successfully' : 'Bank details updated successfully';
     return ApiResponse.success(res, bankDetail, msg);

@@ -20,6 +20,7 @@ const payslipQuerySchema = Joi.object({
   employee_id: Joi.number().integer().optional(),
   district_id: Joi.number().integer().optional(),
   search: Joi.string().max(100).optional(),
+  format: Joi.string().valid('excel', 'pdf').optional(),
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10)
 });
@@ -86,29 +87,32 @@ router.get('/payslips/export', async (req, res, next) => {
       throw ApiError.badRequest(error.details[0].message);
     }
 
-    const { format = 'excel' } = req.query;
-    
-    // Get payslips data
-    const result = await simplePayrollViewService.getEmployeesPayslips(req.user, value);
+    const { format = 'excel' } = value;
     
     if (format === 'excel') {
       const { sendXlsxFromRows, sanitizeFileName } = require('../../../../utils/reportExport');
       
       const columns = [
-        { header: 'Employee Code', key: 'employee_code', width: 15 },
-        { header: 'District', key: 'district_name', width: 15 },
-        { header: 'Post', key: 'post_name', width: 20 },
-        { header: 'Basic Salary', key: 'basic_salary', width: 12 },
-        { header: 'Deductions', key: 'deducted_amount', width: 12 },
-        { header: 'Net Pay', key: 'net_pay', width: 12 }
+        { header: 'Beneficiary Name', key: 'beneficiary_name', width: 30 },
+        { header: 'Beneficiary Name as per Bank', key: 'beneficiary_name_as_per_bank', width: 32 },
+        { header: 'Bank Name', key: 'bank_name', width: 24 },
+        { header: 'Aadhaar Number', key: 'aadhaar_number', width: 18 },
+        { header: 'Account Number', key: 'account_number', width: 22 },
+        { header: 'IFSC Code', key: 'ifsc_code', width: 16 },
+        { header: 'State', key: 'state', width: 18 },
+        { header: 'District', key: 'district', width: 18 },
+        { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
+        { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
+        { header: 'Total Amount', key: 'total_amount', width: 16 }
       ];
 
-      const rows = result.employees || [];
-      const filename = sanitizeFileName(`payslips_${value.month}_${value.year}`);
+      const rows = await simplePayrollViewService.getPayrollPaymentLogRows(req.user, value);
+      const filename = sanitizeFileName(`salary_payment_log_${value.month}_${value.year}`);
       
       await sendXlsxFromRows(res, filename, columns, rows);
     } else if (format === 'pdf') {
       const { sendPdfFromHtml, sanitizeFileName } = require('../../../../utils/reportExport');
+      const result = await simplePayrollViewService.getEmployeesPayslips(req.user, value);
       
       // Generate HTML for PDF
       const html = generatePayslipHtml(result, value);
@@ -241,7 +245,7 @@ const generatePayslipHtml = (data, filters) => {
               <td>${emp.district_name}</td>
               <td>${emp.post_name}</td>
               <td class="text-right">INR ${emp.basic_salary.toLocaleString()}</td>
-              <td class="text-right">INR ${emp.deducted_amount.toLocaleString()}</td>
+              <td class="text-right">INR ${(emp.total_deduction || 0).toLocaleString()}</td>
               <td class="text-right"><strong>INR ${emp.net_pay.toLocaleString()}</strong></td>
             </tr>
           `).join('')}

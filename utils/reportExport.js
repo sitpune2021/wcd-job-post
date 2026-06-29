@@ -11,6 +11,22 @@ const sendXlsxFromRows = async (res, filename, columns, rows) => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Report');
   sheet.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 25 }));
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE2E8F0' }
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+  });
   rows.forEach((r, idx) => {
     const rowData = {};
     columns.forEach((c) => {

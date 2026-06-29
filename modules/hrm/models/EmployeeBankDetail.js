@@ -27,6 +27,11 @@ const EmployeeBankDetail = sequelize.define('EmployeeBankDetail', {
     type: DataTypes.STRING(100),
     allowNull: true
   },
+  account_holder_name: {
+    type: DataTypes.STRING(150),
+    allowNull: true,
+    comment: 'Beneficiary/account holder name exactly as per bank records'
+  },
   account_number: {
     type: DataTypes.STRING(30),
     allowNull: true
