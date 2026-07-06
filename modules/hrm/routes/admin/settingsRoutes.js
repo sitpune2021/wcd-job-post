@@ -150,4 +150,120 @@ router.delete('/payment-distribution/:schemeTypeId', authenticate, requireHRMAdm
   }
 });
 
+// ==================== WEEKLY OFF QUOTA SETTINGS ====================
+
+/**
+ * @route GET /api/hrm/admin/settings/weekly-off-quota
+ * @desc Get all weekly off quota settings (with scheme type info)
+ */
+router.get('/weekly-off-quota', requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
+  try {
+    const settings = await db.WeeklyOffSetting.findAll({
+      include: [{
+        model: db.SchemeType,
+        as: 'schemeType',
+        attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+        where: { is_deleted: false }
+      }],
+      order: [['setting_id', 'ASC']]
+    });
+
+    const result = settings.map(s => ({
+      setting_id: s.setting_id,
+      scheme_type_id: s.scheme_type_id,
+      scheme_code: s.schemeType?.scheme_code,
+      scheme_name: s.schemeType?.scheme_name,
+      monthly_quota: parseInt(s.monthly_quota, 10),
+      created_at: s.created_at,
+      updated_at: s.updated_at
+    }));
+
+    return ApiResponse.success(res, result, 'Weekly off quota settings retrieved');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route PUT /api/hrm/admin/settings/weekly-off-quota/:schemeTypeId
+ * @desc Create or update weekly off quota for a scheme type
+ */
+router.put('/weekly-off-quota/:schemeTypeId', authenticate, requireHRMAdminPermission(['hrm.settings.edit', 'hrm.*']), async (req, res, next) => {
+  try {
+    const { schemeTypeId } = req.params;
+    const { monthly_quota } = req.body;
+
+    if (monthly_quota === undefined || monthly_quota === null || monthly_quota === '') {
+      throw new ApiError(400, 'monthly_quota is required');
+    }
+
+    const monthlyQuota = Number(monthly_quota);
+    if (!Number.isInteger(monthlyQuota) || monthlyQuota < 0 || monthlyQuota > 10) {
+      throw new ApiError(400, 'Monthly quota must be a whole number between 0 and 10');
+    }
+
+    const schemeType = await db.SchemeType.findByPk(schemeTypeId);
+    if (!schemeType || schemeType.is_deleted) {
+      throw new ApiError(404, 'Scheme type not found');
+    }
+
+    const existingSetting = await db.WeeklyOffSetting.findOne({
+      where: { scheme_type_id: parseInt(schemeTypeId, 10) }
+    });
+
+    let setting;
+    if (existingSetting) {
+      setting = await existingSetting.update({
+        monthly_quota: monthlyQuota,
+        updated_by: req.user.admin_id,
+        updated_at: new Date()
+      });
+    } else {
+      setting = await db.WeeklyOffSetting.create({
+        scheme_type_id: parseInt(schemeTypeId, 10),
+        monthly_quota: monthlyQuota,
+        created_by: req.user.admin_id
+      });
+    }
+
+    logger.info(`Weekly off quota ${existingSetting ? 'updated' : 'created'} for scheme type ${schemeTypeId} by admin ${req.user.admin_id}`, {
+      schemeTypeId,
+      monthlyQuota
+    });
+
+    return ApiResponse.success(res, {
+      setting_id: setting.setting_id,
+      scheme_type_id: setting.scheme_type_id,
+      scheme_code: schemeType.scheme_code,
+      scheme_name: schemeType.scheme_name,
+      monthly_quota: monthlyQuota
+    }, existingSetting ? 'Weekly off quota updated' : 'Weekly off quota created');
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route DELETE /api/hrm/admin/settings/weekly-off-quota/:schemeTypeId
+ * @desc Remove weekly off quota setting for a scheme type; service falls back to default quota 4
+ */
+router.delete('/weekly-off-quota/:schemeTypeId', authenticate, requireHRMAdminPermission(['hrm.settings.edit', 'hrm.*']), async (req, res, next) => {
+  try {
+    const { schemeTypeId } = req.params;
+
+    const deleted = await db.WeeklyOffSetting.destroy({
+      where: { scheme_type_id: parseInt(schemeTypeId, 10) }
+    });
+
+    if (!deleted) {
+      throw new ApiError(404, 'Weekly off quota setting not found');
+    }
+
+    logger.info(`Weekly off quota deleted for scheme type ${schemeTypeId} by admin ${req.user.admin_id}`);
+    return ApiResponse.success(res, null, 'Weekly off quota setting deleted');
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

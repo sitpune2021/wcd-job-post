@@ -78,6 +78,7 @@ db.Payment = require('./Payment');
 db.SchemeType = require('./SchemeType');
 db.Scheme = require('./Scheme')(sequelize, DataTypes);
 db.PaymentDistributionSetting = require('./PaymentDistributionSetting');
+db.WeeklyOffSetting = require('./WeeklyOffSetting');
 
 // HRM Module Models
 const hrmModels = require('../modules/hrm/models');
@@ -305,6 +306,8 @@ db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'exited_by', as
 // SchemeType -> PaymentDistributionSetting
 db.SchemeType.hasOne(db.PaymentDistributionSetting, { foreignKey: 'scheme_type_id', as: 'paymentSetting' });
 db.PaymentDistributionSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+db.SchemeType.hasOne(db.WeeklyOffSetting, { foreignKey: 'scheme_type_id', as: 'weeklyOffSetting' });
+db.WeeklyOffSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // EmployeeMaster -> SchemeType (TODO: Add scheme_type_id column to ms_employee_master when implementing migration)
 // db.EmployeeMaster.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // db.SchemeType.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_type_id', as: 'employees' });
@@ -352,7 +355,7 @@ const modelsWithAudit = [
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
   'AllotmentEmailSchedule',
-  'SchemeType', 'PaymentDistributionSetting',
+  'SchemeType', 'PaymentDistributionSetting', 'WeeklyOffSetting',
   'EmployeeMaster', 'EmployeeOnboardingLog', 'EmployeeBankDetail',
   // Phase 2 HRM Models
   'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',

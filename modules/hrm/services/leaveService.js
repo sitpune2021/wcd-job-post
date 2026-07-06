@@ -393,10 +393,10 @@ const getLeaveApprovals = async (adminUser, query) => {
       status: query.status || 'PENDING' // Default to pending
     },
     searchFields: [
-      'employee.employee_code',
-      'employee.applicant.personal.full_name',
-      'district.district_name',
-      'leaveType.leave_name',
+      '$employee.employee_code$',
+      '$employee.applicant.personal.full_name$',
+      '$employee.district.district_name$',
+      '$leaveType.leave_name$',
       'reason',
       'rejection_reason'
     ],

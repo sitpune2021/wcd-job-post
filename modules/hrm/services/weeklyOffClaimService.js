@@ -1,29 +1,19 @@
 const db = require('../../../models');
 const { Op } = require('sequelize');
 const logger = require('../../../config/logger');
+const { ApiError } = require('../../../middleware/errorHandler');
 
-const { HrmWeeklyOffClaim: WeeklyOffClaim, EmployeeMaster, HrmAttendance: Attendance } = db;
+const {
+  HrmWeeklyOffClaim: WeeklyOffClaim,
+  EmployeeMaster,
+  HrmAttendance: Attendance,
+  Scheme,
+  WeeklyOffSetting
+} = db;
 
-/**
- * Get the Sunday of the current week
- */
-function getWeekStart(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day; // Sunday is day 0
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-/**
- * Get the Saturday of the current week (6 days after Sunday)
- */
-function getWeekEnd(weekStart) {
-  const d = new Date(weekStart);
-  d.setDate(d.getDate() + 6);
-  return d;
-}
+const DEFAULT_MONTHLY_QUOTA = 4;
+const MAX_MONTHLY_QUOTA = 5;
+const CLAIM_SLOT_STATUSES = ['PENDING', 'APPROVED'];
 
 /**
  * Format date as YYYY-MM-DD
@@ -40,10 +30,113 @@ function getMonthCode(date) {
   return d.getFullYear() * 100 + (d.getMonth() + 1);
 }
 
+function normalizeMonthlyQuota(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_MONTHLY_QUOTA;
+  return Math.min(Math.max(parsed, 0), MAX_MONTHLY_QUOTA);
+}
+
+async function findEmployeeForQuota(employeeId, transaction = null) {
+  return EmployeeMaster.findOne({
+    where: {
+      employee_id: employeeId,
+      is_active: true
+    },
+    attributes: ['employee_id', 'employee_code', 'scheme_id'],
+    include: [{
+      model: Scheme,
+      as: 'scheme',
+      attributes: ['scheme_id', 'scheme_type_id'],
+      required: false
+    }],
+    transaction
+  });
+}
+
+async function getWeeklyOffQuotaForEmployee(employee, transaction = null) {
+  if (!employee) {
+    return DEFAULT_MONTHLY_QUOTA;
+  }
+
+  const schemeTypeId = employee.scheme?.scheme_type_id || employee.schemeTypeId || null;
+  if (!schemeTypeId || !WeeklyOffSetting) {
+    return DEFAULT_MONTHLY_QUOTA;
+  }
+
+  try {
+    const setting = await WeeklyOffSetting.findOne({
+      where: { scheme_type_id: schemeTypeId },
+      attributes: ['monthly_quota'],
+      transaction
+    });
+
+    return normalizeMonthlyQuota(setting?.monthly_quota);
+  } catch (error) {
+    logger.warn('Weekly off quota setting lookup failed; using default quota', {
+      employeeId: employee.employee_id,
+      schemeTypeId,
+      error: error.message
+    });
+    return DEFAULT_MONTHLY_QUOTA;
+  }
+}
+
+async function getWeeklyOffQuotaForEmployeeId(employeeId, transaction = null) {
+  const employee = await findEmployeeForQuota(employeeId, transaction);
+  return getWeeklyOffQuotaForEmployee(employee, transaction);
+}
+
+async function countClaimedSlots(employeeId, entitlementMonth, excludeClaimId = null, transaction = null) {
+  const where = {
+    employee_id: employeeId,
+    entitlement_month: entitlementMonth,
+    claimed_off_date: { [Op.not]: null },
+    claim_status: { [Op.in]: CLAIM_SLOT_STATUSES }
+  };
+
+  if (excludeClaimId) {
+    where.claim_id = { [Op.ne]: excludeClaimId };
+  }
+
+  return WeeklyOffClaim.count({ where, transaction });
+}
+
+async function ensureClaimWithinMonthlyQuota(claim, monthlyQuota, transaction = null) {
+  if (monthlyQuota <= 0) {
+    throw ApiError.badRequest('Weekly off is not available for your scheme this month');
+  }
+
+  const claimedSlots = await countClaimedSlots(
+    claim.employee_id,
+    claim.entitlement_month,
+    claim.claim_id,
+    transaction
+  );
+
+  if (claimedSlots >= monthlyQuota) {
+    throw ApiError.badRequest(`You have already used your monthly quota of ${monthlyQuota} weekly off claims`);
+  }
+}
+
+function trimVisibleClaimsToQuota(claims, monthlyQuota) {
+  const claimedOrProcessedClaims = claims.filter(c => c.claimed_off_date || c.claim_status !== 'PENDING');
+  const openPendingClaims = claims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date);
+  const claimedSlots = claimedOrProcessedClaims.filter(c =>
+    c.claimed_off_date && CLAIM_SLOT_STATUSES.includes(c.claim_status)
+  ).length;
+  const visibleOpenSlots = Math.max(monthlyQuota - claimedSlots, 0);
+
+  const visibleClaims = [
+    ...claimedOrProcessedClaims,
+    ...openPendingClaims.slice(0, visibleOpenSlots)
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return visibleClaims;
+}
+
 /**
- * Generate monthly weekly off entitlements for all active employees
- * Creates 4 entitlements per employee per month
- * Monthly quota system: 4 per month, can be used anytime within the month
+ * Generate monthly weekly off entitlements for all active employees.
+ * Monthly quota comes from HRM settings per scheme type, with default 4.
  */
 async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) {
   try {
@@ -57,51 +150,56 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
       attempt: retryCount + 1
     });
 
-    // Get all active employees or specific employee
-    const employees = employeeId 
-      ? await EmployeeMaster.findAll({
-          where: {
-            employee_id: employeeId,
-            is_active: true
-          },
-          attributes: ['employee_id', 'employee_code']
-        })
-      : await EmployeeMaster.findAll({
-          where: {
-            is_active: true
-          },
-          attributes: ['employee_id', 'employee_code']
-        });
+    const where = { is_active: true };
+    if (employeeId) {
+      where.employee_id = employeeId;
+    }
+
+    const employees = await EmployeeMaster.findAll({
+      where,
+      attributes: ['employee_id', 'employee_code', 'scheme_id'],
+      include: [{
+        model: Scheme,
+        as: 'scheme',
+        attributes: ['scheme_id', 'scheme_type_id'],
+        required: false
+      }]
+    });
 
     let created = 0;
     let skipped = 0;
+    let disabled = 0;
 
     for (const employee of employees) {
-      // Check if employee already has entitlements for current month
-      const existingEntitlements = await WeeklyOffClaim.findAll({
+      const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee);
+
+      if (monthlyQuota <= 0) {
+        disabled++;
+        continue;
+      }
+
+      const activeEntitlementCount = await WeeklyOffClaim.count({
         where: {
           employee_id: employee.employee_id,
           entitlement_month: monthCode,
-          claim_status: 'PENDING'
+          claim_status: { [Op.ne]: 'EXPIRED' }
         }
       });
 
-      // If employee already has 4 pending entitlements for this month, skip
-      if (existingEntitlements.length >= 4) {
+      if (activeEntitlementCount >= monthlyQuota) {
         skipped++;
         continue;
       }
 
-      // Create remaining entitlements to reach 4 per month
-      const entitlementsNeeded = 4 - existingEntitlements.length;
-      
+      const entitlementsNeeded = monthlyQuota - activeEntitlementCount;
+
       for (let i = 0; i < entitlementsNeeded; i++) {
         await WeeklyOffClaim.create({
           employee_id: employee.employee_id,
           entitlement_month: monthCode,
-          monthly_quota: 4,
-          claim_status: 'PENDING', // Available to claim
-          created_by: null // System generated
+          monthly_quota: monthlyQuota,
+          claim_status: 'PENDING',
+          created_by: null
         });
 
         created++;
@@ -111,43 +209,37 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
     logger.info('Monthly weekly off entitlements generation completed', {
       created,
       skipped,
+      disabled,
       totalEmployees: employees.length
     });
 
-    return { created, skipped, total: employees.length };
+    return { created, skipped, disabled, total: employees.length };
   } catch (error) {
     logger.error('Error generating monthly weekly off entitlements:', error);
-    
-    // Retry logic for failed generations
+
     if (retryCount < 2) {
       logger.warn(`Retrying monthly weekly off entitlement generation (attempt ${retryCount + 2})`);
-      return await generateWeeklyOffEntitlements(employeeId, retryCount + 1);
+      return generateWeeklyOffEntitlements(employeeId, retryCount + 1);
     }
-    
+
     throw error;
   }
 }
 
 /**
- * Get all weekly off claims for an employee
+ * Get all weekly off claims for an employee.
  */
 async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
   try {
     const { status, monthCode } = filters;
     const currentDate = new Date();
     const currentMonthCode = getMonthCode(currentDate);
+    const requestedMonthCode = monthCode || currentMonthCode;
 
     const whereClause = {
-      employee_id: employeeId
+      employee_id: employeeId,
+      entitlement_month: requestedMonthCode
     };
-
-    // Include claims from current month OR recent pending claims from current month
-    if (monthCode) {
-      whereClause.entitlement_month = monthCode;
-    } else {
-      // If no month filter, include all claims from current month
-      whereClause.entitlement_month = currentMonthCode;
-    }
 
     if (status) {
       whereClause.claim_status = status;
@@ -166,26 +258,32 @@ async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
       ]
     });
 
-    // Calculate stats based on monthly quota
-    const pendingClaims = claims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date);
-    const approvedClaims = claims.filter(c => c.claim_status === 'APPROVED');
-    const usedClaims = claims.filter(c => c.claimed_off_date);
-    
-    // Get monthly quota (default 4)
-    const monthlyQuota = claims.length > 0 ? claims[0].monthly_quota : 4;
-    
+    const settingQuota = await getWeeklyOffQuotaForEmployeeId(employeeId);
+    const monthlyQuota = requestedMonthCode === currentMonthCode
+      ? settingQuota
+      : normalizeMonthlyQuota(claims[0]?.monthly_quota ?? settingQuota);
+    const visibleClaims = trimVisibleClaimsToQuota(claims, monthlyQuota);
+
+    const pendingClaims = visibleClaims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date);
+    const submittedClaims = visibleClaims.filter(c => c.claim_status === 'PENDING' && c.claimed_off_date);
+    const approvedClaims = visibleClaims.filter(c => c.claim_status === 'APPROVED');
+    const claimedSlots = visibleClaims.filter(c =>
+      c.claimed_off_date && CLAIM_SLOT_STATUSES.includes(c.claim_status)
+    );
+
     const stats = {
-      totalEntitlements: claims.length,
-      monthlyQuota: monthlyQuota,
+      totalEntitlements: visibleClaims.length,
+      monthlyQuota,
       pending: pendingClaims.length,
+      submitted: submittedClaims.length,
       approved: approvedClaims.length,
-      claimed: usedClaims.length,
-      remaining: monthlyQuota - usedClaims.length
+      claimed: claimedSlots.length,
+      remaining: Math.max(monthlyQuota - claimedSlots.length, 0)
     };
 
     return {
-      data: claims,
-      stats: stats
+      data: visibleClaims,
+      stats
     };
   } catch (error) {
     logger.error('Error getting employee weekly off claims:', error);
@@ -194,71 +292,66 @@ async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
 }
 
 /**
- * Submit or update a weekly off claim
+ * Submit or update a weekly off claim.
  */
 async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updatedBy = null) {
   const transaction = await db.sequelize.transaction();
 
   try {
-    // Find the claim
     const claim = await WeeklyOffClaim.findOne({
       where: {
         claim_id: claimId,
         employee_id: employeeId
       },
-      transaction
+      transaction,
+      lock: transaction.LOCK.UPDATE
     });
 
     if (!claim) {
-      throw new Error('Weekly off claim not found');
+      throw ApiError.notFound('Weekly off claim not found');
     }
 
-    // Check if already approved
     if (claim.claim_status === 'APPROVED') {
-      throw new Error('Cannot modify an already approved weekly off claim');
+      throw ApiError.badRequest('Cannot modify an already approved weekly off claim');
     }
 
-    // Validate claimed date is within the same month as entitlement
+    if (claim.claim_status !== 'PENDING') {
+      throw ApiError.badRequest('This weekly off claim is no longer available');
+    }
+
     const claimedDate = new Date(claimedOffDate);
+    if (Number.isNaN(claimedDate.getTime())) {
+      throw ApiError.badRequest('Invalid claimed off date');
+    }
+
     const entitlementMonth = claim.entitlement_month;
     const claimedMonthCode = getMonthCode(claimedDate);
 
     if (claimedMonthCode !== entitlementMonth) {
-      throw new Error(`Claimed date must be within the entitlement month (${entitlementMonth})`);
+      throw ApiError.badRequest(`Claimed date must be within the entitlement month (${entitlementMonth})`);
     }
 
-    // Check if employee has exceeded monthly quota
-    const usedClaimsInMonth = await WeeklyOffClaim.count({
-      where: {
-        employee_id: employeeId,
-        entitlement_month: entitlementMonth,
-        claimed_off_date: { [Op.not]: null },
-        claim_status: 'APPROVED'
-      }
-    });
+    const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(employeeId, transaction);
+    await ensureClaimWithinMonthlyQuota(claim, monthlyQuota, transaction);
 
-    if (usedClaimsInMonth >= claim.monthly_quota) {
-      throw new Error(`You have already used your monthly quota of ${claim.monthly_quota} weekly off claims`);
-    }
-
-    // Check if another claim exists for the same date
     const existingClaimForDate = await WeeklyOffClaim.findOne({
       where: {
         employee_id: employeeId,
         claimed_off_date: claimedOffDate,
-        claim_status: 'APPROVED',
+        claim_status: { [Op.in]: CLAIM_SLOT_STATUSES },
         claim_id: { [Op.ne]: claimId }
       },
-      transaction
+      transaction,
+      lock: transaction.LOCK.UPDATE
     });
 
     if (existingClaimForDate) {
-      throw new Error('You already have an approved weekly off for this date');
+      throw ApiError.badRequest('You already have a weekly off claim for this date');
     }
 
-    // Update the claim
     await claim.update({
       claimed_off_date: claimedOffDate,
+      monthly_quota: monthlyQuota,
       requested_at: new Date(),
       updated_by: updatedBy
     }, { transaction });
@@ -268,7 +361,8 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
     logger.info('Weekly off claim submitted/updated', {
       claimId,
       employeeId,
-      claimedOffDate
+      claimedOffDate,
+      monthlyQuota
     });
 
     return claim;
@@ -280,45 +374,73 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
 }
 
 /**
- * Approve a weekly off claim (admin only)
+ * Approve a weekly off claim (admin only).
  */
 async function approveWeeklyOffClaim(claimId, adminId, remarks) {
+  const transaction = await db.sequelize.transaction();
+
   try {
     const claim = await WeeklyOffClaim.findOne({
       where: {
         claim_id: claimId,
         claim_status: 'PENDING'
-      }
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE
     });
 
     if (!claim) {
-      throw new Error('Weekly off claim not found or already processed');
+      throw ApiError.notFound('Weekly off claim not found or already processed');
     }
 
-    // Update claim status
+    if (!claim.claimed_off_date) {
+      throw ApiError.badRequest('Cannot approve an unclaimed weekly off entitlement');
+    }
+
+    const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(claim.employee_id, transaction);
+    const approvedClaimsInMonth = await WeeklyOffClaim.count({
+      where: {
+        employee_id: claim.employee_id,
+        entitlement_month: claim.entitlement_month,
+        claimed_off_date: { [Op.not]: null },
+        claim_status: 'APPROVED',
+        claim_id: { [Op.ne]: claimId }
+      },
+      transaction
+    });
+
+    if (approvedClaimsInMonth >= monthlyQuota) {
+      throw ApiError.badRequest(`Monthly weekly off quota of ${monthlyQuota} is already approved for this employee`);
+    }
+
     await claim.update({
       claim_status: 'APPROVED',
+      monthly_quota: monthlyQuota,
       approved_by: adminId,
       approved_at: new Date(),
       admin_remarks: remarks,
       updated_by: adminId
-    });
+    }, { transaction });
+
+    await transaction.commit();
 
     logger.info('Weekly off claim approved successfully', {
       claimId,
       employeeId: claim.employee_id,
-      approvedBy: adminId
+      approvedBy: adminId,
+      monthlyQuota
     });
 
     return claim;
   } catch (error) {
+    await transaction.rollback();
     logger.error('Error approving weekly off claim:', error);
     throw error;
   }
 }
 
 /**
- * Auto-approve claims older than 24 hours
+ * Auto-approve claims older than 24 hours.
  */
 async function autoApproveWeeklyOffClaims() {
   try {
@@ -327,21 +449,61 @@ async function autoApproveWeeklyOffClaims() {
     const pendingClaims = await WeeklyOffClaim.findAll({
       where: {
         claim_status: 'PENDING',
+        claimed_off_date: { [Op.not]: null },
         requested_at: { [Op.lt]: twentyFourHoursAgo }
       }
     });
 
     let approved = 0;
+    let expired = 0;
 
     for (const claim of pendingClaims) {
       let transaction;
       try {
         transaction = await db.sequelize.transaction();
 
+        const lockedClaim = await WeeklyOffClaim.findOne({
+          where: {
+            claim_id: claim.claim_id,
+            claim_status: 'PENDING'
+          },
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+
+        if (!lockedClaim) {
+          await transaction.commit();
+          continue;
+        }
+
+        const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(lockedClaim.employee_id, transaction);
+        const approvedClaimsInMonth = await WeeklyOffClaim.count({
+          where: {
+            employee_id: lockedClaim.employee_id,
+            entitlement_month: lockedClaim.entitlement_month,
+            claimed_off_date: { [Op.not]: null },
+            claim_status: 'APPROVED',
+            claim_id: { [Op.ne]: lockedClaim.claim_id }
+          },
+          transaction
+        });
+
+        if (monthlyQuota <= 0 || approvedClaimsInMonth >= monthlyQuota) {
+          await lockedClaim.update({
+            claim_status: 'EXPIRED',
+            monthly_quota: monthlyQuota,
+            admin_remarks: `Monthly weekly off quota of ${monthlyQuota} is already used`,
+            updated_by: null
+          }, { transaction });
+          await transaction.commit();
+          expired++;
+          continue;
+        }
+
         const existingAttendance = await Attendance.findOne({
           where: {
-            employee_id: claim.employee_id,
-            attendance_date: claim.claimed_off_date
+            employee_id: lockedClaim.employee_id,
+            attendance_date: lockedClaim.claimed_off_date
           },
           transaction,
           lock: transaction.LOCK.UPDATE
@@ -350,12 +512,13 @@ async function autoApproveWeeklyOffClaims() {
           if (['ABSENT', 'WEEKLY_OFF'].includes(existingAttendance.status)) {
             await existingAttendance.update({
               status: 'WEEKLY_OFF',
-              remarks: `Weekly Off Claim - Auto Approved (Month: ${claim.entitlement_month})`,
+              remarks: `Weekly Off Claim - Auto Approved (Month: ${lockedClaim.entitlement_month})`,
               updated_by: null
             }, { transaction });
 
-            await claim.update({
+            await lockedClaim.update({
               claim_status: 'APPROVED',
+              monthly_quota: monthlyQuota,
               approved_by: null,
               approved_at: new Date(),
               admin_remarks: 'Auto-approved after 24 hours',
@@ -368,15 +531,15 @@ async function autoApproveWeeklyOffClaims() {
             approved++;
 
             logger.info('Weekly off claim auto-approved using existing attendance', {
-              claimId: claim.claim_id,
-              employeeId: claim.employee_id,
+              claimId: lockedClaim.claim_id,
+              employeeId: lockedClaim.employee_id,
               attendanceId: existingAttendance.attendance_id,
               previousAttendanceStatus: existingAttendance.status
             });
             continue;
           }
 
-          await claim.update({
+          await lockedClaim.update({
             approved_by: null,
             approved_at: null,
             admin_remarks: 'Attendance already exists for the claimed date. Weekly off claim kept pending for review.',
@@ -386,29 +549,28 @@ async function autoApproveWeeklyOffClaims() {
           }, { transaction });
           await transaction.commit();
           logger.warn('Weekly off claim kept pending because attendance already exists', {
-            claimId: claim.claim_id,
-            employeeId: claim.employee_id,
+            claimId: lockedClaim.claim_id,
+            employeeId: lockedClaim.employee_id,
             attendanceId: existingAttendance.attendance_id,
             attendanceStatus: existingAttendance.status
           });
           continue;
         }
 
-        // Create attendance record
         const attendanceRecord = await Attendance.create({
-          employee_id: claim.employee_id,
-          attendance_date: claim.claimed_off_date,
+          employee_id: lockedClaim.employee_id,
+          attendance_date: lockedClaim.claimed_off_date,
           status: 'WEEKLY_OFF',
           check_in_time: null,
           check_out_time: null,
           total_work_hours: 0,
-          remarks: `Weekly Off Claim - Auto Approved (Month: ${claim.entitlement_month})`,
+          remarks: `Weekly Off Claim - Auto Approved (Month: ${lockedClaim.entitlement_month})`,
           created_by: null
         }, { transaction });
 
-        // Update claim
-        await claim.update({
+        await lockedClaim.update({
           claim_status: 'APPROVED',
+          monthly_quota: monthlyQuota,
           approved_by: null,
           approved_at: new Date(),
           admin_remarks: 'Auto-approved after 24 hours',
@@ -421,12 +583,11 @@ async function autoApproveWeeklyOffClaims() {
         approved++;
 
         logger.info('Weekly off claim auto-approved', {
-          claimId: claim.claim_id,
-          employeeId: claim.employee_id
+          claimId: lockedClaim.claim_id,
+          employeeId: lockedClaim.employee_id
         });
       } catch (error) {
         logger.error(`Failed to auto-approve claim ${claim.claim_id}:`, error);
-        // CRITICAL FIX: Rollback transaction on error to prevent connection leak
         if (transaction) {
           try {
             await transaction.rollback();
@@ -439,10 +600,11 @@ async function autoApproveWeeklyOffClaims() {
 
     logger.info('Auto-approval completed', {
       approved,
+      expired,
       totalPending: pendingClaims.length
     });
 
-    return { approved, total: pendingClaims.length };
+    return { approved, expired, total: pendingClaims.length };
   } catch (error) {
     logger.error('Error in auto-approval process:', error);
     throw error;
@@ -450,14 +612,13 @@ async function autoApproveWeeklyOffClaims() {
 }
 
 /**
- * Expire all unclaimed weekly off entitlements from previous month
+ * Expire all unclaimed weekly off entitlements from previous month.
  */
 async function expireMonthlyWeeklyOffClaims() {
   try {
     const currentDate = new Date();
     const currentMonthCode = getMonthCode(currentDate);
 
-    // Find all PENDING claims from previous months
     const expiredClaims = await WeeklyOffClaim.update(
       { claim_status: 'EXPIRED' },
       {
@@ -482,7 +643,7 @@ async function expireMonthlyWeeklyOffClaims() {
 }
 
 /**
- * Get pending weekly off claims for admin approval
+ * Get pending weekly off claims for admin approval.
  */
 async function getPendingWeeklyOffClaims(adminFilters = {}) {
   try {
@@ -512,7 +673,6 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
       replacements.search = `%${search}%`;
     }
 
-    // Get total count for pagination
     const countSql = `
       SELECT COUNT(*) as total
       FROM ms_hrm_weekly_off_claims w
@@ -528,9 +688,8 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
       replacements,
       type: db.Sequelize.QueryTypes.SELECT
     });
-    const total = parseInt(countResult[0].total);
+    const total = parseInt(countResult[0].total, 10);
 
-    // Get paginated data
     const dataSql = `
       SELECT
         w.claim_id,
@@ -563,8 +722,8 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
       LIMIT :limit OFFSET :offset
     `;
 
-    replacements.limit = parseInt(limit);
-    replacements.offset = parseInt(offset);
+    replacements.limit = parseInt(limit, 10);
+    replacements.offset = parseInt(offset, 10);
 
     const rows = await db.sequelize.query(dataSql, {
       replacements,
@@ -600,10 +759,10 @@ async function getPendingWeeklyOffClaims(adminFilters = {}) {
       data: claims,
       pagination: {
         total,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
-        totalPages: Math.ceil(total / parseInt(limit))
+        limit: parseInt(limit, 10),
+        offset: parseInt(offset, 10),
+        page: Math.floor(parseInt(offset, 10) / parseInt(limit, 10)) + 1,
+        totalPages: Math.ceil(total / parseInt(limit, 10))
       }
     };
   } catch (error) {

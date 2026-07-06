@@ -75,7 +75,7 @@ router.post('/generate', async (req, res, next) => {
       employeeId: employee.employee_id
     });
 
-    await weeklyOffClaimService.generateWeeklyOffEntitlements();
+    await weeklyOffClaimService.generateWeeklyOffEntitlements(employee.employee_id);
     
     return ApiResponse.success(res, null, 'Weekly off entitlements generated successfully');
   } catch (error) {
