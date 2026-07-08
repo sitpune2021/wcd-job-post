@@ -16,6 +16,12 @@ const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
 const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileName } = require('../../../../utils/reportExport');
 
+const formatDateOnly = (value) => {
+  if (!value) return '-';
+  if (typeof value === 'string') return value.split('T')[0];
+  return new Date(value).toISOString().split('T')[0];
+};
+
 // Validation functions
 const validateAadhar = (aadhar) => {
   if (!aadhar) return true; // Optional field
@@ -127,8 +133,8 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*'])
         district_name: emp.district?.district_name || '-',
         location_name: emp.scheme?.scheme_name || '-',
         location_type: emp.scheme?.schemeType?.scheme_code || '-',
-        contract_start_date: emp.contract_start_date,
-        contract_end_date: emp.contract_end_date,
+        contract_start_date: formatDateOnly(emp.contract_start_date),
+        contract_end_date: formatDateOnly(emp.contract_end_date),
         status: status,
         onboarding_status: emp.onboarding_status,
         employment_status: emp.employment_status

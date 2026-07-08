@@ -7,6 +7,7 @@ const {
   HrmWeeklyOffClaim: WeeklyOffClaim,
   EmployeeMaster,
   HrmAttendance: Attendance,
+  HrmLeaveApplication: LeaveApplication,
   Scheme,
   WeeklyOffSetting
 } = db;
@@ -14,6 +15,7 @@ const {
 const DEFAULT_MONTHLY_QUOTA = 4;
 const MAX_MONTHLY_QUOTA = 5;
 const CLAIM_SLOT_STATUSES = ['PENDING', 'APPROVED'];
+const ACTIVE_LEAVE_STATUSES = ['PENDING', 'APPROVED'];
 
 /**
  * Format date as YYYY-MM-DD
@@ -42,7 +44,7 @@ async function findEmployeeForQuota(employeeId, transaction = null) {
       employee_id: employeeId,
       is_active: true
     },
-    attributes: ['employee_id', 'employee_code', 'scheme_id'],
+    attributes: ['employee_id', 'employee_code', 'scheme_id', 'contract_start_date', 'contract_end_date'],
     include: [{
       model: Scheme,
       as: 'scheme',
@@ -84,6 +86,37 @@ async function getWeeklyOffQuotaForEmployee(employee, transaction = null) {
 async function getWeeklyOffQuotaForEmployeeId(employeeId, transaction = null) {
   const employee = await findEmployeeForQuota(employeeId, transaction);
   return getWeeklyOffQuotaForEmployee(employee, transaction);
+}
+
+async function validateWeeklyOffClaimDate(employee, claimedOffDate, transaction = null) {
+  if (!employee) {
+    throw ApiError.forbidden('Employee profile not found for this user');
+  }
+
+  if (employee.contract_start_date && claimedOffDate < employee.contract_start_date) {
+    throw ApiError.badRequest(`Weekly off date must be within your contract period (${employee.contract_start_date} to ${employee.contract_end_date || 'open-ended'})`);
+  }
+
+  if (employee.contract_end_date && claimedOffDate > employee.contract_end_date) {
+    throw ApiError.badRequest(`Weekly off date must be within your contract period (${employee.contract_start_date} to ${employee.contract_end_date})`);
+  }
+
+  const existingLeave = await LeaveApplication.findOne({
+    where: {
+      employee_id: employee.employee_id,
+      is_deleted: false,
+      status: { [Op.in]: ACTIVE_LEAVE_STATUSES },
+      from_date: { [Op.lte]: claimedOffDate },
+      to_date: { [Op.gte]: claimedOffDate }
+    },
+    attributes: ['leave_id', 'status', 'from_date', 'to_date'],
+    transaction
+  });
+
+  if (existingLeave) {
+    const leaveStatus = String(existingLeave.status || '').toLowerCase();
+    throw ApiError.badRequest(`You already have a ${leaveStatus} leave application for ${claimedOffDate}. Weekly off cannot be claimed on the same date.`);
+  }
 }
 
 async function countClaimedSlots(employeeId, entitlementMonth, excludeClaimId = null, transaction = null) {
@@ -331,13 +364,17 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
       throw ApiError.badRequest(`Claimed date must be within the entitlement month (${entitlementMonth})`);
     }
 
-    const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(employeeId, transaction);
+    const claimedDateOnly = formatDate(claimedDate);
+    const employee = await findEmployeeForQuota(employeeId, transaction);
+    await validateWeeklyOffClaimDate(employee, claimedDateOnly, transaction);
+
+    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction);
     await ensureClaimWithinMonthlyQuota(claim, monthlyQuota, transaction);
 
     const existingClaimForDate = await WeeklyOffClaim.findOne({
       where: {
         employee_id: employeeId,
-        claimed_off_date: claimedOffDate,
+        claimed_off_date: claimedDateOnly,
         claim_status: { [Op.in]: CLAIM_SLOT_STATUSES },
         claim_id: { [Op.ne]: claimId }
       },
@@ -350,7 +387,7 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
     }
 
     await claim.update({
-      claimed_off_date: claimedOffDate,
+      claimed_off_date: claimedDateOnly,
       monthly_quota: monthlyQuota,
       requested_at: new Date(),
       updated_by: updatedBy
@@ -361,7 +398,7 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
     logger.info('Weekly off claim submitted/updated', {
       claimId,
       employeeId,
-      claimedOffDate,
+      claimedOffDate: claimedDateOnly,
       monthlyQuota
     });
 
@@ -497,6 +534,35 @@ async function autoApproveWeeklyOffClaims() {
           }, { transaction });
           await transaction.commit();
           expired++;
+          continue;
+        }
+
+        const existingLeave = await LeaveApplication.findOne({
+          where: {
+            employee_id: lockedClaim.employee_id,
+            is_deleted: false,
+            status: { [Op.in]: ACTIVE_LEAVE_STATUSES },
+            from_date: { [Op.lte]: lockedClaim.claimed_off_date },
+            to_date: { [Op.gte]: lockedClaim.claimed_off_date }
+          },
+          attributes: ['leave_id', 'status', 'from_date', 'to_date'],
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+
+        if (existingLeave) {
+          await lockedClaim.update({
+            admin_remarks: `${existingLeave.status} leave application already exists for the claimed date. Weekly off claim kept pending for review.`,
+            auto_approved: false,
+            updated_by: null
+          }, { transaction });
+          await transaction.commit();
+          logger.warn('Weekly off claim kept pending because leave already exists', {
+            claimId: lockedClaim.claim_id,
+            employeeId: lockedClaim.employee_id,
+            leaveId: existingLeave.leave_id,
+            leaveStatus: existingLeave.status
+          });
           continue;
         }
 
