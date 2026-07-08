@@ -79,6 +79,9 @@ const getApplicants = async (query = {}) => {
         am.email,
         am.mobile_no,
         am.is_verified,
+        COALESCE(am.is_employee, false) OR emp.employee_id IS NOT NULL as is_employee_account,
+        emp.employee_id,
+        emp.employee_code,
         am.ocr_disabled,
         am.created_at,
         ap.full_name,
@@ -87,6 +90,14 @@ const getApplicants = async (query = {}) => {
         (SELECT COUNT(*) FROM ms_applications WHERE applicant_id = am.applicant_id AND is_deleted = false) as application_count
       FROM ms_applicant_master am
       LEFT JOIN ms_applicant_personal ap ON am.applicant_id = ap.applicant_id
+      LEFT JOIN LATERAL (
+        SELECT employee_id, employee_code
+        FROM ms_employee_master e
+        WHERE e.applicant_id = am.applicant_id
+          AND e.is_deleted = false
+        ORDER BY e.employee_id DESC
+        LIMIT 1
+      ) emp ON true
       ${whereClause}
       ORDER BY am.applicant_id DESC
       LIMIT :limit OFFSET :offset

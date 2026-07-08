@@ -18,8 +18,16 @@ const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileNa
 
 const formatDateOnly = (value) => {
   if (!value) return '-';
-  if (typeof value === 'string') return value.split('T')[0];
-  return new Date(value).toISOString().split('T')[0];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.split(/[T\s,]/)[0] || '-';
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0];
+  }
+
+  return '-';
 };
 
 // Validation functions
