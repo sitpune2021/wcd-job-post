@@ -15,6 +15,7 @@ const { authenticate } = require('../../../../middleware/auth');
 const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
 const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileName } = require('../../../../utils/reportExport');
+const adminActionAudit = require('../../services/adminActionAuditService');
 
 const formatDateOnly = (value) => {
   if (!value) return '-';
@@ -202,6 +203,75 @@ router.get('/statistics', requireHRMAdminPermission(['hrm.employees.view', 'hrm.
   }
 });
 
+const getEmployeeAuditSnapshot = async (employeeId) => {
+  const employee = await db.EmployeeMaster.findOne({
+    where: { employee_id: parseInt(employeeId, 10), is_deleted: false },
+    include: [{
+      model: db.ApplicantMaster,
+      as: 'applicant',
+      attributes: ['applicant_id', 'email', 'mobile_no'],
+      include: [{
+        model: db.ApplicantPersonal,
+        as: 'personal',
+        attributes: ['full_name', 'dob', 'gender', 'aadhar_no']
+      }]
+    }]
+  });
+
+  return employee ? employee.get({ plain: true }) : null;
+};
+
+/**
+ * @route PATCH /api/hrm/admin/employees/:employeeId/status
+ * @desc Toggle employee active status
+ * @access Admin only
+ */
+router.patch('/:employeeId/status',
+  requireHRMAdminPermission(['hrm.employees.edit', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
+    try {
+      const { employeeId } = req.params;
+      const { is_active } = req.body;
+
+      if (!employeeId || isNaN(parseInt(employeeId, 10))) {
+        throw new ApiError(400, 'Valid employee ID is required');
+      }
+
+      if (typeof is_active !== 'boolean') {
+        throw new ApiError(400, 'is_active must be true or false');
+      }
+
+      const before = await getEmployeeAuditSnapshot(employeeId);
+      if (!before) {
+        throw new ApiError(404, 'Employee not found');
+      }
+
+      await db.EmployeeMaster.update({
+        is_active,
+        employment_status: is_active ? 'ACTIVE' : 'INACTIVE',
+        updated_by: req.user.admin_id,
+        updated_at: new Date()
+      }, {
+        where: { employee_id: parseInt(employeeId, 10), is_deleted: false }
+      });
+
+      const after = await getEmployeeAuditSnapshot(employeeId);
+
+      await adminActionAudit.recordAction(req, {
+        entityType: 'HRM_EMPLOYEE',
+        entityId: employeeId,
+        oldData: before,
+        newData: after
+      });
+
+      return ApiResponse.success(res, after, 'Employee status updated successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 /**
  * @route GET /api/hrm/admin/employees/:employeeId
  * @desc Get employee details by ID
@@ -259,7 +329,10 @@ router.get('/:employeeId', requireHRMAdminPermission(['hrm.employees.view', 'hrm
  * @desc Update employee details
  * @access Admin only
  */
-router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm.*']), async (req, res, next) => {
+router.put('/:employeeId',
+  requireHRMAdminPermission(['hrm.employees.edit', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
   try {
     const { employeeId } = req.params;
 
@@ -285,6 +358,8 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
     if (!employee) {
       throw new ApiError(404, 'Employee not found');
     }
+
+    const before = await getEmployeeAuditSnapshot(employeeId);
 
     // Allowed fields for update
     const allowedFields = [
@@ -419,6 +494,15 @@ router.put('/:employeeId', requireHRMAdminPermission(['hrm.employees.edit', 'hrm
 
     updateData.updated_at = new Date();
     await employee.update(updateData);
+
+    const after = await getEmployeeAuditSnapshot(employeeId);
+
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_EMPLOYEE',
+      entityId: employeeId,
+      oldData: before,
+      newData: after
+    });
 
     return ApiResponse.success(res, employee, 'Employee updated successfully');
   } catch (error) {

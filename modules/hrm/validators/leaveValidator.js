@@ -25,7 +25,9 @@ const leaveAction = Joi.object({
     is: 'APPROVED',
     then: Joi.required().messages({ 'any.required': 'Please specify if this leave is paid or unpaid' }),
     otherwise: Joi.optional()
-  })
+  }),
+  admin_remark: Joi.string().trim().max(1000).optional().allow('', null),
+  audit_remark: Joi.string().trim().max(1000).optional().allow('', null)
 });
 
 const leaveQuery = Joi.object({
