@@ -15,6 +15,7 @@ const buildEmployeeUser = (employee) => {
     email: applicant.email || null,
     mobile_no: applicant.mobile_no || null,
     full_name: personal.full_name || null,
+    photo_path: personal.photo_path || null,
     role: 'EMPLOYEE',
     employment_status: employee.employment_status,
     onboarding_status: employee.onboarding_status,
@@ -35,7 +36,7 @@ const findActiveEmployeeByApplicantId = async (applicantId) => {
       include: [{
         model: db.ApplicantPersonal,
         as: 'personal',
-        attributes: ['full_name'],
+        attributes: ['full_name', 'photo_path'],
         required: false
       }]
     }]

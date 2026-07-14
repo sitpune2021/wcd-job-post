@@ -54,10 +54,7 @@ const getEmployeeProfileRecord = async (user) => {
         include: [{
           model: db.ApplicantPersonal,
           as: 'personal',
-          attributes: [
-            'full_name', 'dob', 'gender', 'photo_path', 'aadhaar_path', 'pan_path',
-            'resume_path', 'domicile_path', 'signature_path'
-          ],
+          attributes: ['full_name', 'dob', 'gender', 'photo_path'],
           required: false
         }]
       },
@@ -112,6 +109,7 @@ const mapProfile = (employee) => {
     applicant_id: employee.applicant_id,
     applicant_no: applicant.applicant_no || null,
     full_name: personal.full_name || null,
+    photo_path: personal.photo_path || null,
     email: applicant.email || null,
     mobile_no: applicant.mobile_no || null,
     dob: personal.dob || null,
@@ -145,15 +143,6 @@ const mapProfile = (employee) => {
       contract_start_date: employee.contract_start_date || null,
       contract_end_date: employee.contract_end_date || null,
       joining_date: employee.created_at || null
-    },
-    paths: {
-      photo_path: personal.photo_path || null,
-      aadhaar_path: personal.aadhaar_path || null,
-      pan_path: personal.pan_path || null,
-      resume_path: personal.resume_path || null,
-      domicile_path: personal.domicile_path || null,
-      signature_path: personal.signature_path || null,
-      allotment_letter_path: employee.allotment_letter_path || null
     }
   };
 };
@@ -228,7 +217,7 @@ const getHome = async (user) => {
       district_name: profile.district.district_name,
       scheme_name: profile.scheme.scheme_name,
       scheme_type_code: profile.scheme.scheme_type_code,
-      photo_path: profile.paths.photo_path
+      photo_path: profile.photo_path
     },
     live_location: {
       scheme_name: profile.scheme.scheme_name,
@@ -281,7 +270,56 @@ const checkLocation = async (user, payload, userAgent) => {
   };
 };
 
-const getCalendar = (user, query) => calendarService.getEmployeeCalendar(user, query);
+const normalizeAppCalendar = (calendarResult) => {
+  const days = calendarResult?.calendar?.days || [];
+
+  const normalizedDays = days.map((day) => {
+    if (!day || day.status !== 'SUNDAY') return day;
+
+    // Mobile app rule: we do not persist ABSENT rows anymore. The shared HRM
+    // calendar already returns real attendance, leave, and weekly-off records
+    // first. If a past date still reaches here as SUNDAY, it means no such
+    // record exists for that date, so show it as ABSENT in the app calendar.
+    const hasMarkedAttendance = day.details?.check_in_time || day.details?.check_out_time;
+    const isPastWorkingDayWithoutAttendance = day.is_past && !hasMarkedAttendance;
+    if (!isPastWorkingDayWithoutAttendance) return day;
+
+    return {
+      ...day,
+      status: 'ABSENT',
+      is_working_day: true,
+      details: {
+        ...(day.details || {}),
+        original_status: 'SUNDAY',
+        remarks: 'No attendance marked'
+      }
+    };
+  });
+
+  let presentDays = 0;
+  let absentDays = 0;
+  normalizedDays.forEach((day) => {
+    if (day.status === 'PRESENT') presentDays += 1;
+    if (day.status === 'ABSENT') absentDays += 1;
+  });
+
+  return {
+    ...calendarResult,
+    calendar: {
+      ...(calendarResult.calendar || {}),
+      days: normalizedDays
+    },
+    summary: {
+      ...(calendarResult.summary || {}),
+      present_days: presentDays || calendarResult.summary?.present_days || 0,
+      absent_days: absentDays || calendarResult.summary?.absent_days || 0
+    }
+  };
+};
+
+const getCalendar = async (user, query) => normalizeAppCalendar(
+  await calendarService.getEmployeeCalendar(user, query)
+);
 const getAttendanceHistory = (user, query) => attendanceService.getMyAttendance(user, query);
 const getLeaveTypes = () => leaveService.getLeaveTypes();
 const getLeaveBalances = (user) => leaveService.getMyLeaveBalances(user);
@@ -298,6 +336,53 @@ const getWeeklyOffs = async (user, query = {}) => {
   if (query.month) filters.monthCode = parseInt(query.month, 10);
 
   return weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, filters);
+};
+
+const claimWeeklyOffForDate = async (user, claimedOffDate) => {
+  const employeeId = await getEmployeeIdFromUser(user);
+  const claimedDate = new Date(claimedOffDate);
+  if (Number.isNaN(claimedDate.getTime())) {
+    throw new ApiError(400, 'Invalid claimed off date');
+  }
+
+  await weeklyOffClaimService.generateWeeklyOffEntitlements(employeeId);
+
+  const monthCode = weeklyOffClaimService.getMonthCode(claimedDate);
+  let claimsResult = await weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, { monthCode });
+  let openClaim = (claimsResult.data || []).find(claim =>
+    claim.claim_status === 'PENDING' && !claim.claimed_off_date
+  );
+
+  if (!openClaim) {
+    await weeklyOffClaimService.generateWeeklyOffEntitlements(employeeId);
+    claimsResult = await weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, { monthCode });
+    openClaim = (claimsResult.data || []).find(claim =>
+      claim.claim_status === 'PENDING' && !claim.claimed_off_date
+    );
+  }
+
+  if (!openClaim) {
+    const remaining = claimsResult.stats?.remaining || 0;
+    const monthlyQuota = claimsResult.stats?.monthlyQuota || 4;
+    if (remaining <= 0) {
+      throw new ApiError(400, 'No weekly off entitlement is available for the selected month');
+    }
+
+    openClaim = await db.HrmWeeklyOffClaim.create({
+      employee_id: employeeId,
+      entitlement_month: monthCode,
+      monthly_quota: monthlyQuota,
+      claim_status: 'PENDING',
+      created_by: null
+    });
+  }
+
+  return weeklyOffClaimService.submitWeeklyOffClaim(
+    employeeId,
+    openClaim.claim_id,
+    claimedOffDate,
+    user.applicant_id || user.employee_id || null
+  );
 };
 
 const claimWeeklyOff = async (user, claimId, claimedOffDate) => {
@@ -344,6 +429,7 @@ module.exports = {
   applyLeave,
   cancelLeave,
   getWeeklyOffs,
+  claimWeeklyOffForDate,
   claimWeeklyOff,
   getLeaveDatesForMonth
 };

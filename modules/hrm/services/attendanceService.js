@@ -282,18 +282,15 @@ const markAttendance = async (user, data, ip) => {
         const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
         
         // Create detailed error message with proper scheme information
-        const errorMessage = 
-          `Location Access Denied\n\n` +
-          `You are too far from your assigned Scheme: "${schemeName}" (${schemeTypeName})\n\n` +
-          `Distance Details:\n` +
-          `• Your current distance: ${validation.distance}m\n` +
-          `• Maximum allowed distance: ${validation.allowedRadius}m\n` +
-          `• You are ${metersOutOfRange} meters out of range\n\n` +
-          `Target Location:\n` +
-          `• Scheme: ${schemeName}\n` +
-          `• Type: ${schemeTypeName}\n` +
-          `• Coordinates: ${targetLocation.latitude}, ${targetLocation.longitude}\n\n` +
-          `Please move closer to your Scheme location and try again.`;
+        const errorMessage = [
+          'Location access denied.',
+          'You are too far from your assigned scheme "' + schemeName + '" (' + schemeTypeName + ').',
+          'Current distance: ' + validation.distance + 'm.',
+          'Maximum allowed distance: ' + validation.allowedRadius + 'm.',
+          'Out of range by: ' + metersOutOfRange + 'm.',
+          'Target coordinates: ' + targetLocation.latitude + ', ' + targetLocation.longitude + '.',
+          'Please move closer to your assigned scheme location and try again.'
+        ].join(' ');
         
         throw new ApiError(422, errorMessage);
       }

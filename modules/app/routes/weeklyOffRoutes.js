@@ -36,6 +36,16 @@ router.get('/', requireAppEmployee, async (req, res, next) => {
   }
 });
 
+router.post('/claim', requireAppEmployee, async (req, res, next) => {
+  try {
+    const value = validate(claimSchema, req.body);
+    const claim = await appEmployeeService.claimWeeklyOffForDate(req.user, value.claimed_off_date);
+    return ApiResponse.success(res, claim, 'Weekly off claim submitted successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/:claimId/claim', requireAppEmployee, async (req, res, next) => {
   try {
     const claimId = parseInt(req.params.claimId, 10);
