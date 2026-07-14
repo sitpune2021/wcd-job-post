@@ -62,11 +62,7 @@ router.post('/:claimId/approve',
   async (req, res, next) => {
     try {
       const { claimId } = req.params;
-      const remarks = String(req.body.remarks || req.body.admin_remark || '').trim();
-
-      if (!remarks) {
-        return res.status(400).json({ success: false, message: 'Admin remarks are required for approval' });
-      }
+      const remarks = String(req.body.remarks || '').trim();
 
       const before = await db.HrmWeeklyOffClaim.findByPk(parseInt(claimId, 10), { raw: true });
       const claim = await weeklyOffClaimService.approveWeeklyOffClaim(
