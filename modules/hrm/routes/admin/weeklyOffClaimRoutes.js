@@ -62,9 +62,9 @@ router.post('/:claimId/approve',
   async (req, res, next) => {
     try {
       const { claimId } = req.params;
-      const { remarks } = req.body;
+      const remarks = String(req.body.remarks || req.body.admin_remark || '').trim();
 
-      if (!remarks || remarks.trim().length === 0) {
+      if (!remarks) {
         return res.status(400).json({ success: false, message: 'Admin remarks are required for approval' });
       }
 

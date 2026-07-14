@@ -23,6 +23,10 @@ const todayString = () => {
   return `${year}-${month}-${day}`;
 };
 
+const getMonthCodeFromParts = (month, year = new Date().getFullYear()) => (
+  Number(year) * 100 + Number(month)
+);
+
 const getEmployeeIdFromUser = async (user) => {
   const employee = await getEmployeeFromUser(user, db.EmployeeMaster);
   if (!employee) {
@@ -333,7 +337,7 @@ const getWeeklyOffs = async (user, query = {}) => {
 
   const filters = {};
   if (query.status) filters.status = query.status;
-  if (query.month) filters.monthCode = parseInt(query.month, 10);
+  if (query.month) filters.monthCode = getMonthCodeFromParts(query.month, query.year);
 
   return weeklyOffClaimService.getEmployeeWeeklyOffClaims(employeeId, filters);
 };
@@ -385,16 +389,6 @@ const claimWeeklyOffForDate = async (user, claimedOffDate) => {
   );
 };
 
-const claimWeeklyOff = async (user, claimId, claimedOffDate) => {
-  const employeeId = await getEmployeeIdFromUser(user);
-  return weeklyOffClaimService.submitWeeklyOffClaim(
-    employeeId,
-    parseInt(claimId, 10),
-    claimedOffDate,
-    user.applicant_id || user.employee_id || null
-  );
-};
-
 const getLeaveDatesForMonth = async (user, month, year) => {
   const employeeId = await getEmployeeIdFromUser(user);
   const start = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -430,6 +424,5 @@ module.exports = {
   cancelLeave,
   getWeeklyOffs,
   claimWeeklyOffForDate,
-  claimWeeklyOff,
   getLeaveDatesForMonth
 };
