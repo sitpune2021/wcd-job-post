@@ -58,3 +58,13 @@ coverage/
 /migrations
 /scripts
 /tests
+
+
+
+
+
+## app
+/modules/app/docs
+/modules/app/scripts
+/modules/app/collections/*
+/modules/app/collections
