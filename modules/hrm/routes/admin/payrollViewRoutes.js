@@ -222,9 +222,9 @@ const generatePayslipHtml = (data, filters) => {
       <div class="summary">
         <h3>Summary</h3>
         <p><strong>Total Employees:</strong> ${summary.total_employees}</p>
-        <p><strong>Total Gross Salary:</strong> INR ${summary.total_gross_salary.toLocaleString()}</p>
+        <p><strong>Total Earned Till Date:</strong> INR ${summary.total_gross_salary.toLocaleString()}</p>
         <p><strong>Total Deductions:</strong> INR ${summary.total_deduction.toLocaleString()}</p>
-        <p><strong>Total Net Pay:</strong> INR ${summary.total_net_pay.toLocaleString()}</p>
+        <p><strong>Total Net Payable Till Date:</strong> INR ${summary.total_net_pay.toLocaleString()}</p>
       </div>
       
       <table>
@@ -235,7 +235,7 @@ const generatePayslipHtml = (data, filters) => {
             <th>Post</th>
             <th>Basic Salary</th>
             <th>Deductions</th>
-            <th>Net Pay</th>
+            <th>Net Payable Till Date</th>
           </tr>
         </thead>
         <tbody>

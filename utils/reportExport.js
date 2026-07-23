@@ -219,7 +219,7 @@ const buildPayslipHtml = (payslipData) => {
       <div class="section-title">Salary Details</div>
       <table>
         <tr><th>Monthly Pay</th><td class="amount">₹${escapeHtml((salary.monthly_pay || 0).toLocaleString('en-IN'))}</td></tr>
-        <tr><th>Calculated Salary</th><td class="amount">₹${escapeHtml((salary.calculated_salary || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr><th>Earned Till Date</th><td class="amount">₹${escapeHtml((salary.calculated_salary || 0).toLocaleString('en-IN'))}</td></tr>
         <tr><th>Attendance Deduction</th><td class="amount">-₹${escapeHtml((salary.attendance_deduction || 0).toLocaleString('en-IN'))}</td></tr>
         <tr><th>Additional Deductions</th><td class="amount">-₹${escapeHtml((salary.additional_deductions || 0).toLocaleString('en-IN'))}</td></tr>
         ${deductionRows ? `
@@ -227,7 +227,7 @@ const buildPayslipHtml = (payslipData) => {
         ${deductionRows}
         ` : ''}
         <tr class="total-row"><th>Total Deduction</th><td class="amount">-₹${escapeHtml((salary.total_deduction || 0).toLocaleString('en-IN'))}</td></tr>
-        <tr class="net-salary"><th>NET SALARY</th><td class="amount">₹${escapeHtml((salary.net_salary || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr class="net-salary"><th>NET PAYABLE TILL DATE</th><td class="amount">₹${escapeHtml((salary.net_salary || 0).toLocaleString('en-IN'))}</td></tr>
       </table>
     </div>
 

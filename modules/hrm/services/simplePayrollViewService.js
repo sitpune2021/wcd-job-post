@@ -7,7 +7,6 @@ const db = require('../../../models');
 const { ApiError } = require('../../../middleware/errorHandler');
 const logger = require('../../../config/logger');
 const { buildHierarchyFilter } = require('../utils/hrmHelpers');
-const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
 const { generatePayslip, calculatePaymentSplit } = require('../utils/salaryCalculations');
 
 const ApplicantPersonal = db.ApplicantPersonal;
@@ -15,6 +14,7 @@ const EmployeeMaster = db.EmployeeMaster;
 const EmployeeBankDetail = db.EmployeeBankDetail;
 const Attendance = db.HrmAttendance;
 const LeaveApplication = db.HrmLeaveApplication;
+const WeeklyOffClaim = db.HrmWeeklyOffClaim;
 const PostMaster = db.PostMaster;
 const DistrictMaster = db.DistrictMaster;
 const Scheme = db.Scheme;
@@ -43,14 +43,26 @@ const parseDateOnly = (value) => {
   return new Date(year, month - 1, day);
 };
 
-const countNonSundayDays = (startDate, endDate) => {
-  let count = 0;
+const isCurrentMonth = (month, year) => {
+  const today = new Date();
+  return today.getFullYear() === parseInt(year, 10) && today.getMonth() + 1 === parseInt(month, 10);
+};
+
+const buildDateRange = (startDate, endDate) => {
+  const dates = [];
   const cursor = new Date(startDate);
   while (cursor <= endDate) {
-    if (cursor.getDay() !== 0) count += 1;
+    dates.push(toDateOnly(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
-  return count;
+  return dates;
+};
+
+const clampDateRange = (startDate, endDate, minDate, maxDate) => {
+  const effectiveStart = startDate && startDate > minDate ? startDate : minDate;
+  const effectiveEnd = endDate && endDate < maxDate ? endDate : maxDate;
+  if (effectiveStart > effectiveEnd) return null;
+  return { effectiveStart, effectiveEnd };
 };
 
 const getPaymentSettingInclude = () => ({
@@ -163,7 +175,14 @@ const getPayrollEmployees = async (adminUser, filters, options = {}) => {
 };
 
 /**
- * Calculate attendance summary for one or more employees.
+ * Calculate payroll attendance summary for one or more employees.
+ *
+ * Payroll rule:
+ * - Salary denominator is every calendar day in the employee contract overlap for the selected month.
+ * - Sundays and holidays are normal payable/deductible days; they are not paid automatically.
+ * - Approved weekly off and paid approved leave are paid.
+ * - Explicit absent, unpaid leave, half-day shortage, and past unmarked days are deducted.
+ * - In the current month, future contract days are neutral: not paid in day counts and not deducted yet.
  */
 const calculateAttendanceSummaries = async (employees, month, year) => {
   const employeeList = Array.isArray(employees) ? employees : [employees];
@@ -178,16 +197,18 @@ const calculateAttendanceSummaries = async (employees, month, year) => {
   const monthEnd = new Date(year, month, 0);
   const monthStartText = toDateOnly(monthStart);
   const monthEndText = toDateOnly(monthEnd);
-  const workingDaysResult = await getWorkingDaysInMonth(month, year);
-  const defaultWorkingDays = toNumber(workingDaysResult?.workingDays, 0);
+  const today = new Date();
+  const dueEnd = isCurrentMonth(month, year) && today < monthEnd ? today : monthEnd;
+  const dueEndText = toDateOnly(dueEnd);
 
   const attendanceRecords = await Attendance.findAll({
     where: {
       employee_id: { [Op.in]: employeeIds },
       attendance_date: { [Op.between]: [monthStartText, monthEndText] },
-      status: { [Op.in]: ['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'HOLIDAY', 'SUNDAY'] }
+      status: { [Op.in]: ['PRESENT', 'ABSENT', 'HALF_DAY', 'ON_LEAVE', 'WEEKLY_OFF', 'HOLIDAY', 'SUNDAY'] },
+      is_deleted: false
     },
-    attributes: ['employee_id', 'status']
+    attributes: ['employee_id', 'attendance_date', 'status']
   });
 
   const approvedLeaves = await LeaveApplication.findAll({
@@ -195,88 +216,171 @@ const calculateAttendanceSummaries = async (employees, month, year) => {
       employee_id: { [Op.in]: employeeIds },
       status: 'APPROVED',
       is_deleted: false,
-      [Op.or]: [{ is_paid: true }, { is_paid: null }],
       from_date: { [Op.lte]: monthEndText },
       to_date: { [Op.gte]: monthStartText }
     },
-    attributes: ['employee_id', 'from_date', 'to_date', 'is_half_day']
+    attributes: ['employee_id', 'from_date', 'to_date', 'is_half_day', 'is_paid']
   });
 
-  const approvedLeaveDaysByEmployee = new Map();
+  const approvedWeeklyOffs = await WeeklyOffClaim.findAll({
+    where: {
+      employee_id: { [Op.in]: employeeIds },
+      claim_status: 'APPROVED',
+      claimed_off_date: { [Op.between]: [monthStartText, monthEndText] }
+    },
+    attributes: ['employee_id', 'claimed_off_date']
+  });
+
+  const attendanceByEmployeeDate = new Map();
+  attendanceRecords.forEach((record) => {
+    const key = `${record.employee_id}:${record.attendance_date}`;
+    attendanceByEmployeeDate.set(key, record.status);
+  });
+
+  const weeklyOffByEmployeeDate = new Set();
+  approvedWeeklyOffs.forEach((claim) => {
+    if (!claim.claimed_off_date) return;
+    weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claim.claimed_off_date}`);
+  });
+
+  const approvedLeavesByEmployeeDate = new Map();
   approvedLeaves.forEach((leave) => {
     const leaveStart = parseDateOnly(leave.from_date);
     const leaveEnd = parseDateOnly(leave.to_date);
     if (!leaveStart || !leaveEnd) return;
 
-    const effectiveStart = leaveStart > monthStart ? leaveStart : monthStart;
-    const effectiveEnd = leaveEnd < monthEnd ? leaveEnd : monthEnd;
-    if (effectiveStart > effectiveEnd) return;
+    const range = clampDateRange(leaveStart, leaveEnd, monthStart, monthEnd);
+    if (!range) return;
 
-    const leaveDays = leave.is_half_day ? 0.5 : countNonSundayDays(effectiveStart, effectiveEnd);
-    approvedLeaveDaysByEmployee.set(
-      leave.employee_id,
-      toNumber(approvedLeaveDaysByEmployee.get(leave.employee_id), 0) + leaveDays
-    );
+    buildDateRange(range.effectiveStart, range.effectiveEnd).forEach((dateText) => {
+      const key = `${leave.employee_id}:${dateText}`;
+      if (!approvedLeavesByEmployeeDate.has(key)) {
+        approvedLeavesByEmployeeDate.set(key, []);
+      }
+      approvedLeavesByEmployeeDate.get(key).push(leave);
+    });
   });
 
   for (const employee of employeeList) {
     const employeeId = employee.employee_id;
     summaries.set(employeeId, {
-      working_days: defaultWorkingDays,
+      salary_days: 0,
+      working_days: 0,
       present_days: 0,
       absent_days: 0,
       leave_days: 0,
+      paid_leave_days: 0,
+      unpaid_leave_days: 0,
+      weekly_off_days: 0,
       half_days: 0,
       half_day_days: 0,
-      paid_days: 0
+      future_days: 0,
+      paid_days: 0,
+      deducted_days: 0
     });
   }
-
-  attendanceRecords.forEach((record) => {
-    const summary = summaries.get(record.employee_id);
-    if (!summary) return;
-
-    switch (record.status) {
-      case 'PRESENT':
-        summary.present_days += 1;
-        break;
-      case 'ABSENT':
-        summary.absent_days += 1;
-        break;
-      case 'HALF_DAY':
-        summary.half_days += 1;
-        break;
-      case 'ON_LEAVE':
-        summary.leave_days += 1;
-        break;
-      default:
-        break;
-    }
-  });
 
   for (const employee of employeeList) {
     const summary = summaries.get(employee.employee_id);
     const contractStart = parseDateOnly(employee.contract_start_date);
     const contractEnd = parseDateOnly(employee.contract_end_date);
 
-    let workingDays = defaultWorkingDays;
-    if (contractStart && contractStart > monthEnd) {
-      workingDays = 0;
-    } else if (contractEnd && contractEnd < monthStart) {
-      workingDays = 0;
-    } else {
-      const effectiveStart = contractStart && contractStart > monthStart ? contractStart : monthStart;
-      const effectiveEnd = contractEnd && contractEnd < monthEnd ? contractEnd : monthEnd;
-      workingDays = effectiveStart <= effectiveEnd ? countNonSundayDays(effectiveStart, effectiveEnd) : 0;
+    if ((contractStart && contractStart > monthEnd) || (contractEnd && contractEnd < monthStart)) {
+      continue;
     }
 
-    summary.working_days = workingDays;
-    summary.leave_days = Math.max(
-      summary.leave_days,
-      toNumber(approvedLeaveDaysByEmployee.get(employee.employee_id), 0)
-    );
-    summary.half_day_days = summary.half_days * 0.5;
-    summary.paid_days = summary.present_days + summary.half_day_days + summary.leave_days;
+    const range = clampDateRange(contractStart, contractEnd, monthStart, monthEnd);
+    if (!range) continue;
+
+    const salaryDates = buildDateRange(range.effectiveStart, range.effectiveEnd);
+    summary.salary_days = salaryDates.length;
+    summary.working_days = salaryDates.length;
+
+    salaryDates.forEach((dateText) => {
+      const dayKey = `${employee.employee_id}:${dateText}`;
+      const attendanceStatus = attendanceByEmployeeDate.get(dayKey);
+      const leaves = approvedLeavesByEmployeeDate.get(dayKey) || [];
+      const hasApprovedWeeklyOff = weeklyOffByEmployeeDate.has(dayKey) || attendanceStatus === 'WEEKLY_OFF';
+      const isFutureUndueDay = dateText > dueEndText;
+
+      if (isFutureUndueDay) {
+        summary.future_days += 1;
+        return;
+      }
+
+      if (hasApprovedWeeklyOff) {
+        summary.weekly_off_days += 1;
+        summary.paid_days += 1;
+        return;
+      }
+
+      const paidFullLeave = leaves.find((leave) => !leave.is_half_day && leave.is_paid !== false);
+      const unpaidFullLeave = leaves.find((leave) => !leave.is_half_day && leave.is_paid === false);
+      const halfDayLeave = leaves.find((leave) => leave.is_half_day);
+
+      if (paidFullLeave) {
+        summary.leave_days += 1;
+        summary.paid_leave_days += 1;
+        summary.paid_days += 1;
+        return;
+      }
+
+      if (unpaidFullLeave) {
+        summary.leave_days += 1;
+        summary.unpaid_leave_days += 1;
+        summary.absent_days += 1;
+        summary.deducted_days += 1;
+        return;
+      }
+
+      if (halfDayLeave) {
+        const isPaidHalfLeave = halfDayLeave.is_paid !== false;
+        summary.leave_days += 0.5;
+        if (isPaidHalfLeave) {
+          summary.paid_leave_days += 0.5;
+          summary.paid_days += 0.5;
+        } else {
+          summary.unpaid_leave_days += 0.5;
+          summary.deducted_days += 0.5;
+        }
+
+        // Leave approval stores half-day leave as HALF_DAY attendance, so only an
+        // explicit PRESENT record can pay the remaining half of this salary day.
+        if (attendanceStatus === 'PRESENT') {
+          summary.present_days += 0.5;
+          summary.paid_days += 0.5;
+        } else {
+          summary.absent_days += 0.5;
+          summary.deducted_days += 0.5;
+        }
+        return;
+      }
+
+      switch (attendanceStatus) {
+        case 'PRESENT':
+          summary.present_days += 1;
+          summary.paid_days += 1;
+          break;
+        case 'HALF_DAY':
+          summary.half_days += 1;
+          summary.half_day_days += 0.5;
+          summary.paid_days += 0.5;
+          summary.deducted_days += 0.5;
+          break;
+        case 'ON_LEAVE':
+          summary.leave_days += 1;
+          summary.paid_leave_days += 1;
+          summary.paid_days += 1;
+          break;
+        case 'ABSENT':
+        case 'HOLIDAY':
+        case 'SUNDAY':
+        default:
+          summary.absent_days += 1;
+          summary.deducted_days += 1;
+          break;
+      }
+    });
   }
 
   return summaries;
@@ -290,13 +394,19 @@ const calculateAttendanceSummary = async (employeeId, month, year) => {
 
   if (!employee) {
     return {
+      salary_days: 0,
       working_days: 0,
       present_days: 0,
       absent_days: 0,
       leave_days: 0,
+      paid_leave_days: 0,
+      unpaid_leave_days: 0,
+      weekly_off_days: 0,
       half_days: 0,
       half_day_days: 0,
-      paid_days: 0
+      future_days: 0,
+      paid_days: 0,
+      deducted_days: 0
     };
   }
 
@@ -431,12 +541,18 @@ const buildPayslipsForEmployees = async (employees, month, year) => {
   return employees.map((employee) => {
     const attendance = attendanceMap.get(employee.employee_id) || {
       working_days: 0,
+      salary_days: 0,
       present_days: 0,
       absent_days: 0,
       leave_days: 0,
+      paid_leave_days: 0,
+      unpaid_leave_days: 0,
+      weekly_off_days: 0,
       half_days: 0,
       half_day_days: 0,
-      paid_days: 0
+      future_days: 0,
+      paid_days: 0,
+      deducted_days: 0
     };
     return buildEmployeePayslip(employee, attendance, parseInt(month, 10), parseInt(year, 10));
   });

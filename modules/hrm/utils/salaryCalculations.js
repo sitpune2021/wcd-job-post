@@ -72,27 +72,28 @@ const calculateDeductions = (employee, monthlyPay) => {
 /**
  * Calculate paid days for salary.
  */
-const calculatePaidDays = (present, halfDays, onLeave) => {
-  const halfDayDays = toNumber(halfDays) * 0.5;
-  return toNumber(present) + halfDayDays + toNumber(onLeave);
+const calculatePaidDays = (salaryDays, deductedDays) => {
+  return Math.max(toNumber(salaryDays) - toNumber(deductedDays), 0);
 };
 
 /**
  * Calculate salary based on attendance and configured deductions.
  *
  * Formula:
- * - Monthly pay is the full basic salary for the post/employee.
- * - Gross earned is prorated by paid days.
- * - Attendance deduction is monthly pay minus gross earned.
+ * - Monthly pay is always taken from the assigned post amount.
+ * - Salary days are all calendar days in the employee's contract overlap for the month.
+ * - Past unmarked days, absent days, unpaid leave, and half-day shortage are deducted.
+ * - Approved weekly off, paid leave, and present days are paid.
+ * - Future current-month days are neutral and not included in payable salary yet.
  * - Additional deductions such as PT are applied after attendance proration.
- * - Net salary is what is payable and is later split by payment distribution.
+ * - Net salary is till-date payable and is later split by payment distribution.
  */
 const calculateSalary = (employee, attendance) => {
   try {
-    const monthlyPay = toNumber(employee?.employee_pay || employee?.post?.amount, 0);
-    const workingDays = toNumber(attendance?.working_days, 0);
+    const monthlyPay = toNumber(employee?.post?.amount, 0);
+    const salaryDays = toNumber(attendance?.salary_days || attendance?.working_days, 0);
 
-    if (monthlyPay <= 0 || workingDays <= 0) {
+    if (monthlyPay <= 0 || salaryDays <= 0) {
       return {
         monthly_pay: 0,
         per_day_salary: 0,
@@ -105,16 +106,26 @@ const calculateSalary = (employee, attendance) => {
       };
     }
 
-    const paidDays = Math.min(Math.max(toNumber(attendance?.paid_days, 0), 0), workingDays);
-    const perDaySalary = monthlyPay / workingDays;
-    const calculatedSalary = perDaySalary * paidDays;
-    const attendanceDeduction = Math.max(monthlyPay - calculatedSalary, 0);
+    const deductedDays = Math.min(Math.max(toNumber(attendance?.deducted_days, 0), 0), salaryDays);
+    const paidDays = Math.min(Math.max(toNumber(attendance?.paid_days, calculatePaidDays(salaryDays, deductedDays)), 0), salaryDays);
+    const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
+    const perDaySalary = monthlyPay / salaryDays;
+    const earnedTillDate = perDaySalary * paidDays;
+    const attendanceDeduction = Math.min(perDaySalary * deductedDays, monthlyPay);
+    const futurePendingAmount = Math.min(perDaySalary * futureDays, monthlyPay);
+    const calculatedSalary = Math.max(earnedTillDate, 0);
     const deductions = calculateDeductions(employee, monthlyPay);
     const netSalary = Math.max(calculatedSalary - deductions.totalDeductions, 0);
 
     return {
       monthly_pay: roundMoney(monthlyPay),
       per_day_salary: roundMoney(perDaySalary),
+      salary_days: roundMoney(salaryDays),
+      paid_days: roundMoney(paidDays),
+      deducted_days: roundMoney(deductedDays),
+      future_days: roundMoney(futureDays),
+      earned_till_date: roundMoney(earnedTillDate),
+      future_pending_amount: roundMoney(futurePendingAmount),
       calculated_salary: roundMoney(calculatedSalary),
       attendance_deduction: roundMoney(attendanceDeduction),
       additional_deductions: roundMoney(deductions.totalDeductions),
@@ -201,8 +212,9 @@ const generatePayslip = (employee, attendance, month, year) => {
  */
 const validateSalaryInputs = (employee, attendance) => {
   if (!employee || !attendance) return false;
-  if (!employee.employee_id || !attendance.working_days) return false;
-  return attendance.working_days > 0;
+  const salaryDays = toNumber(attendance.salary_days || attendance.working_days, 0);
+  if (!employee.employee_id || salaryDays <= 0) return false;
+  return true;
 };
 
 module.exports = {
