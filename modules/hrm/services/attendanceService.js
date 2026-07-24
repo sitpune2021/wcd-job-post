@@ -305,6 +305,13 @@ const markAttendance = async (user, data, ip) => {
   if (existingAttendance) {
     // Use existing attendance record for additional sessions
     attendance = existingAttendance;
+    if (data.shift_type_id && !attendance.shift_type_id) {
+      await attendance.update({
+        shift_type_id: data.shift_type_id,
+        updated_by: user.applicant_id || user.id,
+        updated_at: new Date()
+      });
+    }
     logger.info('Creating additional session for existing attendance', {
       employeeId: employee.employee_id,
       attendanceId: attendance.attendance_id,

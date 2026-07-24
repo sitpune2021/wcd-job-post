@@ -108,6 +108,7 @@ router.post('/mark', attendanceUpload, async (req, res, next) => {
       longitude: value.longitude,
       geo_address: value.geo_address,
       remarks: value.remarks,
+      shift_type_id: value.shift_type_id,
       image: imageData,
       userAgent: req.headers['user-agent'] // For device detection in geofencing
     };
