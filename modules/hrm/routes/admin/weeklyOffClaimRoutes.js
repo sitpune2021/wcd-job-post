@@ -11,8 +11,6 @@ const { requireHRMAdminPermission } = require('../../middleware/permissionGuard'
 const weeklyOffClaimService = require('../../services/weeklyOffClaimService');
 const ApiResponse = require('../../../../utils/ApiResponse');
 const logger = require('../../../../config/logger');
-const db = require('../../../../models');
-const adminActionAudit = require('../../services/adminActionAuditService');
 
 router.use(authenticate);
 router.use(hrmFeatureFlag.checkHRMEnabled);
@@ -58,27 +56,20 @@ router.get('/pending',
  */
 router.post('/:claimId/approve',
   requireHRMAdminPermission(['hrm.weekly_off.manage', 'hrm.*']),
-  adminActionAudit.requireAuditRemark,
   async (req, res, next) => {
     try {
       const { claimId } = req.params;
-      const remarks = String(req.body.remarks || '').trim();
+      const { remarks } = req.body;
 
-      const before = await db.HrmWeeklyOffClaim.findByPk(parseInt(claimId, 10), { raw: true });
+      if (!remarks || remarks.trim().length === 0) {
+        return res.status(400).json({ success: false, message: 'Admin remarks are required for approval' });
+      }
+
       const claim = await weeklyOffClaimService.approveWeeklyOffClaim(
         parseInt(claimId),
         req.user.id,
         remarks
       );
-
-      const after = await db.HrmWeeklyOffClaim.findByPk(parseInt(claimId, 10), { raw: true });
-      await adminActionAudit.recordAction(req, {
-        entityType: 'HRM_WEEKLY_OFF',
-        entityId: claimId,
-        oldData: before,
-        newData: after || claim
-      });
-
       return ApiResponse.success(res, claim, 'Weekly off claim approved successfully');
     } catch (error) {
       logger.error('Error approving weekly off claim:', error);

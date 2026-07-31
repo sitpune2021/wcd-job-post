@@ -1756,7 +1756,7 @@ router.post(
         applicantId: req.user.applicant_id,
         fileName: req.file.originalname,
         fileSize: req.file.size,
-        ocrEnabled: await educationOcrVerifier.isGlobalOcrEnabled()
+        ocrEnabled: educationOcrVerifier.isGlobalOcrEnabled()
       });
 
       const personal = await db.ApplicantPersonal.findOne({

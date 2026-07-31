@@ -1,57 +1,49 @@
 /**
  * Centralized HRM Salary Calculations Module
- * Keeps salary, deduction, and payment split rules in one backend source.
+ * Consolidates all salary-related calculations to reduce code duplication
+ * and ensure consistency across the application
  */
 
 const logger = require('../../../config/logger');
 
-const toNumber = (value, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
-
-const resolveEmployeeGender = (employee) => {
-  const rawGender = employee?.gender || employee?.applicant?.personal?.gender || '';
-  const gender = String(rawGender).trim().toLowerCase();
-  if (gender.startsWith('f')) return 'female';
-  if (gender.startsWith('m')) return 'male';
-  return 'male';
-};
-
 /**
- * Calculate additional deductions based on configurable rules.
+ * Calculate additional deductions based on configurable rules
+ * @param {Object} employee - Employee object with personal details
+ * @param {number} monthlyPay - Monthly salary amount
+ * @param {number} calculatedSalary - Calculated salary for deduction purposes
+ * @returns {Object} Deductions breakdown
  */
-const calculateDeductions = (employee, monthlyPay) => {
+const calculateDeductions = (employee, monthlyPay, calculatedSalary) => {
   const deductions = [];
   let totalDeductions = 0;
 
+  // PT Tax (Professional Tax) - Configurable by gender and salary
   if (process.env.PT_TAX_ENABLED === 'true') {
-    const maleThreshold = toNumber(process.env.PT_TAX_MALE_THRESHOLD, 10000);
-    const maleAmount = toNumber(process.env.PT_TAX_MALE_AMOUNT, 200);
-    const femaleThreshold = toNumber(process.env.PT_TAX_FEMALE_THRESHOLD, 25000);
-    const femaleAmount = toNumber(process.env.PT_TAX_FEMALE_AMOUNT, 200);
-    const gender = resolveEmployeeGender(employee);
+    const maleThreshold = parseFloat(process.env.PT_TAX_MALE_THRESHOLD || 10000);
+    const maleAmount = parseFloat(process.env.PT_TAX_MALE_AMOUNT || 200);
+    const femaleThreshold = parseFloat(process.env.PT_TAX_FEMALE_THRESHOLD || 10000);
+    const femaleAmount = parseFloat(process.env.PT_TAX_FEMALE_AMOUNT || 200);
 
+    // Determine gender from employee data
+    const gender = employee.gender?.toLowerCase() || 'male'; // Default to male if not specified
     let ptTaxAmount = 0;
     let ptTaxReason = '';
 
     if (gender === 'male' && monthlyPay >= maleThreshold) {
       ptTaxAmount = maleAmount;
-      ptTaxReason = `PT Tax (Male): Salary >= INR ${maleThreshold.toLocaleString('en-IN')}`;
+      ptTaxReason = `PT Tax (Male): Salary ≥ ₹${maleThreshold.toLocaleString('en-IN')}`;
     } else if (gender === 'female' && monthlyPay >= femaleThreshold) {
       ptTaxAmount = femaleAmount;
-      ptTaxReason = `PT Tax (Female): Salary >= INR ${femaleThreshold.toLocaleString('en-IN')}`;
+      ptTaxReason = `PT Tax (Female): Salary ≥ ₹${femaleThreshold.toLocaleString('en-IN')}`;
     }
 
     if (ptTaxAmount > 0) {
       deductions.push({
         type: 'PT_TAX',
         name: 'Professional Tax',
-        amount: roundMoney(ptTaxAmount),
+        amount: ptTaxAmount,
         reason: ptTaxReason,
-        calculation: `INR ${ptTaxAmount.toLocaleString('en-IN')} fixed amount based on gender and salary threshold`
+        calculation: `₹${ptTaxAmount} (Fixed amount based on gender and salary threshold)`
       });
       totalDeductions += ptTaxAmount;
     }
@@ -59,8 +51,8 @@ const calculateDeductions = (employee, monthlyPay) => {
 
   return {
     deductions,
-    totalDeductions: roundMoney(totalDeductions),
-    breakdown: deductions.map((d) => ({
+    totalDeductions,
+    breakdown: deductions.map(d => ({
       name: d.name,
       amount: d.amount,
       reason: d.reason,
@@ -70,30 +62,29 @@ const calculateDeductions = (employee, monthlyPay) => {
 };
 
 /**
- * Calculate paid days for salary.
+ * Calculate paid days for salary
+ * @param {number} present - Number of present days
+ * @param {number} halfDays - Number of half days
+ * @param {number} onLeave - Number of leave days
+ * @returns {number} Total paid days
  */
-const calculatePaidDays = (salaryDays, deductedDays) => {
-  return Math.max(toNumber(salaryDays) - toNumber(deductedDays), 0);
+const calculatePaidDays = (present, halfDays, onLeave) => {
+  const halfDayDays = halfDays * 0.5;
+  return present + halfDayDays + onLeave;
 };
 
 /**
- * Calculate salary based on attendance and configured deductions.
- *
- * Formula:
- * - Monthly pay is always taken from the assigned post amount.
- * - Salary days are all calendar days in the employee's contract overlap for the month.
- * - Past unmarked days, absent days, unpaid leave, and half-day shortage are deducted.
- * - Approved weekly off, paid leave, and present days are paid.
- * - Future current-month days are neutral and not included in payable salary yet.
- * - Additional deductions such as PT are applied after attendance proration.
- * - Net salary is till-date payable and is later split by payment distribution.
+ * Calculate salary based on attendance and deductions
+ * @param {Object} employee - Employee object with salary and personal details
+ * @param {Object} attendance - Attendance summary object
+ * @returns {Object} Salary calculation result
  */
 const calculateSalary = (employee, attendance) => {
   try {
-    const monthlyPay = toNumber(employee?.post?.amount, 0);
-    const salaryDays = toNumber(attendance?.salary_days || attendance?.working_days, 0);
+    // Get employee pay (priority to employee_pay, fallback to post.amount)
+    const monthlyPay = parseFloat(employee.employee_pay || employee.post?.amount || 0);
 
-    if (monthlyPay <= 0 || salaryDays <= 0) {
+    if (monthlyPay === 0) {
       return {
         monthly_pay: 0,
         per_day_salary: 0,
@@ -106,31 +97,25 @@ const calculateSalary = (employee, attendance) => {
       };
     }
 
-    const deductedDays = Math.min(Math.max(toNumber(attendance?.deducted_days, 0), 0), salaryDays);
-    const paidDays = Math.min(Math.max(toNumber(attendance?.paid_days, calculatePaidDays(salaryDays, deductedDays)), 0), salaryDays);
-    const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
-    const perDaySalary = monthlyPay / salaryDays;
-    const earnedTillDate = perDaySalary * paidDays;
-    const attendanceDeduction = Math.min(perDaySalary * deductedDays, monthlyPay);
-    const futurePendingAmount = Math.min(perDaySalary * futureDays, monthlyPay);
-    const calculatedSalary = Math.max(earnedTillDate, 0);
-    const deductions = calculateDeductions(employee, monthlyPay);
-    const netSalary = Math.max(calculatedSalary - deductions.totalDeductions, 0);
+    // Calculate salary - PT deduction first, then attendance-based
+    const deductions = calculateDeductions(employee, monthlyPay, monthlyPay);
+    const salaryAfterPT = monthlyPay - deductions.totalDeductions;
+    
+    // Calculate per-day salary after PT deduction
+    const perDaySalary = salaryAfterPT / attendance.working_days;
+    const calculatedSalary = perDaySalary * attendance.paid_days;
+    const attendanceDeduction = perDaySalary * attendance.absent_days;
+    
+    const netSalary = calculatedSalary;
 
     return {
-      monthly_pay: roundMoney(monthlyPay),
-      per_day_salary: roundMoney(perDaySalary),
-      salary_days: roundMoney(salaryDays),
-      paid_days: roundMoney(paidDays),
-      deducted_days: roundMoney(deductedDays),
-      future_days: roundMoney(futureDays),
-      earned_till_date: roundMoney(earnedTillDate),
-      future_pending_amount: roundMoney(futurePendingAmount),
-      calculated_salary: roundMoney(calculatedSalary),
-      attendance_deduction: roundMoney(attendanceDeduction),
-      additional_deductions: roundMoney(deductions.totalDeductions),
-      total_deduction: roundMoney(attendanceDeduction + deductions.totalDeductions),
-      net_salary: roundMoney(netSalary),
+      monthly_pay: parseFloat(monthlyPay.toFixed(2)),
+      per_day_salary: parseFloat(perDaySalary.toFixed(2)),
+      calculated_salary: parseFloat(calculatedSalary.toFixed(2)),
+      attendance_deduction: parseFloat(attendanceDeduction.toFixed(2)),
+      additional_deductions: parseFloat(deductions.totalDeductions.toFixed(2)),
+      total_deduction: parseFloat((attendanceDeduction + deductions.totalDeductions).toFixed(2)),
+      net_salary: parseFloat(netSalary.toFixed(2)),
       deduction_breakdown: deductions.breakdown
     };
   } catch (error) {
@@ -140,50 +125,23 @@ const calculateSalary = (employee, attendance) => {
 };
 
 /**
- * Split net salary into center/state portions based on scheme type settings.
- */
-const calculatePaymentSplit = (netSalary, paymentDistribution) => {
-  const totalAmount = roundMoney(netSalary);
-  const centerPercent = toNumber(paymentDistribution?.center_share_percent, 0);
-  const statePercent = toNumber(paymentDistribution?.state_share_percent, 0);
-  const hasDistribution = centerPercent > 0 || statePercent > 0;
-
-  if (!hasDistribution || totalAmount <= 0) {
-    return {
-      center_share_percent: centerPercent,
-      state_share_percent: statePercent,
-      center_share_amount: 0,
-      state_share_amount: 0,
-      undistributed_amount: totalAmount,
-      total_amount: totalAmount,
-      has_distribution: hasDistribution
-    };
-  }
-
-  const centerShareAmount = roundMoney((totalAmount * centerPercent) / 100);
-  const stateShareAmount = roundMoney((totalAmount * statePercent) / 100);
-  const undistributedAmount = roundMoney(Math.max(totalAmount - centerShareAmount - stateShareAmount, 0));
-
-  return {
-    center_share_percent: centerPercent,
-    state_share_percent: statePercent,
-    center_share_amount: centerShareAmount,
-    state_share_amount: stateShareAmount,
-    undistributed_amount: undistributedAmount,
-    total_amount: totalAmount,
-    has_distribution: true
-  };
-};
-
-/**
- * Generate complete payslip data.
+ * Generate complete payslip data
+ * @param {Object} employee - Employee object
+ * @param {Object} attendance - Attendance summary object
+ * @param {number} month - Month (1-12)
+ * @param {number} year - Year
+ * @returns {Object} Complete payslip data
  */
 const generatePayslip = (employee, attendance, month, year) => {
   try {
-    const fullName = employee?.full_name || employee?.applicant?.personal?.full_name || employee?.employee_code;
+    // Get personal information for full name
+    let fullName = employee.full_name || employee.applicant?.personal?.full_name || employee.employee_code;
+
+    // Calculate salary
     const salary = calculateSalary(employee, attendance);
 
-    return {
+    // Build payslip data
+    const payslipData = {
       employee: {
         employee_id: employee.employee_id,
         employee_code: employee.employee_code,
@@ -193,14 +151,16 @@ const generatePayslip = (employee, attendance, month, year) => {
         district_name: employee.district?.district_name || 'N/A'
       },
       pay_period: {
-        month,
-        year,
+        month: month,
+        year: year,
         month_name: new Date(year, month - 1).toLocaleString('default', { month: 'long' })
       },
-      salary,
-      attendance,
+      salary: salary,
+      attendance: attendance,
       generated_at: new Date().toISOString()
     };
+
+    return payslipData;
   } catch (error) {
     logger.error('Error generating payslip:', error);
     throw error;
@@ -208,12 +168,24 @@ const generatePayslip = (employee, attendance, month, year) => {
 };
 
 /**
- * Validate salary calculation inputs.
+ * Validate salary calculation inputs
+ * @param {Object} employee - Employee object
+ * @param {Object} attendance - Attendance object
+ * @returns {boolean} True if inputs are valid
  */
 const validateSalaryInputs = (employee, attendance) => {
-  if (!employee || !attendance) return false;
-  const salaryDays = toNumber(attendance.salary_days || attendance.working_days, 0);
-  if (!employee.employee_id || salaryDays <= 0) return false;
+  if (!employee || !attendance) {
+    return false;
+  }
+
+  if (!employee.employee_id || !attendance.working_days) {
+    return false;
+  }
+
+  if (attendance.working_days <= 0) {
+    return false;
+  }
+
   return true;
 };
 
@@ -221,7 +193,6 @@ module.exports = {
   calculateDeductions,
   calculatePaidDays,
   calculateSalary,
-  calculatePaymentSplit,
   generatePayslip,
   validateSalaryInputs
 };

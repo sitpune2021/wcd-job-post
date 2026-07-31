@@ -18,7 +18,6 @@ const adminReportsRoutes = require('./admin/reports');
 
 // HRM Module Routes (conditionally loaded)
 const hrmRoutes = require('../modules/hrm/routes');
-const appRoutes = require('../modules/app/routes');
 
 // Mount routes
 router.use('/health', healthRoutes); // Health check and metrics (no auth)
@@ -37,6 +36,5 @@ router.use('/public', publicMastersRoutes); // Public master data (no auth requi
 
 // HRM Module (modular and toggleable)
 router.use('/hrm', hrmRoutes); // HRM employee management (admin & employee)
-router.use('/app', appRoutes); // Mobile employee app APIs
 
 module.exports = router;
