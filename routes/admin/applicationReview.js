@@ -8,12 +8,14 @@ const meritListService = require('../../services/meritListService');
 const cronService = require('../../services/cronService');
 const documentVerificationService = require('../../services/documentVerificationService');
 const provisionalSelectionService = require('../../services/provisionalSelectionService');
+const { APPLICATION_STATUS } = require('../../constants/applicationStatus');
 const {
   toBool,
   buildFileUrl,
   sendPdfFromHtml: sendApplicationPdfFromHtml,
   buildApplicationPdfHtml
 } = require('../../utils/applicationPdf');
+const { buildSelectionLetterHtml } = require('../../utils/selectionLetterPdf');
 const { Op } = require('sequelize');
 const {
   sanitizeFileName,
@@ -358,6 +360,27 @@ router.post('/applications/:id/pdf', requirePermission('applications.view'), aud
 
     const safeNo = application?.application_no || application?.application_id || req.params.id;
     return await sendApplicationPdfFromHtml(res, `application_${safeNo}`, html);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/admin/review/applications/:id/selection-letter.pdf
+ * @desc Download selected candidate allotment/order letter PDF
+ * @access Private (Admin)
+ */
+router.get('/applications/:id/selection-letter.pdf', requirePermission('applications.view'), auditLog('EXPORT_SELECTION_LETTER_PDF'), async (req, res, next) => {
+  try {
+    const application = await applicationReviewService.getApplicationDetail(req.params.id);
+
+    if (application.status !== APPLICATION_STATUS.SELECTED) {
+      throw ApiError.badRequest('Selection letter is available only for final selected applications');
+    }
+
+    const html = buildSelectionLetterHtml(req, application);
+    const safeNo = sanitizeFileName(application?.application_no || application?.application_id || req.params.id);
+    return await sendReportPdfFromHtml(res, `selection_letter_${safeNo}`, html);
   } catch (error) {
     next(error);
   }

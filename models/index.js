@@ -20,6 +20,7 @@ db.Role = require('./Role');
 db.RolePermission = require('./RolePermission');
 db.ApplicantMaster = require('./ApplicantMaster');
 db.AdminUser = require('./AdminUser');
+db.AdminUserScheme = require('./AdminUserScheme');
 db.ApplicantPersonal = require('./ApplicantPersonal');
 db.ApplicantAddress = require('./ApplicantAddress');
 db.ApplicantEducation = require('./ApplicantEducation');
@@ -78,6 +79,7 @@ db.Payment = require('./Payment');
 db.SchemeType = require('./SchemeType');
 db.Scheme = require('./Scheme')(sequelize, DataTypes);
 db.PaymentDistributionSetting = require('./PaymentDistributionSetting');
+db.WeeklyOffSetting = require('./WeeklyOffSetting');
 
 // HRM Module Models
 const hrmModels = require('../modules/hrm/models');
@@ -305,6 +307,8 @@ db.ApplicationStageHistory.belongsTo(db.AdminUser, { foreignKey: 'exited_by', as
 // SchemeType -> PaymentDistributionSetting
 db.SchemeType.hasOne(db.PaymentDistributionSetting, { foreignKey: 'scheme_type_id', as: 'paymentSetting' });
 db.PaymentDistributionSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+db.SchemeType.hasOne(db.WeeklyOffSetting, { foreignKey: 'scheme_type_id', as: 'weeklyOffSetting' });
+db.WeeklyOffSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // EmployeeMaster -> SchemeType (TODO: Add scheme_type_id column to ms_employee_master when implementing migration)
 // db.EmployeeMaster.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // db.SchemeType.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_type_id', as: 'employees' });
@@ -326,6 +330,22 @@ db.DistrictMaster.hasMany(db.PostMaster, { foreignKey: 'district_id', as: 'posts
 
 db.AdminUser.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
 db.Scheme.hasMany(db.AdminUser, { foreignKey: 'scheme_id', as: 'admins' });
+db.AdminUser.belongsToMany(db.Scheme, {
+  through: db.AdminUserScheme,
+  foreignKey: 'admin_id',
+  otherKey: 'scheme_id',
+  as: 'assignedSchemes'
+});
+db.Scheme.belongsToMany(db.AdminUser, {
+  through: db.AdminUserScheme,
+  foreignKey: 'scheme_id',
+  otherKey: 'admin_id',
+  as: 'assignedAdmins'
+});
+db.AdminUser.hasMany(db.AdminUserScheme, { foreignKey: 'admin_id', as: 'schemeAssignments' });
+db.AdminUserScheme.belongsTo(db.AdminUser, { foreignKey: 'admin_id', as: 'admin' });
+db.Scheme.hasMany(db.AdminUserScheme, { foreignKey: 'scheme_id', as: 'adminAssignments' });
+db.AdminUserScheme.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
 
 db.EmployeeMaster.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
 db.Scheme.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_id', as: 'employees' });
@@ -342,7 +362,7 @@ db.Sequelize = Sequelize;
 // The actual user ID is obtained from auditContext (set by middleware)
 
 const modelsWithAudit = [
-  'AdminUser', 'Role', 'Permission', 'RolePermission',
+  'AdminUser', 'AdminUserScheme', 'Role', 'Permission', 'RolePermission',
   'ApplicantMaster', 'ApplicantPersonal', 'ApplicantAddress',
   'ApplicantEducation', 'ApplicantExperience', 'ApplicantDocument',
   'Application', 'EligibilityResult', 'MeritList',
@@ -352,7 +372,7 @@ const modelsWithAudit = [
   'ExperienceDomain', 'StreamGroup', 'PostDocumentRequirement', 'RejectionReason',
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
   'AllotmentEmailSchedule',
-  'SchemeType', 'PaymentDistributionSetting',
+  'SchemeType', 'PaymentDistributionSetting', 'WeeklyOffSetting',
   'EmployeeMaster', 'EmployeeOnboardingLog', 'EmployeeBankDetail',
   // Phase 2 HRM Models
   'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',

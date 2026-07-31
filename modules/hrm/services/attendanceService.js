@@ -282,18 +282,15 @@ const markAttendance = async (user, data, ip) => {
         const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
         
         // Create detailed error message with proper scheme information
-        const errorMessage = 
-          `Location Access Denied\n\n` +
-          `You are too far from your assigned Scheme: "${schemeName}" (${schemeTypeName})\n\n` +
-          `Distance Details:\n` +
-          `• Your current distance: ${validation.distance}m\n` +
-          `• Maximum allowed distance: ${validation.allowedRadius}m\n` +
-          `• You are ${metersOutOfRange} meters out of range\n\n` +
-          `Target Location:\n` +
-          `• Scheme: ${schemeName}\n` +
-          `• Type: ${schemeTypeName}\n` +
-          `• Coordinates: ${targetLocation.latitude}, ${targetLocation.longitude}\n\n` +
-          `Please move closer to your Scheme location and try again.`;
+        const errorMessage = [
+          'Location access denied.',
+          'You are too far from your assigned scheme "' + schemeName + '" (' + schemeTypeName + ').',
+          'Current distance: ' + validation.distance + 'm.',
+          'Maximum allowed distance: ' + validation.allowedRadius + 'm.',
+          'Out of range by: ' + metersOutOfRange + 'm.',
+          'Target coordinates: ' + targetLocation.latitude + ', ' + targetLocation.longitude + '.',
+          'Please move closer to your assigned scheme location and try again.'
+        ].join(' ');
         
         throw new ApiError(422, errorMessage);
       }
@@ -308,6 +305,13 @@ const markAttendance = async (user, data, ip) => {
   if (existingAttendance) {
     // Use existing attendance record for additional sessions
     attendance = existingAttendance;
+    if (data.shift_type_id && !attendance.shift_type_id) {
+      await attendance.update({
+        shift_type_id: data.shift_type_id,
+        updated_by: user.applicant_id || user.id,
+        updated_at: new Date()
+      });
+    }
     logger.info('Creating additional session for existing attendance', {
       employeeId: employee.employee_id,
       attendanceId: attendance.attendance_id,

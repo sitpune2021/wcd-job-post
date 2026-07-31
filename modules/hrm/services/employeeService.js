@@ -297,7 +297,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
     const employee = employees[0];
 
     // Get leave balance summary for current year
-    const [leaveBalances] = await db.sequelize.query(
+    const leaveBalances = await db.sequelize.query(
       `SELECT 
         lt.leave_code,
         lt.leave_name,
@@ -320,7 +320,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
     );
 
     // Get attendance summary for current month
-    const [attendanceSummary] = await db.sequelize.query(
+    const attendanceSummaryRows = await db.sequelize.query(
       `SELECT 
         COUNT(CASE WHEN status = 'PRESENT' THEN 1 END) as present_days,
         COUNT(CASE WHEN status = 'ABSENT' THEN 1 END) as absent_days,
@@ -339,7 +339,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
     );
 
     // Get recent leave applications
-    const [recentLeaves] = await db.sequelize.query(
+    const recentLeaves = await db.sequelize.query(
       `SELECT 
         la.leave_id,
         la.from_date,
@@ -362,7 +362,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
     );
 
     // Get onboarding log
-    const [onboardingLog] = await db.sequelize.query(
+    const onboardingLog = await db.sequelize.query(
       `SELECT 
         log_id,
         action,
@@ -427,7 +427,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         onboarding_email_sent_by_username: employee.onboarding_email_sent_by_username
       },
       leave_balance: leaveBalances,
-      attendance_summary: attendanceSummary[0] || {
+      attendance_summary: attendanceSummaryRows[0] || {
         present_days: 0,
         absent_days: 0,
         half_days: 0,
@@ -959,7 +959,7 @@ async function getEmployeeProfile(employeeId) {
     const employee = employees[0];
 
     // Get leave balance summary for current year
-    const [leaveBalances] = await db.sequelize.query(
+    const leaveBalances = await db.sequelize.query(
       `SELECT 
         lt.leave_code,
         lt.leave_name,
@@ -982,7 +982,7 @@ async function getEmployeeProfile(employeeId) {
     );
 
     // Get attendance summary for current month
-    const [attendanceSummary] = await db.sequelize.query(
+    const attendanceSummaryRows = await db.sequelize.query(
       `SELECT 
         COUNT(CASE WHEN status = 'PRESENT' THEN 1 END) as present_days,
         COUNT(CASE WHEN status = 'ABSENT' THEN 1 END) as absent_days,
@@ -1001,7 +1001,7 @@ async function getEmployeeProfile(employeeId) {
     );
 
     // Get recent leave applications
-    const [recentLeaves] = await db.sequelize.query(
+    const recentLeaves = await db.sequelize.query(
       `SELECT 
         la.leave_id,
         la.from_date,
@@ -1024,7 +1024,7 @@ async function getEmployeeProfile(employeeId) {
     );
 
     // Get onboarding log
-    const [onboardingLog] = await db.sequelize.query(
+    const onboardingLog = await db.sequelize.query(
       `SELECT 
         log_id,
         action,
@@ -1088,7 +1088,7 @@ async function getEmployeeProfile(employeeId) {
         onboarding_email_sent_by_username: employee.onboarding_email_sent_by_username
       },
       leave_balance: leaveBalances,
-      attendance_summary: attendanceSummary[0] || {
+      attendance_summary: attendanceSummaryRows[0] || {
         present_days: 0,
         absent_days: 0,
         half_days: 0,

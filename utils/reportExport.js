@@ -11,6 +11,22 @@ const sendXlsxFromRows = async (res, filename, columns, rows) => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Report');
   sheet.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 25 }));
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE2E8F0' }
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
+    };
+  });
   rows.forEach((r, idx) => {
     const rowData = {};
     columns.forEach((c) => {
@@ -33,6 +49,7 @@ const sendPdfFromHtml = async (res, filename, html, options = {}) => {
       {
         format: 'A4',
         printBackground: true,
+        executablePath: process.env.CHROMIUM_PATH,
         margin: { top: '14mm', right: '12mm', bottom: '14mm', left: '12mm' },
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
       }
@@ -202,7 +219,7 @@ const buildPayslipHtml = (payslipData) => {
       <div class="section-title">Salary Details</div>
       <table>
         <tr><th>Monthly Pay</th><td class="amount">₹${escapeHtml((salary.monthly_pay || 0).toLocaleString('en-IN'))}</td></tr>
-        <tr><th>Calculated Salary</th><td class="amount">₹${escapeHtml((salary.calculated_salary || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr><th>Earned Till Date</th><td class="amount">₹${escapeHtml((salary.calculated_salary || 0).toLocaleString('en-IN'))}</td></tr>
         <tr><th>Attendance Deduction</th><td class="amount">-₹${escapeHtml((salary.attendance_deduction || 0).toLocaleString('en-IN'))}</td></tr>
         <tr><th>Additional Deductions</th><td class="amount">-₹${escapeHtml((salary.additional_deductions || 0).toLocaleString('en-IN'))}</td></tr>
         ${deductionRows ? `
@@ -210,7 +227,7 @@ const buildPayslipHtml = (payslipData) => {
         ${deductionRows}
         ` : ''}
         <tr class="total-row"><th>Total Deduction</th><td class="amount">-₹${escapeHtml((salary.total_deduction || 0).toLocaleString('en-IN'))}</td></tr>
-        <tr class="net-salary"><th>NET SALARY</th><td class="amount">₹${escapeHtml((salary.net_salary || 0).toLocaleString('en-IN'))}</td></tr>
+        <tr class="net-salary"><th>NET PAYABLE TILL DATE</th><td class="amount">₹${escapeHtml((salary.net_salary || 0).toLocaleString('en-IN'))}</td></tr>
       </table>
     </div>
 

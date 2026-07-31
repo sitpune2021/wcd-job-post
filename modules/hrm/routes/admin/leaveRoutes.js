@@ -6,6 +6,8 @@ const { requireHRMAdminPermission } = require('../../middleware/permissionGuard'
 const leaveService = require('../../services/leaveService');
 const { leaveActionSchema, leaveQuerySchema } = require('../../validators');
 const ApiResponse = require('../../../../utils/ApiResponse');
+const db = require('../../../../models');
+const adminActionAudit = require('../../services/adminActionAuditService');
 
 router.use(hrmFeatureFlag.checkHRMEnabled);
 router.use(authenticate);
@@ -25,12 +27,26 @@ router.get('/approvals', async (req, res, next) => {
 });
 
 // Approve or reject a leave application
-router.patch('/:id/action', requireHRMAdminPermission('hrm.leave.manage'), async (req, res, next) => {
+router.patch('/:id/action',
+  requireHRMAdminPermission('hrm.leave.manage'),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
   try {
     const { error, value } = leaveActionSchema.validate(req.body);
     if (error) return res.status(400).json({ success: false, message: error.details[0].message });
 
+    const before = await db.HrmLeaveApplication.findByPk(parseInt(req.params.id, 10), { raw: true });
     const result = await leaveService.actionLeave(req.user, parseInt(req.params.id), value);
+    const after = await db.HrmLeaveApplication.findByPk(parseInt(req.params.id, 10), { raw: true });
+
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_LEAVE',
+      entityId: req.params.id,
+      requestData: value,
+      oldData: before,
+      newData: after || result
+    });
+
     return ApiResponse.success(res, result, `Leave ${value.status.toLowerCase()} successfully`);
   } catch (err) {
     next(err);

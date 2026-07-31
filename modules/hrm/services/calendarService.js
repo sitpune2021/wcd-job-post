@@ -221,8 +221,11 @@ const getEmployeeCalendar = async (user, query) => {
     let isWorkingDay = true;
     let details = null;
 
-    // Check for definitive statuses first (weekly off, leave)
-    // These override any attendance records
+    // Status precedence matters:
+    // 1. Approved weekly off / leave are explicit HRM records and should be shown as-is.
+    // 2. Marked attendance should override generic Sunday/holiday labels.
+    // 3. Because ABSENT rows are no longer persisted, past unmarked working days
+    //    are inferred as ABSENT below.
     
     // Check if on approved weekly off
     if (weeklyOffDates.has(dateStr)) {

@@ -52,6 +52,24 @@ class ApiError extends Error {
   }
 }
 
+const friendlyUniqueFieldName = (field) => {
+  const value = String(field || '').toLowerCase();
+  if (value.includes('aadhaar') || value.includes('aadhar') || value.includes('adhaar')) return 'Aadhaar number';
+  if (value.includes('email')) return 'Email';
+  if (value.includes('mobile') || value.includes('phone')) return 'Mobile number';
+  if (value.includes('applicant_no')) return 'Applicant number';
+  if (value.includes('employee_code')) return 'Employee code';
+  if (value.includes('account_number')) return 'Account number';
+
+  return String(field || 'Value')
+    .replace(/^.*regexp_replace\(/i, '')
+    .replace(/::.*$/i, '')
+    .replace(/[()"']/g, '')
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase()) || 'Value';
+};
+
 /**
  * Global Error Handler Middleware
  * 
@@ -89,7 +107,10 @@ const errorHandler = (err, req, res, next) => {
 
     case 'SequelizeUniqueConstraintError':
       statusCode = 409;
-      errors = err.errors?.map(e => ({ field: e.path, message: `${e.path} already exists` })) || null;
+      errors = err.errors?.map(e => {
+        const field = friendlyUniqueFieldName(e.path);
+        return { field, message: `${field} already exists` };
+      }) || null;
       message = errors?.[0]?.message || 'A record with the same value already exists';
       break;
 

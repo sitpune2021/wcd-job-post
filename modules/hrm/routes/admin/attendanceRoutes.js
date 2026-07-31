@@ -6,6 +6,8 @@ const { requireHRMAdminPermission } = require('../../middleware/permissionGuard'
 const attendanceService = require('../../services/attendanceService');
 const { markAttendanceByAdminSchema, attendanceQuerySchema } = require('../../validators');
 const ApiResponse = require('../../../../utils/ApiResponse');
+const db = require('../../../../models');
+const adminActionAudit = require('../../services/adminActionAuditService');
 
 // Generate PDF for attendance records - bypasses authentication middleware issue
 router.get('/records/pdf', async (req, res) => {
@@ -54,12 +56,43 @@ router.get('/records', async (req, res, next) => {
 });
 
 // Mark attendance for employees (admin function)
-router.post('/mark', requireHRMAdminPermission('hrm.attendance.manage'), async (req, res, next) => {
+router.post('/mark',
+  requireHRMAdminPermission('hrm.attendance.manage'),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
   try {
     const { error, value } = markAttendanceByAdminSchema.validate(req.body);
     if (error) return res.status(400).json({ success: false, message: error.details[0].message });
 
+    const attendanceDate = new Date(value.attendance_date).toISOString().split('T')[0];
+    const before = await db.HrmAttendance.findAll({
+      where: {
+        employee_id: value.employee_ids,
+        attendance_date: attendanceDate,
+        is_deleted: false
+      },
+      raw: true
+    });
+
     const result = await attendanceService.markAttendanceByAdmin(req.user, value);
+
+    const after = await db.HrmAttendance.findAll({
+      where: {
+        employee_id: value.employee_ids,
+        attendance_date: attendanceDate,
+        is_deleted: false
+      },
+      raw: true
+    });
+
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_ATTENDANCE',
+      entityId: `${attendanceDate}:${value.employee_ids.join(',')}`,
+      requestData: value,
+      oldData: before,
+      newData: after || result
+    });
+
     return ApiResponse.success(res, result, result.message);
   } catch (err) {
     next(err);

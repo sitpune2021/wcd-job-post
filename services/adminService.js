@@ -12,6 +12,9 @@ const {
   ApplicantDocument,
   PostMaster,
   DistrictMaster,
+  Scheme,
+  SchemeType,
+  AdminUserScheme,
   EligibilityResult
 } = db;
 const bcrypt = require('bcryptjs');
@@ -19,6 +22,94 @@ const logger = require('../config/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { Op } = require('sequelize');
 const { getRelativePath } = require('../utils/fileUpload');
+
+const normalizeSchemeIds = (schemeIds, fallbackSchemeId) => {
+  const rawValues = Array.isArray(schemeIds) ? schemeIds : [];
+  if (fallbackSchemeId !== undefined && fallbackSchemeId !== null && fallbackSchemeId !== '') {
+    rawValues.unshift(fallbackSchemeId);
+  }
+
+  return Array.from(new Set(
+    rawValues
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  ));
+};
+
+const getActorId = (currentUser) => currentUser?.id || currentUser?.admin_id || null;
+
+const assignedSchemesInclude = {
+  model: Scheme,
+  as: 'assignedSchemes',
+  attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'district_id', 'scheme_type_id'],
+  through: {
+    attributes: ['is_primary', 'is_active'],
+    where: { is_active: true }
+  },
+  required: false,
+  include: [
+    {
+      model: SchemeType,
+      as: 'schemeType',
+      attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+      required: false
+    }
+  ]
+};
+
+const validateSchemeIds = async (schemeIds, transaction) => {
+  if (!schemeIds.length) return;
+
+  const activeCount = await Scheme.count({
+    where: {
+      scheme_id: { [Op.in]: schemeIds },
+      is_deleted: false
+    },
+    transaction
+  });
+
+  if (activeCount !== schemeIds.length) {
+    throw new ApiError(400, 'One or more selected schemes are invalid');
+  }
+};
+
+const syncAdminSchemeAssignments = async (adminId, schemeIds, currentUserId, transaction) => {
+  await AdminUserScheme.update(
+    {
+      is_active: false,
+      is_primary: false,
+      updated_by: currentUserId,
+      updated_at: new Date()
+    },
+    { where: { admin_id: adminId }, transaction }
+  );
+
+  for (let index = 0; index < schemeIds.length; index += 1) {
+    const schemeId = schemeIds[index];
+    const existing = await AdminUserScheme.findOne({
+      where: { admin_id: adminId, scheme_id: schemeId },
+      transaction
+    });
+
+    const assignmentData = {
+      is_active: true,
+      is_primary: index === 0,
+      updated_by: currentUserId,
+      updated_at: new Date()
+    };
+
+    if (existing) {
+      await existing.update(assignmentData, { transaction });
+    } else {
+      await AdminUserScheme.create({
+        admin_id: adminId,
+        scheme_id: schemeId,
+        ...assignmentData,
+        created_by: currentUserId
+      }, { transaction });
+    }
+  }
+};
 
 /**
  * Admin Service
@@ -36,6 +127,9 @@ class AdminService {
    */
   async createUser(data, currentUser) {
     const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id } = data;
+    const schemeIds = normalizeSchemeIds(data.scheme_ids, scheme_id);
+    const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
+    const actorId = getActorId(currentUser);
 
     const transaction = await db.sequelize.transaction();
 
@@ -59,6 +153,8 @@ class AdminService {
       if (!role) {
         throw new ApiError(400, 'Invalid role');
       }
+
+      await validateSchemeIds(schemeIds, transaction);
 
       // Handle employee linking
       let finalUsername = username;
@@ -102,11 +198,13 @@ class AdminService {
         mobile_no,
         role_id,
         district_id,
-        scheme_id,
+        scheme_id: primarySchemeId,
         linked_employee_id,
-        created_by: currentUser.id,
+        created_by: actorId,
         is_active: true
       }, { transaction });
+
+      await syncAdminSchemeAssignments(user.admin_id, schemeIds, actorId, transaction);
 
       await transaction.commit();
 
@@ -114,14 +212,14 @@ class AdminService {
       if (linked_employee_id) {
         logger.info(`Admin user linked to employee ${linked_employee_id} with auto email/password`);
       }
-      if (district_id || scheme_id) {
-        logger.info(`Admin user linked to - District: ${district_id || 'None'}, Scheme: ${scheme_id || 'None'}`);
+      if (district_id || schemeIds.length) {
+        logger.info(`Admin user linked to - District: ${district_id || 'None'}, Schemes: ${schemeIds.join(', ') || 'None'}`);
       }
 
       // Fetch user with role
       const createdUser = await AdminUser.findByPk(user.admin_id, {
         attributes: { exclude: ['password_hash'] },
-        include: [{ model: Role, as: 'role' }]
+        include: [{ model: Role, as: 'role' }, assignedSchemesInclude]
       });
 
       return createdUser;
@@ -170,8 +268,10 @@ class AdminService {
         where,
         attributes: { exclude: ['password_hash'] },
         include: [
-          { model: Role, as: 'role' }
+          { model: Role, as: 'role' },
+          assignedSchemesInclude
         ],
+        distinct: true,
         order: [['created_at', 'DESC']],
         limit,
         offset
@@ -204,7 +304,8 @@ class AdminService {
         where: { admin_id: userId, is_deleted: false },
         attributes: { exclude: ['password_hash'] },
         include: [
-          { model: Role, as: 'role' }
+          { model: Role, as: 'role' },
+          assignedSchemesInclude
         ]
       });
 
@@ -235,19 +336,26 @@ class AdminService {
    */
   async updateUser(userId, data, currentUser) {
     const { full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
+    const hasSchemeIdsPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_ids');
+    const actorId = getActorId(currentUser);
+    let transaction;
 
     try {
+      transaction = await db.sequelize.transaction();
       const user = await AdminUser.findOne({
-        where: { admin_id: userId, is_deleted: false }
+        where: { admin_id: userId, is_deleted: false },
+        transaction
       });
 
       if (!user) {
+        await transaction.rollback();
         throw new ApiError(404, 'User not found');
       }
 
       // District admins can only update users in their district
       if (currentUser.role === 'DISTRICT_ADMIN' && currentUser.district_id) {
         if (user.district_id !== currentUser.district_id) {
+          await transaction.rollback();
           throw new ApiError(403, 'Access denied');
         }
       }
@@ -263,9 +371,16 @@ class AdminService {
           }
         });
         if (existingEmail) {
+          await transaction.rollback();
           throw new ApiError(400, 'Email already exists');
         }
       }
+
+      const schemeIds = hasSchemeIdsPayload
+        ? normalizeSchemeIds(data.scheme_ids, null)
+        : normalizeSchemeIds([], scheme_id !== undefined ? scheme_id : user.scheme_id);
+      const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
+      await validateSchemeIds(schemeIds, transaction);
 
       // Prepare update data
       const updateData = {
@@ -274,7 +389,7 @@ class AdminService {
         mobile_no: mobile_no !== undefined ? mobile_no : user.mobile_no,
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
-        scheme_id: scheme_id !== undefined ? scheme_id : user.scheme_id,
+        scheme_id: hasSchemeIdsPayload || scheme_id !== undefined ? primarySchemeId : user.scheme_id,
         linked_employee_id: linked_employee_id !== undefined ? linked_employee_id : user.linked_employee_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };
@@ -308,8 +423,9 @@ class AdminService {
             if (existingUser.is_deleted) {
               // Permanently delete the soft-deleted user to free up the username
               logger.info(`Permanently deleting soft-deleted user ${existingUser.admin_id} with username ${existingUser.username}`);
-              await existingUser.destroy({ force: true });
+              await existingUser.destroy({ force: true, transaction });
             } else {
+              await transaction.rollback();
               throw new ApiError(409, `Username ${linkedFields.username} already exists. Please choose a different employee or delete the existing user.`);
             }
           }
@@ -323,6 +439,7 @@ class AdminService {
           logger.info(`Admin user ${user.username} linked to employee ${linked_employee_id}`);
         } catch (error) {
           logger.error('Error linking employee:', error);
+          await transaction.rollback();
           throw new ApiError(400, 'Failed to link employee: ' + error.message);
         }
       } else {
@@ -334,13 +451,22 @@ class AdminService {
       }
 
       // Update user
-      await user.update(updateData);
+      await user.update(updateData, { transaction });
+
+      if (hasSchemeIdsPayload || scheme_id !== undefined) {
+        await syncAdminSchemeAssignments(user.admin_id, schemeIds, actorId, transaction);
+      }
+
+      await transaction.commit();
 
       logger.info(`Admin user updated: ${user.username} by ${currentUser.username || currentUser.id}`);
 
       // Fetch updated user with role
       return await this.getUserById(userId, currentUser);
     } catch (error) {
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       logger.error('Update user error:', error);
       throw error;
     }

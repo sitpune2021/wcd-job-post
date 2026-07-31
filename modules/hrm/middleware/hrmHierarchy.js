@@ -2,6 +2,7 @@ const { ApiError } = require('../../../middleware/errorHandler');
 const logger = require('../../../config/logger');
 const db = require('../../../models');
 const Scheme = require('../../../models/Scheme');
+const { Op } = require('sequelize');
 
 /**
  * Middleware to filter HRM data based on admin hierarchy
@@ -28,6 +29,19 @@ const applyHRMHierarchyFilter = async (req, res, next) => {
     logger.info('HRM Scope set to STATE', { 
       admin_id: req.user.admin_id,
       hrmScope: req.hrmScope 
+    });
+    return next();
+  }
+
+  const assignedSchemeIds = req.user.assigned_scheme_ids || req.user.dataValues?.assigned_scheme_ids || [];
+  if (Array.isArray(assignedSchemeIds) && assignedSchemeIds.length > 0) {
+    req.hrmScope = {
+      level: 'SCHEME_MULTI',
+      filters: { scheme_ids: assignedSchemeIds }
+    };
+    logger.info('HRM Scope set to SCHEME_MULTI', {
+      admin_id: req.user.admin_id,
+      scheme_count: assignedSchemeIds.length
     });
     return next();
   }
@@ -184,6 +198,10 @@ const buildEmployeeWhereClause = (baseWhere, hrmScope) => {
     where.scheme_id = hrmScope.filters.scheme_id;
   }
 
+  if (Array.isArray(hrmScope.filters.scheme_ids) && hrmScope.filters.scheme_ids.length > 0) {
+    where.scheme_id = { [Op.in]: hrmScope.filters.scheme_ids };
+  }
+
   return where;
 };
 
@@ -202,6 +220,10 @@ const canAccessEmployee = (employee, hrmScope) => {
   }
 
   if (filters.scheme_id && employee.scheme_id !== filters.scheme_id) {
+    return false;
+  }
+
+  if (Array.isArray(filters.scheme_ids) && filters.scheme_ids.length > 0 && !filters.scheme_ids.includes(employee.scheme_id)) {
     return false;
   }
 

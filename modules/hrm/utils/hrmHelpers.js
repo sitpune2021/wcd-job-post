@@ -45,6 +45,13 @@ const buildHierarchyFilter = (adminUser) => {
     return where;
   }
 
+  const assignedSchemeIds = adminUser.assigned_scheme_ids || adminUser.dataValues?.assigned_scheme_ids || [];
+  if (Array.isArray(assignedSchemeIds) && assignedSchemeIds.length > 0) {
+    // Multi-scheme assignment is the most specific HRM scope and may cross districts.
+    where.scheme_id = { [Op.in]: assignedSchemeIds };
+    return where;
+  }
+
   // If admin has no district/scheme assignment, show all employees
   if (!adminUser.district_id && !adminUser.scheme_id) {
     return where; // No filters = show all

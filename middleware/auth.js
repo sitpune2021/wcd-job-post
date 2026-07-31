@@ -84,6 +84,20 @@ const initializePassport = () => {
             const tokenPermissions = Array.isArray(jwtPayload.permissions) ? jwtPayload.permissions : [];
             // Merge and dedupe permissions from DB and token
             user.dataValues.permissions = Array.from(new Set([...dbPermissions, ...tokenPermissions]));
+
+            if (db.AdminUserScheme) {
+              const assignments = await db.AdminUserScheme.findAll({
+                where: {
+                  admin_id: user.admin_id,
+                  is_active: true
+                },
+                attributes: ['scheme_id'],
+                raw: true
+              });
+              const assignedSchemeIds = assignments.map((assignment) => Number(assignment.scheme_id));
+              user.dataValues.assigned_scheme_ids = assignedSchemeIds;
+              user.assigned_scheme_ids = assignedSchemeIds;
+            }
           }
         }
 

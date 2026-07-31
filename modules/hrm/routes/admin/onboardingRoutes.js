@@ -15,6 +15,7 @@ const { ApiError } = require('../../../../middleware/errorHandler');
 const logger = require('../../../../config/logger');
 const { excelUtils } = require('../../utils');
 const { generateTemplate, parseExcelFile, validateHRMScope, upload } = excelUtils;
+const adminActionAudit = require('../../services/adminActionAuditService');
 
 // Apply authentication and hierarchy filter
 router.use(authenticate);
@@ -70,6 +71,7 @@ router.get('/applicants/excel-imported',
  */
 router.post('/create-existing',
   requireHRMAdminPermission(['hrm.onboarding.import', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
   async (req, res, next) => {
   try {
     const employeeData = req.body;
@@ -106,6 +108,12 @@ router.post('/create-existing',
       ipAddress,
       req.hrmScope
     );
+
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_EMPLOYEE',
+      entityId: result?.employee?.employee_id || result?.employee_id || null,
+      newData: result
+    });
 
     return ApiResponse.success(res, result, 'Employee created successfully');
   } catch (error) {
@@ -250,6 +258,7 @@ router.get('/pending-applications',
  */
 router.post('/confirm-selected',
   requireHRMAdminPermission(['hrm.onboarding.confirm', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
   async (req, res, next) => {
   try {
     const { applicant_id, employee_data } = req.body;
@@ -268,6 +277,12 @@ router.post('/confirm-selected',
       ipAddress,
       req.hrmScope
     );
+
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_ONBOARDING',
+      entityId: applicant_id,
+      newData: result
+    });
 
     return ApiResponse.success(res, result, 'Applicant confirmed and onboarded successfully');
   } catch (error) {

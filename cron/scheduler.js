@@ -143,8 +143,8 @@ function initCronJobs() {
     timezone: 'Asia/Kolkata'
   });
 
-  // Run daily at 11:00 PM IST to auto-approve weekly off claims pending for 24+ hours
-  cron.schedule('0 23 * * *', async () => {
+  // Run every hour so claims are auto-approved soon after crossing the 24-hour threshold
+  cron.schedule('0 * * * *', async () => {
     logger.info('CRON: Auto-approving pending weekly off claims...');
     try {
       await autoApproveWeeklyOffClaimsJob();
@@ -175,7 +175,7 @@ function initCronJobs() {
   logger.info('CRON: - Attendance processing: 59 23 * * * (11:59 PM IST)');
   logger.info('CRON: - Attendance reminders: 0 * * * * (Every hour, IST)');
   logger.info('CRON: - Weekly off entitlements: 1 0 1 * * (1st of month, 12:01 AM IST)');
-  logger.info('CRON: - Weekly off auto-approval: 0 23 * * * (Daily 11:00 PM IST)');
+  logger.info('CRON: - Weekly off auto-approval: 0 * * * * (Every hour, IST)');
   logger.info('CRON: - Weekly off monthly expiry: 5 0 * * * (Daily 12:05 AM IST)');
 }
 

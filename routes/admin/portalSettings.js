@@ -32,4 +32,14 @@ router.put('/notifications-enabled', requirePermission('portal.settings.edit'), 
   } catch (error) { next(error); }
 });
 
+router.put('/ocr-enabled', requirePermission('portal.settings.edit'), auditLog('UPDATE_PORTAL_OCR'), async (req, res, next) => {
+  try {
+    return ApiResponse.success(
+      res,
+      await service.updateOcrEnabled(req.body.enabled, req.user.admin_id),
+      'OCR setting updated'
+    );
+  } catch (error) { next(error); }
+});
+
 module.exports = router;
