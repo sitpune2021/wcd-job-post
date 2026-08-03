@@ -144,9 +144,6 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
     type: DataTypes.STRING(20),
     allowNull: false,
     defaultValue: 'ACTIVE',
-    validate: {
-      isIn: [['ACTIVE', 'INACTIVE', 'TERMINATED', 'ON_LEAVE', 'SUSPENDED', 'RESIGNED', 'CONTRACT_ENDED']]
-    },
     comment: 'Employment status for HRM operations'
   },
   is_deleted: {

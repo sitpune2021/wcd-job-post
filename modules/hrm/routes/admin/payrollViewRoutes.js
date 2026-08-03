@@ -101,9 +101,15 @@ router.get('/payslips/export', async (req, res, next) => {
         { header: 'IFSC Code', key: 'ifsc_code', width: 16 },
         { header: 'State', key: 'state', width: 18 },
         { header: 'District', key: 'district', width: 18 },
+        { header: 'Present Days', key: 'present_days', width: 14 },
+        { header: 'Absent Days', key: 'absent_days', width: 14 },
+        { header: 'Total Days', key: 'total_days', width: 14 },
+        { header: 'Weekly Off Days', key: 'weekly_off_days', width: 16 },
+        { header: 'Leave Days', key: 'leave_days', width: 14 },
+        { header: 'Half Days', key: 'half_days', width: 14 },
         { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
         { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
-        { header: 'Total Amount', key: 'total_amount', width: 16 }
+        { header: 'Total', key: 'total_amount', width: 16 }
       ];
 
       const rows = await simplePayrollViewService.getPayrollPaymentLogRows(req.user, value);
@@ -233,6 +239,12 @@ const generatePayslipHtml = (data, filters) => {
             <th>Employee Code</th>
             <th>District</th>
             <th>Post</th>
+            <th>Present</th>
+            <th>Absent</th>
+            <th>Total Days</th>
+            <th>Weekly Off</th>
+            <th>Leave</th>
+            <th>Half Days</th>
             <th>Basic Salary</th>
             <th>Deductions</th>
             <th>Net Payable Till Date</th>
@@ -244,6 +256,12 @@ const generatePayslipHtml = (data, filters) => {
               <td>${emp.employee_code}</td>
               <td>${emp.district_name}</td>
               <td>${emp.post_name}</td>
+              <td class="text-right">${emp.present_days || 0}</td>
+              <td class="text-right">${emp.absent_days || 0}</td>
+              <td class="text-right">${emp.total_days || 0}</td>
+              <td class="text-right">${emp.weekly_off_days || 0}</td>
+              <td class="text-right">${emp.leave_days || 0}</td>
+              <td class="text-right">${emp.half_days || 0}</td>
               <td class="text-right">INR ${emp.basic_salary.toLocaleString()}</td>
               <td class="text-right">INR ${(emp.total_deduction || 0).toLocaleString()}</td>
               <td class="text-right"><strong>INR ${emp.net_pay.toLocaleString()}</strong></td>

@@ -492,6 +492,12 @@ const toEmployeeListRow = (payslipData) => ({
   undistributed_amount: payslipData.payment_distribution.undistributed_amount,
   center_share_percent: payslipData.payment_distribution.center_share_percent,
   state_share_percent: payslipData.payment_distribution.state_share_percent,
+  present_days: payslipData.attendance.present_days || 0,
+  absent_days: payslipData.attendance.absent_days || 0,
+  total_days: payslipData.attendance.salary_days || payslipData.attendance.working_days || 0,
+  weekly_off_days: payslipData.attendance.weekly_off_days || 0,
+  leave_days: payslipData.attendance.leave_days || 0,
+  half_days: payslipData.attendance.half_days || 0,
   deduction_breakdown: payslipData.salary.deduction_breakdown
 });
 
@@ -651,6 +657,12 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     ifsc_code: payslip.bank.ifsc_code,
     state: payslip.bank.state,
     district: payslip.bank.district || payslip.employee.district_name,
+    present_days: payslip.attendance.present_days || 0,
+    absent_days: payslip.attendance.absent_days || 0,
+    total_days: payslip.attendance.salary_days || payslip.attendance.working_days || 0,
+    weekly_off_days: payslip.attendance.weekly_off_days || 0,
+    leave_days: payslip.attendance.leave_days || 0,
+    half_days: payslip.attendance.half_days || 0,
     center_share_payment_amount: payslip.payment_distribution.center_share_amount,
     state_share_payment_amount: payslip.payment_distribution.state_share_amount,
     total_amount: payslip.payment_distribution.total_amount,
