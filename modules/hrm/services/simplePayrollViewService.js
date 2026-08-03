@@ -129,7 +129,7 @@ const getEmployeeIncludes = () => [
 ];
 
 const buildPayrollWhere = (adminUser, filters) => {
-  const { employee_id, district_id, search } = filters;
+  const { employee_id, district_id, scheme_id, search } = filters;
   const where = {
     is_deleted: false,
     is_active: true,
@@ -138,6 +138,7 @@ const buildPayrollWhere = (adminUser, filters) => {
 
   if (employee_id) where.employee_id = employee_id;
   if (district_id) where.district_id = district_id;
+  if (scheme_id) where.scheme_id = scheme_id;
 
   if (search) {
     const pattern = `%${String(search).trim()}%`;
@@ -595,7 +596,7 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
  */
 const getEmployeesPayslips = async (adminUser, filters) => {
   try {
-    const { month, year, page = 1, limit = 10, employee_id, district_id, search } = filters;
+    const { month, year, page = 1, limit = 10, employee_id, district_id, scheme_id, search } = filters;
 
     if (!month || !year) {
       throw ApiError.badRequest('Month and year are required');
@@ -629,6 +630,7 @@ const getEmployeesPayslips = async (adminUser, filters) => {
         year,
         employee_id,
         district_id,
+        scheme_id,
         search
       }
     };
@@ -657,6 +659,7 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     ifsc_code: payslip.bank.ifsc_code,
     state: payslip.bank.state,
     district: payslip.bank.district || payslip.employee.district_name,
+    scheme_name: payslip.employee.scheme_name,
     present_days: payslip.attendance.present_days || 0,
     absent_days: payslip.attendance.absent_days || 0,
     total_days: payslip.attendance.salary_days || payslip.attendance.working_days || 0,

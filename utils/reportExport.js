@@ -47,10 +47,11 @@ const sendPdfFromHtml = async (res, filename, html, options = {}) => {
     const pdfBuffer = await htmlToPdf.generatePdf(
       { content: html },
       {
-        format: 'A4',
+        format: options.format || 'A4',
+        landscape: options.landscape === true,
         printBackground: true,
         executablePath: process.env.CHROMIUM_PATH,
-        margin: { top: '14mm', right: '12mm', bottom: '14mm', left: '12mm' },
+        margin: options.margin || { top: '10mm', right: '8mm', bottom: '10mm', left: '8mm' },
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
       }
     );
@@ -239,7 +240,7 @@ const buildPayslipHtml = (payslipData) => {
 </html>`;
 };
 
-const buildSimpleReportHtml = (title, columns, rows) => {
+const buildSimpleReportHtml = (title, columns, rows, options = {}) => {
   const escapeHtml = (value) =>
     value === null || value === undefined
       ? ''
@@ -254,6 +255,8 @@ const buildSimpleReportHtml = (title, columns, rows) => {
     minute: '2-digit',
     hour12: false
   }).format(now);
+  const pageSize = options.landscape ? 'A4 landscape' : 'A4';
+  const margin = options.margin || '16mm';
   
   // Calculate total width and create colgroup with percentage-based widths
   const totalWidth = columns.reduce((sum, c) => sum + (c.width || 15), 0);
@@ -284,7 +287,7 @@ const buildSimpleReportHtml = (title, columns, rows) => {
   <meta charset="utf-8" />
   <title>${title}</title>
   <style>
-    @page { size: A4; margin: 16mm; }
+    @page { size: ${pageSize}; margin: ${margin}; }
     :root {
       --text: #111827;
       --muted: #4b5563;
@@ -302,11 +305,11 @@ const buildSimpleReportHtml = (title, columns, rows) => {
       padding: 0;
     }
     .page {
-      padding: 4px 2px 0 2px;
+      padding: 2px 1px 0 1px;
     }
     .title {
       text-align: center;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       letter-spacing: 0.1px;
       margin: 0 0 2px 0;
@@ -325,7 +328,7 @@ const buildSimpleReportHtml = (title, columns, rows) => {
     }
     th, td {
       border: 1px solid var(--border);
-      padding: 3px 4px;
+      padding: 3px 3px;
       vertical-align: top;
       word-break: break-word;
       line-height: 1.2;
@@ -334,12 +337,12 @@ const buildSimpleReportHtml = (title, columns, rows) => {
       background: var(--header-bg);
       color: var(--header-text);
       font-weight: 700;
-      font-size: 8px;
+      font-size: 7px;
       text-transform: uppercase;
       letter-spacing: 0.25px;
     }
     tbody tr:nth-child(odd) { background: var(--row-alt); }
-    td { font-size: 8px; }
+    td { font-size: 7.5px; }
     .empty td {
       text-align: center;
       font-style: italic;
