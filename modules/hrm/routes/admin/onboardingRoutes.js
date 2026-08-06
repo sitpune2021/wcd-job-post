@@ -70,7 +70,7 @@ router.get('/applicants/excel-imported',
  * @access Admin only
  */
 router.post('/create-existing',
-  requireHRMAdminPermission(['hrm.onboarding.import', 'hrm.*']),
+  requireHRMAdminPermission(['hrm.onboarding.create', 'hrm.*']),
   adminActionAudit.requireAuditRemark,
   async (req, res, next) => {
   try {

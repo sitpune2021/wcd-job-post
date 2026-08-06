@@ -16,6 +16,11 @@ const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
 const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileName } = require('../../../../utils/reportExport');
 const adminActionAudit = require('../../services/adminActionAuditService');
+const { resolveEmployeeMonthlyPay } = require('../../utils/salaryCalculations');
+const {
+  normalizeMonthlyPay,
+  syncPostAmountAndEmployeePay
+} = require('../../utils/paySync');
 
 const formatDateOnly = (value) => {
   if (!value) return '-';
@@ -101,7 +106,7 @@ router.get('/', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), asyn
  * @desc Export employees to Excel or PDF (backend generation)
  * @access Admin only
  */
-router.get('/export', requireHRMAdminPermission(['hrm.employees.view', 'hrm.*']), async (req, res, next) => {
+router.get('/export', requireHRMAdminPermission(['hrm.employees.export', 'hrm.*']), async (req, res, next) => {
   try {
     const { format = 'excel' } = req.query;
 
@@ -374,6 +379,29 @@ router.put('/:employeeId',
         updateData[field] = req.body[field];
       }
     }
+
+    if (req.body.employee_pay !== undefined) {
+      updateData.employee_pay = normalizeMonthlyPay(req.body.employee_pay);
+    }
+
+    if (updateData.post_id !== undefined && req.body.employee_pay === undefined) {
+      const targetPost = await db.PostMaster.findOne({
+        where: {
+          post_id: updateData.post_id,
+          is_deleted: false
+        },
+        attributes: ['post_id', 'amount']
+      });
+
+      if (!targetPost) {
+        throw new ApiError(400, 'Selected post not found');
+      }
+
+      updateData.employee_pay = resolveEmployeeMonthlyPay({
+        employee_pay: null,
+        post: targetPost
+      }) || null;
+    }
     
     // Auto-sync employment_status with is_active only if employment_status not explicitly provided
     if (updateData.is_active !== undefined && !updateData.employment_status) {
@@ -488,12 +516,23 @@ router.put('/:employeeId',
       throw new ApiError(400, 'No data provided for update');
     }
 
+    const targetPostId = updateData.post_id !== undefined ? updateData.post_id : employee.post_id;
+
     await EmployeeMaster.update(updateData, {
       where: { employee_id: parseInt(employeeId) }
     });
 
     updateData.updated_at = new Date();
     await employee.update(updateData);
+
+    if (req.body.employee_pay !== undefined && targetPostId) {
+      await syncPostAmountAndEmployeePay({
+        db,
+        postId: targetPostId,
+        amount: updateData.employee_pay,
+        updatedBy: req.user.admin_id
+      });
+    }
 
     const after = await getEmployeeAuditSnapshot(employeeId);
 

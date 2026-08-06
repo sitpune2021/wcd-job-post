@@ -12,6 +12,8 @@ const {
 const logger = require('../../../config/logger');
 const { Op } = require('sequelize');
 const { ApiError } = require('../../../middleware/errorHandler');
+const { resolveEmployeeMonthlyPay } = require('../utils/salaryCalculations');
+const { syncPostAmountAndEmployeePay } = require('../utils/paySync');
 
 /**
  * Parse date from DD/MM/YYYY format to YYYY-MM-DD
@@ -135,6 +137,21 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
 
     // Create employee record
     const employeeCode = await generateEmployeeCode(transaction);
+    const resolvedEmployeePay = resolveEmployeeMonthlyPay({
+      employee_pay: contractData.employee_pay,
+      post: application.post
+    });
+
+    if (contractData.employee_pay !== undefined) {
+      await syncPostAmountAndEmployeePay({
+        db,
+        postId: application.post_id,
+        amount: resolvedEmployeePay || null,
+        updatedBy: adminId,
+        transaction
+      });
+    }
+
     const employee = await EmployeeMaster.create({
       employee_code: employeeCode,
       applicant_id: application.applicant_id,
@@ -144,6 +161,7 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
       scheme_id: schemeId,
       contract_start_date: parseDate(contractData.contract_start_date),
       contract_end_date: parseDate(contractData.contract_end_date) || null,
+      employee_pay: resolvedEmployeePay || null,
       onboarding_type: 'CRM_SELECTED',
       onboarding_status: 'ACTIVE',
       onboarding_completed_at: new Date(),
@@ -250,6 +268,19 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
       throw ApiError.badRequest('Scheme must be provided');
     }
 
+    const post = await db.PostMaster.findOne({
+      where: {
+        post_id,
+        is_deleted: false
+      },
+      attributes: ['post_id', 'amount'],
+      transaction
+    });
+
+    if (!post) {
+      throw ApiError.badRequest('Selected post not found');
+    }
+
     // Check if email already exists in applicant table
     const existingApplicant = await db.ApplicantMaster.findOne({
       where: { email, is_deleted: false },
@@ -330,6 +361,21 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     // Create employee record (only for new applicants)
     let employee;
     try {
+      const resolvedEmployeePay = resolveEmployeeMonthlyPay({
+        employee_pay,
+        post
+      });
+
+      if (employee_pay !== undefined) {
+        await syncPostAmountAndEmployeePay({
+          db,
+          postId: post_id,
+          amount: resolvedEmployeePay || null,
+          updatedBy: adminId,
+          transaction
+        });
+      }
+
       employee = await EmployeeMaster.create({
         applicant_id: applicantId,
         application_id: null,                // No Application record for imported employees
@@ -341,7 +387,7 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
         hub_id: null,                        // Legacy field - no longer needed with scheme-based approach
         contract_start_date: parsedStartDate,
         contract_end_date: calculatedEndDate, // Calculate end date from start date + 11 months
-        employee_pay: employee_pay || null,
+        employee_pay: resolvedEmployeePay || null,
         onboarding_type: 'EXISTING_IMPORT',
         onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
         employment_status: 'ACTIVE',        // Set employment status to ACTIVE as well

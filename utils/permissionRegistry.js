@@ -652,23 +652,37 @@ registerPermission({
 // HRM Employees
 registerPermission({
   code: 'hrm.employees.view',
-  name: 'View HRM Employees',
-  description: 'View employee list and details',
+  name: 'View Employee Records',
+  description: 'View employee lists, profiles, and employee details',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.employees.export',
+  name: 'Export Employee Records',
+  description: 'Download employee records as Excel or PDF',
   module: 'hrm'
 });
 
 // HRM Onboarding
 registerPermission({
   code: 'hrm.onboarding.view',
-  name: 'View HRM Onboarding',
-  description: 'View onboarding applicants and pending applications',
+  name: 'View Onboarding Applications',
+  description: 'View pending onboarding applicants and onboarding-related lists',
+  module: 'hrm'
+});
+
+registerPermission({
+  code: 'hrm.onboarding.create',
+  name: 'Onboard Employee by Form',
+  description: 'Create a new employee by using the manual onboarding form',
   module: 'hrm'
 });
 
 registerPermission({
   code: 'hrm.onboarding.import',
-  name: 'Import HRM Employees',
-  description: 'Import employees via Excel or manual form',
+  name: 'Import Employees by Excel',
+  description: 'Upload employee onboarding data through Excel import and template download',
   module: 'hrm'
 });
 
@@ -703,15 +717,15 @@ registerPermission({
 
 registerPermission({
   code: 'hrm.attendance.bulk_upload',
-  name: 'Bulk Upload Attendance',
-  description: 'Upload bulk attendance via Excel template',
+  name: 'Upload Bulk Attendance Sheet',
+  description: 'Upload attendance through the bulk attendance Excel flow',
   module: 'hrm'
 });
 
 registerPermission({
   code: 'hrm.attendance.bulk_approve',
-  name: 'Approve Bulk Attendance',
-  description: 'Approve or reject bulk attendance uploads',
+  name: 'Review Bulk Attendance Uploads',
+  description: 'Approve or reject submitted bulk attendance uploads',
   module: 'hrm'
 });
 
@@ -965,9 +979,11 @@ const syncToDatabase = async (sequelize) => {
         
         if (isNew) {
           created++;
-        } else if (dbPermission.description !== permission.description || 
+        } else if (dbPermission.permission_name !== permission.name ||
+                   dbPermission.description !== permission.description || 
                    dbPermission.module !== permission.module) {
           await dbPermission.update({
+            permission_name: permission.name,
             description: permission.description,
             module: permission.module,
             is_active: true

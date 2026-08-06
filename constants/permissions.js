@@ -133,12 +133,14 @@ const PERMISSIONS = {
   HRM: {
     EMPLOYEES: {
       VIEW: 'hrm.employees.view',
+      EXPORT: 'hrm.employees.export',
       EDIT: 'hrm.employees.edit',
       ONBOARD: 'hrm.employees.onboard',
       MANAGE: 'hrm.employees.*'
     },
     ONBOARDING: {
       VIEW: 'hrm.onboarding.view',
+      CREATE: 'hrm.onboarding.create',
       CONFIRM: 'hrm.onboarding.confirm',
       REJECT: 'hrm.onboarding.reject',
       IMPORT: 'hrm.onboarding.import',

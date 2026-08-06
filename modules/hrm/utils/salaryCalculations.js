@@ -12,6 +12,15 @@ const toNumber = (value, fallback = 0) => {
 
 const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
 
+const resolveEmployeeMonthlyPay = (employee) => {
+  const employeePay = toNumber(employee?.employee_pay, 0);
+  if (employeePay > 0) {
+    return employeePay;
+  }
+
+  return toNumber(employee?.post?.amount, 0);
+};
+
 const resolveEmployeeGender = (employee) => {
   const rawGender = employee?.gender || employee?.applicant?.personal?.gender || '';
   const gender = String(rawGender).trim().toLowerCase();
@@ -80,7 +89,7 @@ const calculatePaidDays = (salaryDays, deductedDays) => {
  * Calculate salary based on attendance and configured deductions.
  *
  * Formula:
- * - Monthly pay is always taken from the assigned post amount.
+ * - Monthly pay is taken from employee_pay first, then falls back to the assigned post amount.
  * - Salary days are all calendar days in the employee's contract overlap for the month.
  * - Past unmarked days, absent days, unpaid leave, and half-day shortage are deducted.
  * - Approved weekly off, paid leave, and present days are paid.
@@ -90,7 +99,7 @@ const calculatePaidDays = (salaryDays, deductedDays) => {
  */
 const calculateSalary = (employee, attendance) => {
   try {
-    const monthlyPay = toNumber(employee?.post?.amount, 0);
+    const monthlyPay = resolveEmployeeMonthlyPay(employee);
     const salaryDays = toNumber(attendance?.salary_days || attendance?.working_days, 0);
 
     if (monthlyPay <= 0 || salaryDays <= 0) {
@@ -223,5 +232,6 @@ module.exports = {
   calculateSalary,
   calculatePaymentSplit,
   generatePayslip,
+  resolveEmployeeMonthlyPay,
   validateSalaryInputs
 };

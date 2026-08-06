@@ -12,6 +12,7 @@ const logger = require('../../config/logger');
 const { ApiError } = require('../../middleware/errorHandler');
 const { paginatedQuery, isPaginatedResponse } = require('../../utils/pagination');
 const { localizeField } = require('./helpers');
+const { syncEmployeePayFromPostAmount } = require('../../modules/hrm/utils/paySync');
 
  const parseOptionalInt = (value) => {
    if (value === undefined) return undefined;
@@ -681,6 +682,15 @@ const updatePost = async (postId, data, userId) => {
     }
 
     await post.update(updateData);
+
+    if (Object.prototype.hasOwnProperty.call(updateData, 'amount')) {
+      await syncEmployeePayFromPostAmount({
+        db,
+        postId: post.post_id,
+        amount: updateData.amount,
+        updatedBy: userId
+      });
+    }
 
     if (Object.prototype.hasOwnProperty.call(data, 'allowed_category_ids')) {
       await setPostCategories(postId, parseIntArray(data.allowed_category_ids), userId);
