@@ -6,13 +6,25 @@ const service = require('../../services/recruitmentDriveService');
 
 router.use(authenticate);
 
-router.get('/', requirePermission('posts.view'), async (_req, res, next) => {
+router.get('/', requirePermission([
+  'posts.view',
+  'hrm.employees.view',
+  'hrm.onboarding.view',
+  'hrm.onboarding.create',
+  'hrm.*'
+]), async (_req, res, next) => {
   try {
     return ApiResponse.success(res, await service.listDrives(), 'Recruitment drives retrieved');
   } catch (error) { next(error); }
 });
 
-router.get('/current', requirePermission('posts.view'), async (_req, res, next) => {
+router.get('/current', requirePermission([
+  'posts.view',
+  'hrm.employees.view',
+  'hrm.onboarding.view',
+  'hrm.onboarding.create',
+  'hrm.*'
+]), async (_req, res, next) => {
   try {
     return ApiResponse.success(res, await service.getActiveDrive(), 'Active recruitment drive retrieved');
   } catch (error) { next(error); }
@@ -45,4 +57,3 @@ router.post('/:id/clone-posts', requirePermission('posts.create'), auditLog('CLO
 });
 
 module.exports = router;
-
