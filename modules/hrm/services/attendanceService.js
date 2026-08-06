@@ -77,6 +77,153 @@ const formatAttendanceRecord = (record) => {
 const { getCurrentDate, getCurrentTime, isWeekend } = require('../utils/dateTimeHelpers');
 const { safeQuery, safeHolidayCheck, safeLeaveCheck, safeAttendanceCheck } = require('../utils/safeQueryHelpers');
 
+const validateEmployeeGeofence = async (employee, data, options = {}) => {
+  const {
+    requireCoordinates = false,
+    actionLabel = 'mark attendance'
+  } = options;
+
+  const hasCoordinates = data.latitude !== undefined
+    && data.latitude !== null
+    && data.longitude !== undefined
+    && data.longitude !== null;
+
+  if (!hasCoordinates) {
+    if (requireCoordinates) {
+      throw new ApiError(
+        400,
+        `Current location is required to ${actionLabel}. Please enable location access and try again.`
+      );
+    }
+    return;
+  }
+
+  logger.info('Starting geofencing validation', {
+    employeeId: employee.employee_id,
+    userLat: data.latitude,
+    userLon: data.longitude,
+    hasSchemeId: !!employee.scheme_id,
+    actionLabel
+  });
+
+  const employeeWithLocation = await EmployeeMaster.findOne({
+    where: { employee_id: employee.employee_id },
+    include: [
+      {
+        model: db.Scheme,
+        as: 'scheme',
+        include: [
+          {
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: false
+          }
+        ],
+        attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'latitude', 'longitude', 'geofence_radius_meters'],
+        required: false
+      }
+    ]
+  });
+
+  logger.info('Employee location data retrieved', {
+    employeeId: employeeWithLocation.employee_id,
+    hasScheme: !!employeeWithLocation.scheme,
+    actionLabel
+  });
+
+  if (!employeeWithLocation.scheme || !employeeWithLocation.scheme.schemeType) {
+    throw new ApiError(400, 'Employee scheme assignment not configured. Please contact admin.');
+  }
+
+  const postingCenter = employeeWithLocation.scheme.schemeType.scheme_code;
+  const latitude = employeeWithLocation.scheme.latitude;
+  const longitude = employeeWithLocation.scheme.longitude;
+  const geofenceRadius = employeeWithLocation.scheme.geofence_radius_meters;
+
+  logger.info('Using scheme location for geofencing', {
+    employeeId: employeeWithLocation.employee_id,
+    schemeId: employeeWithLocation.scheme.scheme_id,
+    schemeCode: employeeWithLocation.scheme.scheme_code,
+    schemeType: postingCenter,
+    actionLabel
+  });
+
+  const targetLat = latitude ? parseFloat(latitude) : null;
+  const targetLon = longitude ? parseFloat(longitude) : null;
+
+  if (isNaN(targetLat) || isNaN(targetLon) || targetLat === null || targetLon === null || targetLat === 0 || targetLon === 0) {
+    const locationName = employeeWithLocation.scheme.scheme_name;
+    throw new ApiError(
+      403,
+      `Your assigned ${postingCenter} "${locationName}" does not have valid location coordinates configured. Please contact your administrator to set up the location for attendance marking.`
+    );
+  }
+
+  const deviceType = detectDevice(data.userAgent);
+  const baseRadius = geofenceRadius || 100;
+  const allowedRadius = getAllowedRadius(deviceType, baseRadius);
+
+  logger.info('DEBUG: Before geofence validation', {
+    employeeId: employee.employee_id,
+    locationType: postingCenter,
+    locationName: employeeWithLocation.scheme.scheme_name || 'Unknown Scheme',
+    deviceType,
+    userLat: data.latitude,
+    userLon: data.longitude,
+    targetLat,
+    targetLon,
+    baseRadius,
+    allowedRadius,
+    actionLabel
+  });
+
+  const validation = validateGeofence({
+    userLat: data.latitude,
+    userLon: data.longitude,
+    targetLat,
+    targetLon,
+    allowedRadius
+  });
+
+  const mobileMultiplier = parseFloat(process.env.GEOFENCE_MOBILE_MULTIPLIER) || 2;
+  const desktopMultiplier = parseFloat(process.env.GEOFENCE_DESKTOP_MULTIPLIER) || 1;
+  const currentMultiplier = deviceType === 'mobile' ? mobileMultiplier : desktopMultiplier;
+
+  logger.info('DEBUG: Geofencing validation completed', {
+    employeeId: employee.employee_id,
+    locationType: postingCenter,
+    locationName: employeeWithLocation.scheme.scheme_name || 'Unknown Scheme',
+    deviceType,
+    distance: validation.distance,
+    baseRadius,
+    deviceMultiplier: currentMultiplier,
+    finalRadius: validation.allowedRadius,
+    isWithinRange: validation.isWithinRange,
+    metersOver: validation.distance > validation.allowedRadius ? Math.round(validation.distance - validation.allowedRadius) : 0,
+    actionLabel
+  });
+
+  if (!validation.isWithinRange) {
+    const schemeName = employeeWithLocation.scheme?.scheme_name || 'Unknown Scheme';
+    const schemeTypeName = employeeWithLocation.scheme?.schemeType?.scheme_name || 'Unknown Type';
+    const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
+
+    throw new ApiError(
+      422,
+      [
+        'Location access denied.',
+        `You are too far from your assigned scheme "${schemeName}" (${schemeTypeName}).`,
+        `Current distance: ${validation.distance}m.`,
+        `Maximum allowed distance: ${validation.allowedRadius}m.`,
+        `Out of range by: ${metersOutOfRange}m.`,
+        `Target coordinates: ${targetLat}, ${targetLon}.`,
+        `Please move closer to your assigned scheme location and try again.`
+      ].join(' ')
+    );
+  }
+};
+
 /**
  * Mark attendance for the logged-in employee
  * One attendance per day, auto-captures time + IP
@@ -127,175 +274,7 @@ const markAttendance = async (user, data, ip) => {
     });
   }
 
-  // Geofencing validation - check if employee is within allowed location
-  if (data.latitude && data.longitude) {
-    logger.info('Starting geofencing validation', {
-      employeeId: employee.employee_id,
-      userLat: data.latitude,
-      userLon: data.longitude,
-      hasSchemeId: !!employee.scheme_id
-    });
-
-    // Get employee's post details with Scheme location (scheme-only approach)
-    const employeeId = employee.employee_id;
-    const employeeWithLocation = await EmployeeMaster.findOne({
-      where: { employee_id: employeeId },
-      include: [
-        {
-          model: db.Scheme,
-          as: 'scheme',
-          include: [
-            {
-              model: db.SchemeType,
-              as: 'schemeType',
-              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-              required: false
-            }
-          ],
-          attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'latitude', 'longitude', 'geofence_radius_meters'],
-          required: false
-        }
-      ]
-    });
-
-    
-    logger.info('Employee location data retrieved', {
-      employeeId: employeeWithLocation.employee_id,
-      hasScheme: !!employeeWithLocation.scheme
-    });
-
-    // Determine employee's actual posting and validate against correct center (scheme-only approach)
-    let targetLocation = null;
-    let locationType = null;
-    let postingCenter = null;
-    let latitude = null;
-    let longitude = null;
-    let geofenceRadius = null;
-
-    // Scheme-only approach: All employees must have a scheme assignment
-    if (!employeeWithLocation.scheme || !employeeWithLocation.scheme.schemeType) {
-      throw new ApiError(400, 'Employee scheme assignment not configured. Please contact admin.');
-    }
-
-    postingCenter = employeeWithLocation.scheme.schemeType.scheme_code; // 'OSC' or 'HUB'
-    latitude = employeeWithLocation.scheme.latitude;
-    longitude = employeeWithLocation.scheme.longitude;
-    geofenceRadius = employeeWithLocation.scheme.geofence_radius_meters;
-    
-    logger.info('Using Scheme location for geofencing', {
-      employeeId: employeeWithLocation.employee_id,
-      schemeId: employeeWithLocation.scheme.scheme_id,
-      schemeCode: employeeWithLocation.scheme.scheme_code,
-      schemeType: postingCenter
-    });
-
-    // Convert strings to numbers if needed and validate
-    const numLat = latitude ? parseFloat(latitude) : null;
-    const numLon = longitude ? parseFloat(longitude) : null;
-    
-    if (!isNaN(numLat) && !isNaN(numLon) && numLat !== null && numLon !== null && numLat !== 0 && numLon !== 0) {
-      // Create a copy with numeric coordinates
-      targetLocation = {
-        latitude: numLat,
-        longitude: numLon,
-        geofence_radius_meters: geofenceRadius
-      };
-      locationType = postingCenter;
-      
-      logger.info('Employee location validated for geofencing', {
-        employeeId: employeeWithLocation.employee_id,
-        postingCenter: postingCenter,
-        locationType: locationType,
-        latitude: numLat,
-        longitude: numLon,
-        geofenceRadius: geofenceRadius
-      });
-    } else {
-      // Location has no valid coordinates
-      const locationName = employeeWithLocation.scheme.scheme_name;
-      
-      throw new ApiError(403, 
-        `Your assigned ${postingCenter} "${locationName}" does not have valid location coordinates configured. ` +
-        `Please contact your administrator to set up the location for attendance marking.`
-      );
-    }
-
-    // Validate geofence against the correct center
-    if (targetLocation) {
-      // Detect device type from user agent
-      const deviceType = detectDevice(data.userAgent);
-      
-      // Get allowed radius based on device type
-      const baseRadius = targetLocation.geofence_radius_meters || 100;
-      const allowedRadius = getAllowedRadius(deviceType, baseRadius);
-
-      // Validate location
-      const targetLat = parseFloat(targetLocation.latitude);
-      const targetLon = parseFloat(targetLocation.longitude);
-      
-      logger.info('DEBUG: Before geofence validation', {
-        employeeId: employee.employee_id,
-        locationType,
-        locationName: targetLocation.scheme_name || 'Unknown Scheme',
-        deviceType,
-        userLat: data.latitude,
-        userLon: data.longitude,
-        targetLat: targetLat,
-        targetLon: targetLon,
-        targetLatType: typeof targetLocation.latitude,
-        targetLonType: typeof targetLocation.longitude,
-        baseRadius: baseRadius,
-        allowedRadius: allowedRadius
-      });
-
-      const validation = validateGeofence({
-        userLat: data.latitude,
-        userLon: data.longitude,
-        targetLat: targetLat,
-        targetLon: targetLon,
-        allowedRadius
-      });
-
-      // Get multipliers for logging
-      const mobileMultiplier = parseFloat(process.env.GEOFENCE_MOBILE_MULTIPLIER) || 2;
-      const desktopMultiplier = parseFloat(process.env.GEOFENCE_DESKTOP_MULTIPLIER) || 1;
-      const currentMultiplier = deviceType === 'mobile' ? mobileMultiplier : desktopMultiplier;
-
-      logger.info('DEBUG: Geofencing validation completed', {
-        employeeId: employee.employee_id,
-        locationType,
-        locationName: targetLocation.scheme_name || 'Unknown Scheme',
-        deviceType,
-        distance: validation.distance,
-        baseRadius: baseRadius,
-        deviceMultiplier: currentMultiplier,
-        finalRadius: validation.allowedRadius,
-        isWithinRange: validation.isWithinRange,
-        metersOver: validation.distance > validation.allowedRadius ? Math.round(validation.distance - validation.allowedRadius) : 0
-      });
-
-      if (!validation.isWithinRange) {
-        // Get proper scheme name and type from employee data
-        const schemeName = employeeWithLocation.scheme?.scheme_name || 'Unknown Scheme';
-        const schemeTypeName = employeeWithLocation.scheme?.schemeType?.scheme_name || 'Unknown Type';
-        
-        const metersOutOfRange = Math.round(validation.distance - validation.allowedRadius);
-        
-        // Create detailed error message with proper scheme information
-        const errorMessage = [
-          'Location access denied.',
-          'You are too far from your assigned scheme "' + schemeName + '" (' + schemeTypeName + ').',
-          'Current distance: ' + validation.distance + 'm.',
-          'Maximum allowed distance: ' + validation.allowedRadius + 'm.',
-          'Out of range by: ' + metersOutOfRange + 'm.',
-          'Target coordinates: ' + targetLocation.latitude + ', ' + targetLocation.longitude + '.',
-          'Please move closer to your assigned scheme location and try again.'
-        ].join(' ');
-        
-        throw new ApiError(422, errorMessage);
-      }
-    }
-  }
+  await validateEmployeeGeofence(employee, data, { actionLabel: 'mark attendance' });
 
   // Use standardized time (IST timezone)
   const timeStr = getCurrentTime();
@@ -1157,6 +1136,14 @@ const checkOutSimple = async (user, data, ip) => {
   if (!employee) {
     throw new ApiError(404, 'Employee record not found. Please contact admin.');
   }
+  if (employee.employment_status !== 'ACTIVE') {
+    throw new ApiError(403, 'Only active employees can check out.');
+  }
+
+  await validateEmployeeGeofence(employee, data, {
+    requireCoordinates: true,
+    actionLabel: 'check out'
+  });
 
   const today = getCurrentDate();
   const currentTime = getCurrentTime();

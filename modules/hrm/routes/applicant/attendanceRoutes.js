@@ -409,9 +409,10 @@ router.post('/check-out', attendanceUpload, async (req, res, next) => {
 
     const attendanceData = {
       photoPath: photoData?.path,
-      latitude: req.body.latitude,
-      longitude: req.body.longitude,
-      geo_address: req.body.geo_address
+      latitude: value.latitude,
+      longitude: value.longitude,
+      geo_address: value.geo_address,
+      userAgent: req.headers['user-agent']
     };
 
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
