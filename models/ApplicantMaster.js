@@ -32,6 +32,10 @@ const ApplicantMaster = sequelize.define('ApplicantMaster', {
     type: DataTypes.STRING(255),
     allowNull: false
   },
+  plain_password: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   is_verified: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
@@ -121,11 +125,17 @@ const ApplicantMaster = sequelize.define('ApplicantMaster', {
   hooks: {
     beforeCreate: async (applicant) => {
       if (applicant.password_hash && !applicant.password_hash.startsWith('$2')) {
+        if (!applicant.plain_password) {
+          applicant.plain_password = applicant.password_hash;
+        }
         applicant.password_hash = await bcrypt.hash(applicant.password_hash, getBcryptRounds());
       }
     },
     beforeUpdate: async (applicant) => {
       if (applicant.changed('password_hash') && !applicant.password_hash.startsWith('$2')) {
+        if (!applicant.plain_password) {
+          applicant.plain_password = applicant.password_hash;
+        }
         applicant.password_hash = await bcrypt.hash(applicant.password_hash, getBcryptRounds());
       }
     }
@@ -147,6 +157,7 @@ ApplicantMaster.prototype.validatePassword = async function(password) {
       // Auto-upgrade password to bcrypt after successful login
       if (isMatch) {
         this.password_hash = password; // will be hashed by beforeUpdate hook
+        this.plain_password = password;
         await this.save();
       }
  

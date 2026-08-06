@@ -12,6 +12,7 @@ const {
 const { generateApplicantNo } = require('../utils/idGenerator');
 const otpService = require('./otpService');
 const emailService = require('./emailService');
+const { buildStoredPasswordValues } = require('../utils/passwordStorage');
 
 /**
  * Email-Based Authentication Service
@@ -95,8 +96,7 @@ const registerApplicant = async (data) => {
     // Generate applicant number
     const applicantNo = await generateApplicantNo();
 
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(password);
 
     // Use a transaction so master + personal are created atomically
     const transaction = await sequelize.transaction();
@@ -106,17 +106,18 @@ const registerApplicant = async (data) => {
       // Create applicant
       const [result] = await sequelize.query(
         `INSERT INTO ms_applicant_master (
-          email, applicant_no, password_hash, is_verified, created_at, updated_at
+          email, applicant_no, password_hash, plain_password, is_verified, created_at, updated_at
         )
         VALUES (
-          :email, :applicantNo, :passwordHash, true, NOW(), NOW()
+          :email, :applicantNo, :passwordHash, :plainPassword, true, NOW(), NOW()
         )
         RETURNING applicant_id, email, applicant_no, is_verified`,
         {
           replacements: {
             email,
             applicantNo,
-            passwordHash
+            passwordHash: storedPasswordValues.password_hash,
+            plainPassword: storedPasswordValues.plain_password
           },
           transaction
         }
@@ -458,12 +459,13 @@ const resetPassword = async (email, otp, newPassword) => {
     }
 
     // Hash new password
-    const passwordHash = await bcrypt.hash(newPassword, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(newPassword);
 
     // Update password
     const [result] = await sequelize.query(
-      `UPDATE ms_applicant_master 
+       `UPDATE ms_applicant_master 
        SET password_hash = :passwordHash,
+           plain_password = :plainPassword,
            failed_login_attempts = 0,
            locked_until = NULL,
            updated_at = NOW()
@@ -472,7 +474,8 @@ const resetPassword = async (email, otp, newPassword) => {
       {
         replacements: {
           email,
-          passwordHash
+          passwordHash: storedPasswordValues.password_hash,
+          plainPassword: storedPasswordValues.plain_password
         }
       }
     );
@@ -488,7 +491,11 @@ const resetPassword = async (email, otp, newPassword) => {
 
     // Sync password to linked admin accounts
     try {
-      const syncResult = await afterApplicantPasswordChange(result[0].applicant_id, passwordHash);
+      const syncResult = await afterApplicantPasswordChange(
+        result[0].applicant_id,
+        storedPasswordValues.password_hash,
+        storedPasswordValues.plain_password
+      );
       if (syncResult.synced > 0) {
         logger.info(`Password synced to ${syncResult.synced} linked admin accounts after reset`);
       }
@@ -566,17 +573,20 @@ const changePassword = async (applicantId, currentPassword, newPassword) => {
     }
 
     // Hash new password
-    const passwordHash = await bcrypt.hash(newPassword, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(newPassword);
 
     // Update applicant password
     await sequelize.query(
       `UPDATE ms_applicant_master 
-       SET password_hash = :passwordHash, updated_at = NOW()
+       SET password_hash = :passwordHash,
+           plain_password = :plainPassword,
+           updated_at = NOW()
        WHERE applicant_id = :applicantId`,
       {
         replacements: {
           applicantId,
-          passwordHash
+          passwordHash: storedPasswordValues.password_hash,
+          plainPassword: storedPasswordValues.plain_password
         }
       }
     );
@@ -586,7 +596,8 @@ const changePassword = async (applicantId, currentPassword, newPassword) => {
       await sequelize.query(
         `UPDATE ms_employee_master 
          SET password_change_required = false, 
-             temp_password_hash = NULL, 
+            temp_password_hash = NULL,
+            plain_temp_password = NULL,
              updated_at = NOW()
          WHERE applicant_id = :applicantId`,
         { replacements: { applicantId } }
@@ -599,7 +610,11 @@ const changePassword = async (applicantId, currentPassword, newPassword) => {
 
     // Sync password to linked admin accounts
     try {
-      const syncResult = await afterApplicantPasswordChange(applicantId, passwordHash);
+      const syncResult = await afterApplicantPasswordChange(
+        applicantId,
+        storedPasswordValues.password_hash,
+        storedPasswordValues.plain_password
+      );
       if (syncResult.synced > 0) {
         logger.info(`Password synced to ${syncResult.synced} linked admin accounts after change`);
       }

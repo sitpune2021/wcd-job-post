@@ -15,6 +15,7 @@ const {
   ensureAdminUsernameAvailable,
   buildLinkedAdminFields
 } = require('../admin/adminUserLinkHelper');
+const { buildStoredPasswordValues } = require('../../utils/passwordStorage');
 
 // ==================== USER CRUD OPERATIONS ====================
 
@@ -143,6 +144,7 @@ const createUser = async (data, createdBy) => {
     const isLinked = !!data.linked_employee_id;
     let tempPassword = null;
     let passwordHash;
+    let plainPassword = null;
 
     let username = data.username;
     let email = data.email;
@@ -160,22 +162,25 @@ const createUser = async (data, createdBy) => {
       email = linkedFields.email;
       fullName = linkedFields.full_name;
       passwordHash = linkedFields.password_hash;
+      plainPassword = linkedFields.plain_password || linkedFields.temp_password_plain || null;
       districtId = linkedFields.district_id;
       schemeId = linkedFields.scheme_id;
     } else {
       await ensureAdminUsernameAvailable(username);
       tempPassword = data.password && data.password.trim() ? data.password.trim() : crypto.randomBytes(8).toString('hex');
-      passwordHash = await bcrypt.hash(tempPassword, getBcryptRounds());
+      const storedPasswordValues = await buildStoredPasswordValues(tempPassword);
+      passwordHash = storedPasswordValues.password_hash;
+      plainPassword = storedPasswordValues.plain_password;
     }
 
     const [result] = await sequelize.query(
       `INSERT INTO ms_admin_users (
-        username, email, full_name, mobile_no, password_hash, role_id,
+        username, email, full_name, mobile_no, password_hash, plain_password, role_id,
         district_id, scheme_id, linked_employee_id,
         is_active, created_by, created_at, updated_at
       )
       VALUES (
-        :username, :email, :full_name, :mobile_no, :password_hash, :role_id,
+        :username, :email, :full_name, :mobile_no, :password_hash, :plain_password, :role_id,
         :district_id, :scheme_id, :linked_employee_id,
         true, :created_by, NOW(), NOW()
       )
@@ -187,6 +192,7 @@ const createUser = async (data, createdBy) => {
           full_name: fullName,
           mobile_no: mobile,
           password_hash: passwordHash,
+          plain_password: plainPassword,
           role_id: roleId,
           district_id: districtId,
           scheme_id: schemeId,
@@ -221,6 +227,7 @@ const updateUser = async (userId, data, updatedBy) => {
     
     let username = data.username;
     let passwordHash = null;
+    let plainPassword;
 
     if (data.linked_employee_id) {
       const employee = await fetchLinkedEmployeeDetails(data.linked_employee_id);
@@ -230,6 +237,7 @@ const updateUser = async (userId, data, updatedBy) => {
       data.email = linkedFields.email;
       data.full_name = linkedFields.full_name;
       passwordHash = linkedFields.password_hash; // Use employee's password hash directly
+      plainPassword = linkedFields.plain_password || linkedFields.temp_password_plain || null;
       data.district_id = linkedFields.district_id;
       data.scheme_id = linkedFields.scheme_id;
     } else if (username) {
@@ -238,7 +246,9 @@ const updateUser = async (userId, data, updatedBy) => {
 
     // Only hash password if it's provided and not linking to employee
     if (data.password && data.password.trim() && !data.linked_employee_id) {
-      passwordHash = await bcrypt.hash(data.password.trim(), getBcryptRounds());
+      const storedPasswordValues = await buildStoredPasswordValues(data.password.trim());
+      passwordHash = storedPasswordValues.password_hash;
+      plainPassword = storedPasswordValues.plain_password;
     }
 
     const [result] = await sequelize.query(
@@ -255,6 +265,7 @@ const updateUser = async (userId, data, updatedBy) => {
            review_batch_start = :review_batch_start,
            review_batch_end = :review_batch_end,
            password_hash = COALESCE(:password_hash, password_hash),
+           plain_password = COALESCE(:plain_password, plain_password),
            updated_by = :updated_by,
            updated_at = NOW()
        WHERE admin_id = :userId AND is_deleted = false
@@ -274,13 +285,12 @@ const updateUser = async (userId, data, updatedBy) => {
           review_batch_end: data.review_batch_end !== undefined ? data.review_batch_end : null,
           is_active: data.is_active !== undefined ? data.is_active : null,
           password_hash: passwordHash !== null ? passwordHash : undefined,
+          plain_password: plainPassword !== undefined ? plainPassword : undefined,
           updated_by: updatedBy
         }
       }
     );
     
-    logger.info(`SQL replacements for user ${userId}:`, JSON.stringify(replacements, null, 2));
-
     if (result.length === 0) {
       return null;
     }

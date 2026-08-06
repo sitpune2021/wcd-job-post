@@ -5,6 +5,10 @@ const { generateEmployeeCode } = require('../utils/employeeCodeGenerator');
 const { sendOnboardingEmail } = require('./hrmEmailService');
 const bcrypt = require('bcryptjs');
 const { getBcryptRounds } = require('../../../config/security');
+const {
+  buildStoredPasswordValues,
+  buildStoredTempPasswordValues
+} = require('../../../utils/passwordStorage');
 const logger = require('../../../config/logger');
 const { Op } = require('sequelize');
 const { ApiError } = require('../../../middleware/errorHandler');
@@ -258,7 +262,8 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
 
     // Use provided password or generate temporary password: User@123
     const password = employeeData.password || 'User@123';
-    const passwordHash = await bcrypt.hash(password, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(password);
+    const storedTempPasswordValues = await buildStoredTempPasswordValues(password);
 
     // Generate applicant number
     const { generateApplicantNo } = require('../../../utils/idGenerator');
@@ -268,7 +273,8 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
     const applicant = await db.ApplicantMaster.create({
       applicant_no: applicant_no,
       email,
-      password_hash: passwordHash,
+      password_hash: storedPasswordValues.password_hash,
+      plain_password: storedPasswordValues.plain_password,
       is_verified: true,
       is_employee: true,
       created_by: adminId,
@@ -339,7 +345,8 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
         onboarding_type: 'EXISTING_IMPORT',
         onboarding_status: 'ACTIVE',        // EXISTING_IMPORT employees are already working
         employment_status: 'ACTIVE',        // Set employment status to ACTIVE as well
-        temp_password_hash: passwordHash,
+        temp_password_hash: storedTempPasswordValues.temp_password_hash,
+        plain_temp_password: storedTempPasswordValues.plain_temp_password,
         password_change_required: true,
         is_active: true,                     // EXISTING_IMPORT employees should be active immediately
         created_by: adminId

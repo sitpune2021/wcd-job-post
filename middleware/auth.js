@@ -5,6 +5,7 @@ const db = require('../models');
 const logger = require('../config/logger');
 const { hasPermission, hasAnyPermission } = require('../utils/permissionRegistry');
 const auditContext = require('../utils/auditContext');
+const { resolveAdminHRMScope } = require('../modules/hrm/utils/adminScopeResolver');
 
 // Initialize passport with JWT strategy
 const initializePassport = () => {
@@ -98,6 +99,10 @@ const initializePassport = () => {
               user.dataValues.assigned_scheme_ids = assignedSchemeIds;
               user.assigned_scheme_ids = assignedSchemeIds;
             }
+
+            const hrmScope = await resolveAdminHRMScope(user);
+            user.dataValues.hrm_scope_filters = hrmScope.filters;
+            user.hrm_scope_filters = hrmScope.filters;
           }
         }
 

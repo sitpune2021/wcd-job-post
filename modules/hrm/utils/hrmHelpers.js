@@ -37,6 +37,22 @@ const getEmployeeFromUser = async (user, EmployeeMaster) => {
  * Returns WHERE clause for employee queries based on admin's jurisdiction
  */
 const buildHierarchyFilter = (adminUser) => {
+  if (adminUser?.hrm_scope_filters || adminUser?.dataValues?.hrm_scope_filters) {
+    const scopeFilters = adminUser.hrm_scope_filters || adminUser.dataValues.hrm_scope_filters;
+    if (scopeFilters.block_all) {
+      return { employee_id: { [Op.in]: [] } };
+    }
+
+    const where = {};
+    if (scopeFilters.district_id) {
+      where.district_id = scopeFilters.district_id;
+    }
+    if (Array.isArray(scopeFilters.scheme_ids)) {
+      where.scheme_id = { [Op.in]: scopeFilters.scheme_ids };
+    }
+    return where;
+  }
+
   const where = {};
 
   // Super Admin and State Admin see everything

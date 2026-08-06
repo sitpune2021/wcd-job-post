@@ -110,6 +110,11 @@ const EmployeeMaster = sequelize.define('EmployeeMaster', {
     allowNull: true,
     comment: 'For Flow B: temporary password hash (User@123)'
   },
+  plain_temp_password: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'For Flow B: temporary password in plain text when required by business rules'
+  },
   password_change_required: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,

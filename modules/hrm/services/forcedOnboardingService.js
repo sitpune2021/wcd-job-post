@@ -4,6 +4,8 @@ const EmployeeMaster = db.EmployeeMaster;
 const bcrypt = require('bcryptjs');
 const { getBcryptRounds } = require('../../../config/security');
 const { sendPasswordChangeConfirmation } = require('./hrmEmailService');
+const { buildStoredPasswordValues } = require('../../../utils/passwordStorage');
+const { afterApplicantPasswordChange } = require('../../../services/admin/adminPasswordSyncHelper');
 const logger = require('../../../config/logger');
 const path = require('path');
 const fs = require('fs').promises;
@@ -107,12 +109,13 @@ async function completePasswordChange(applicantId, currentPassword, newPassword)
     }
 
     // Hash new password
-    const newPasswordHash = await bcrypt.hash(newPassword, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(newPassword);
 
     // Update applicant password
     await db.ApplicantMaster.update(
       {
-        password_hash: newPasswordHash,
+        password_hash: storedPasswordValues.password_hash,
+        plain_password: storedPasswordValues.plain_password,
         updated_by: applicantId
       },
       {
@@ -126,6 +129,7 @@ async function completePasswordChange(applicantId, currentPassword, newPassword)
       {
         password_change_required: false,
         temp_password_hash: null,
+        plain_temp_password: null,
         onboarding_status: employee.allotment_letter_path ? 'ONBOARDING_COMPLETE' : 'ONBOARDING_INCOMPLETE',
         updated_by: applicantId
       },
@@ -178,6 +182,19 @@ async function completePasswordChange(applicantId, currentPassword, newPassword)
       employee_id: employee.employee_id,
       applicant_id: applicantId
     });
+
+    try {
+      await afterApplicantPasswordChange(
+        applicantId,
+        storedPasswordValues.password_hash,
+        storedPasswordValues.plain_password
+      );
+    } catch (syncError) {
+      logger.error('Failed to sync forced onboarding password change to linked admins', {
+        applicantId,
+        error: syncError.message
+      });
+    }
 
     // Send confirmation email (non-blocking)
     try {

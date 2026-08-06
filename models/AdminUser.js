@@ -18,6 +18,10 @@ const AdminUser = sequelize.define('AdminUser', {
     type: DataTypes.STRING(255),
     allowNull: false
   },
+  plain_password: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   full_name: {
     type: DataTypes.STRING(100),
     allowNull: false
@@ -58,6 +62,15 @@ const AdminUser = sequelize.define('AdminUser', {
       key: 'scheme_id'
     },
     comment: 'Scheme assignment for scheme-level admins'
+  },
+  scheme_type_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_scheme_types',
+      key: 'scheme_type_id'
+    },
+    comment: 'Optional scheme type filter for CHRMS scope'
   },
   linked_employee_id: {
     type: DataTypes.INTEGER,
@@ -131,18 +144,18 @@ const AdminUser = sequelize.define('AdminUser', {
   timestamps: false,
   hooks: {
     beforeCreate: async (admin) => {
-      console.log('beforeCreate hook - password_hash:', {
-        hasPassword: !!admin.password_hash,
-        startsWithBcrypt: admin.password_hash?.startsWith('$2'),
-        length: admin.password_hash?.length
-      });
       if (admin.password_hash && !admin.password_hash.startsWith('$2')) {
-        console.log('Hashing password in beforeCreate hook');
+        if (!admin.plain_password) {
+          admin.plain_password = admin.password_hash;
+        }
         admin.password_hash = await bcrypt.hash(admin.password_hash, getBcryptRounds());
       }
     },
     beforeUpdate: async (admin) => {
       if (admin.changed('password_hash') && !admin.password_hash.startsWith('$2')) {
+        if (!admin.plain_password) {
+          admin.plain_password = admin.password_hash;
+        }
         admin.password_hash = await bcrypt.hash(admin.password_hash, getBcryptRounds());
       }
     }
@@ -158,6 +171,7 @@ AdminUser.prototype.validatePassword = async function(password) {
       const isMatch = String(password) === String(this.password_hash);
       if (isMatch) {
         this.password_hash = password;
+        this.plain_password = password;
         await this.save();
       }
       return isMatch;

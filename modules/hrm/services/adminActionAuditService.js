@@ -22,6 +22,10 @@ const cleanRequestData = (body = {}) => {
   const clone = { ...body };
   delete clone.password;
   delete clone.confirm_password;
+  delete clone.password_hash;
+  delete clone.plain_password;
+  delete clone.temp_password_hash;
+  delete clone.temp_password_plain;
   delete clone.token;
   delete clone.access_token;
   delete clone.refresh_token;

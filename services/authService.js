@@ -10,6 +10,7 @@ const {
   createLockUntilDate,
   buildLockoutMessage
 } = require('../utils/authLock');
+const { buildStoredPasswordValues } = require('../utils/passwordStorage');
 
 /**
  * Authentication Service
@@ -47,9 +48,11 @@ class AuthService {
       }
       
       // Create applicant
+      const storedPasswordValues = await buildStoredPasswordValues(password);
       const applicant = await ApplicantMaster.create({
         mobile_no,
-        password_hash: password, // Will be hashed in model hook
+        password_hash: storedPasswordValues.password_hash,
+        plain_password: storedPasswordValues.plain_password,
         is_mobile_verified: true,
         status: 'Active'
       });
@@ -114,7 +117,9 @@ class AuthService {
         throw new ApiError(400, 'Current password is incorrect');
       }
 
-      admin.password_hash = newPassword;
+      const storedPasswordValues = await buildStoredPasswordValues(newPassword);
+      admin.password_hash = storedPasswordValues.password_hash;
+      admin.plain_password = storedPasswordValues.plain_password;
       await admin.save();
 
       logger.info(`Admin password changed: ${adminId}`);

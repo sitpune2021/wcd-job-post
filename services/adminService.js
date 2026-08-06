@@ -17,11 +17,11 @@ const {
   AdminUserScheme,
   EligibilityResult
 } = db;
-const bcrypt = require('bcryptjs');
 const logger = require('../config/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { Op } = require('sequelize');
 const { getRelativePath } = require('../utils/fileUpload');
+const { buildStoredPasswordValues } = require('../utils/passwordStorage');
 
 const normalizeSchemeIds = (schemeIds, fallbackSchemeId) => {
   const rawValues = Array.isArray(schemeIds) ? schemeIds : [];
@@ -55,6 +55,13 @@ const assignedSchemesInclude = {
       required: false
     }
   ]
+};
+
+const assignedSchemeTypeInclude = {
+  model: SchemeType,
+  as: 'schemeType',
+  attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+  required: false
 };
 
 const validateSchemeIds = async (schemeIds, transaction) => {
@@ -111,6 +118,27 @@ const syncAdminSchemeAssignments = async (adminId, schemeIds, currentUserId, tra
   }
 };
 
+const normalizeSchemeTypeId = (schemeTypeId) => {
+  const normalized = Number(schemeTypeId);
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+};
+
+const validateSchemeTypeId = async (schemeTypeId, transaction) => {
+  if (!schemeTypeId) return;
+
+  const exists = await SchemeType.count({
+    where: {
+      scheme_type_id: schemeTypeId,
+      is_deleted: false
+    },
+    transaction
+  });
+
+  if (!exists) {
+    throw new ApiError(400, 'Selected scheme type is invalid');
+  }
+};
+
 /**
  * Admin Service
  * Handles admin user management, dashboard, and application management
@@ -126,8 +154,9 @@ class AdminService {
    * @returns {Promise<Object>} - Created user
    */
   async createUser(data, currentUser) {
-    const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id } = data;
+    const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id, scheme_type_id, linked_employee_id } = data;
     const schemeIds = normalizeSchemeIds(data.scheme_ids, scheme_id);
+    const schemeTypeId = normalizeSchemeTypeId(scheme_type_id);
     const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
     const actorId = getActorId(currentUser);
 
@@ -155,12 +184,14 @@ class AdminService {
       }
 
       await validateSchemeIds(schemeIds, transaction);
+      await validateSchemeTypeId(schemeTypeId, transaction);
 
       // Handle employee linking
       let finalUsername = username;
       let finalEmail = email;
       let finalPassword = password;
       let finalFullName = full_name;
+      let finalPasswordHash = null;
 
       if (linked_employee_id) {
         try {
@@ -179,7 +210,8 @@ class AdminService {
           // Override fields with employee data
           finalUsername = linkedFields.username;
           finalEmail = linkedFields.email;
-          finalPassword = linkedFields.password_hash; // Use employee's password
+          finalPassword = linkedFields.plain_password || linkedFields.plain_temp_password;
+          finalPasswordHash = linkedFields.password_hash;
           finalFullName = linkedFields.full_name;
           
           logger.info(`Admin user will be linked to employee ${linked_employee_id}`);
@@ -189,16 +221,21 @@ class AdminService {
         }
       }
 
+      const storedPasswordValues = finalPassword
+        ? await buildStoredPasswordValues(finalPassword)
+        : { password_hash: finalPasswordHash, plain_password: null };
+
       // Create admin user (model will hash password in beforeCreate hook)
       const user = await AdminUser.create({
         username: finalUsername,
-        password_hash: finalPassword, // Pass plain text, model will hash it
+        ...storedPasswordValues,
         full_name: finalFullName,
         email: finalEmail,
         mobile_no,
         role_id,
         district_id,
         scheme_id: primarySchemeId,
+        scheme_type_id: schemeTypeId,
         linked_employee_id,
         created_by: actorId,
         is_active: true
@@ -218,8 +255,8 @@ class AdminService {
 
       // Fetch user with role
       const createdUser = await AdminUser.findByPk(user.admin_id, {
-        attributes: { exclude: ['password_hash'] },
-        include: [{ model: Role, as: 'role' }, assignedSchemesInclude]
+        attributes: { exclude: ['password_hash', 'plain_password'] },
+        include: [{ model: Role, as: 'role' }, assignedSchemesInclude, assignedSchemeTypeInclude]
       });
 
       return createdUser;
@@ -266,10 +303,11 @@ class AdminService {
 
       const { count, rows } = await AdminUser.findAndCountAll({
         where,
-        attributes: { exclude: ['password_hash'] },
+        attributes: { exclude: ['password_hash', 'plain_password'] },
         include: [
           { model: Role, as: 'role' },
-          assignedSchemesInclude
+          assignedSchemesInclude,
+          assignedSchemeTypeInclude
         ],
         distinct: true,
         order: [['created_at', 'DESC']],
@@ -302,10 +340,11 @@ class AdminService {
     try {
       const user = await AdminUser.findOne({
         where: { admin_id: userId, is_deleted: false },
-        attributes: { exclude: ['password_hash'] },
+        attributes: { exclude: ['password_hash', 'plain_password'] },
         include: [
           { model: Role, as: 'role' },
-          assignedSchemesInclude
+          assignedSchemesInclude,
+          assignedSchemeTypeInclude
         ]
       });
 
@@ -335,8 +374,9 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, scheme_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
+    const { full_name, email, mobile_no, role_id, district_id, scheme_id, scheme_type_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
     const hasSchemeIdsPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_ids');
+    const hasSchemeTypeIdPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_type_id');
     const actorId = getActorId(currentUser);
     let transaction;
 
@@ -379,8 +419,12 @@ class AdminService {
       const schemeIds = hasSchemeIdsPayload
         ? normalizeSchemeIds(data.scheme_ids, null)
         : normalizeSchemeIds([], scheme_id !== undefined ? scheme_id : user.scheme_id);
+      const schemeTypeId = hasSchemeTypeIdPayload
+        ? normalizeSchemeTypeId(data.scheme_type_id)
+        : normalizeSchemeTypeId(user.scheme_type_id);
       const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
       await validateSchemeIds(schemeIds, transaction);
+      await validateSchemeTypeId(schemeTypeId, transaction);
 
       // Prepare update data
       const updateData = {
@@ -390,6 +434,7 @@ class AdminService {
         role_id: role_id || user.role_id,
         district_id: district_id !== undefined ? district_id : user.district_id,
         scheme_id: hasSchemeIdsPayload || scheme_id !== undefined ? primarySchemeId : user.scheme_id,
+        scheme_type_id: hasSchemeTypeIdPayload ? schemeTypeId : user.scheme_type_id,
         linked_employee_id: linked_employee_id !== undefined ? linked_employee_id : user.linked_employee_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };
@@ -434,7 +479,13 @@ class AdminService {
           updateData.username = linkedFields.username;
           updateData.email = linkedFields.email;
           updateData.full_name = linkedFields.full_name;
-          updateData.password_hash = linkedFields.password_hash; // Use employee's password
+          const linkedPlainPassword = linkedFields.plain_password || linkedFields.plain_temp_password;
+          if (linkedPlainPassword) {
+            Object.assign(updateData, await buildStoredPasswordValues(linkedPlainPassword));
+          } else {
+            updateData.password_hash = linkedFields.password_hash;
+            updateData.plain_password = user.plain_password || null;
+          }
           
           logger.info(`Admin user ${user.username} linked to employee ${linked_employee_id}`);
         } catch (error) {
@@ -445,7 +496,7 @@ class AdminService {
       } else {
         // Handle password update if provided and not empty (model will hash it in beforeUpdate hook)
         if (password && password.trim() !== '') {
-          updateData.password_hash = password; // Model will hash this in beforeUpdate hook
+          Object.assign(updateData, await buildStoredPasswordValues(password.trim()));
           logger.info(`Password updated for user: ${user.username} by ${currentUser.username || currentUser.id}`);
         }
       }
@@ -540,9 +591,7 @@ class AdminService {
         }
       }
 
-      // Hash new password
-      const password_hash = await bcrypt.hash(newPassword, getBcryptRounds());
-      await user.update({ password_hash });
+      await user.update(await buildStoredPasswordValues(newPassword));
 
       logger.info(`Password reset for: ${user.username} by ${currentUser.username || currentUser.id}`);
 

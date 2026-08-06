@@ -5,6 +5,8 @@ const { buildEmployeeWhereClause } = require('../middleware/hrmHierarchy');
 const { ApiError } = require('../../../middleware/errorHandler');
 const bcrypt = require('bcryptjs');
 const { getBcryptRounds } = require('../../../config/security');
+const { buildStoredPasswordValues } = require('../../../utils/passwordStorage');
+const { afterApplicantPasswordChange } = require('../../../services/admin/adminPasswordSyncHelper');
 const logger = require('../../../config/logger');
 const { Op } = require('sequelize');
 const fs = require('fs');
@@ -782,13 +784,14 @@ async function changeEmployeePassword(applicantId, currentPassword, newPassword)
     }
 
     // Hash new password
-    const passwordHash = await bcrypt.hash(newPassword, getBcryptRounds());
+    const storedPasswordValues = await buildStoredPasswordValues(newPassword);
     logger.info('New password hashed successfully');
 
     // Update applicant password
     const applicantUpdateResult = await db.ApplicantMaster.update(
       { 
-        password_hash: passwordHash,
+        password_hash: storedPasswordValues.password_hash,
+        plain_password: storedPasswordValues.plain_password,
         updated_at: new Date()
       },
       { where: { applicant_id: applicantId } }
@@ -804,6 +807,7 @@ async function changeEmployeePassword(applicantId, currentPassword, newPassword)
       { 
         password_change_required: false, // Set to false since password has been changed
         temp_password_hash: null, // Clear temp password hash
+        plain_temp_password: null,
         updated_at: new Date()
       },
       { where: { employee_id: employee.employee_id } }
@@ -817,6 +821,19 @@ async function changeEmployeePassword(applicantId, currentPassword, newPassword)
     });
 
     logger.info(`Password changed successfully for employee: ${employee.employee_id}`);
+
+    try {
+      await afterApplicantPasswordChange(
+        applicantId,
+        storedPasswordValues.password_hash,
+        storedPasswordValues.plain_password
+      );
+    } catch (syncError) {
+      logger.error('Failed to sync employee password change to linked admins', {
+        applicantId,
+        error: syncError.message
+      });
+    }
 
     return { success: true, message: 'Password changed successfully' };
   } catch (error) {

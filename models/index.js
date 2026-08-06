@@ -329,7 +329,9 @@ db.PostMaster.belongsTo(db.DistrictMaster, { foreignKey: 'district_id', as: 'dis
 db.DistrictMaster.hasMany(db.PostMaster, { foreignKey: 'district_id', as: 'posts' });
 
 db.AdminUser.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
+db.AdminUser.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 db.Scheme.hasMany(db.AdminUser, { foreignKey: 'scheme_id', as: 'admins' });
+db.SchemeType.hasMany(db.AdminUser, { foreignKey: 'scheme_type_id', as: 'admins' });
 db.AdminUser.belongsToMany(db.Scheme, {
   through: db.AdminUserScheme,
   foreignKey: 'admin_id',

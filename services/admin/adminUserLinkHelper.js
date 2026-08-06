@@ -18,6 +18,8 @@ const fetchLinkedEmployeeDetails = async (employeeId) => {
         LOWER(am.email) AS normalized_email,
         am.email,
         am.password_hash,
+        am.plain_password,
+        e.plain_temp_password,
         ap.full_name
        FROM ms_employee_master e
        JOIN ms_applicant_master am ON am.applicant_id = e.applicant_id
@@ -94,6 +96,8 @@ const buildLinkedAdminFields = (employee, fallbackName) => {
     email: employee.email,
     full_name: fullName,
     password_hash: employee.password_hash,
+    plain_password: employee.plain_password,
+    plain_temp_password: employee.plain_temp_password,
     district_id: employee.district_id || null,
     scheme_id: employee.scheme_id || null
   };
