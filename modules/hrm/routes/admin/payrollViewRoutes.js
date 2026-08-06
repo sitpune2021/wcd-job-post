@@ -19,6 +19,7 @@ const payslipQuerySchema = Joi.object({
   year: Joi.number().integer().min(2020).max(2100).required(),
   employee_id: Joi.number().integer().optional(),
   district_id: Joi.number().integer().optional(),
+  scheme_type_id: Joi.number().integer().optional(),
   scheme_id: Joi.number().integer().optional(),
   search: Joi.string().max(100).optional(),
   format: Joi.string().valid('excel', 'pdf').optional(),
@@ -98,12 +99,16 @@ router.get('/payslips/export', async (req, res, next) => {
       { header: 'IFSC Code', key: 'ifsc_code', width: 16 },
       { header: 'State', key: 'state', width: 18 },
       { header: 'District', key: 'district', width: 18 },
+      { header: 'Scheme Type', key: 'scheme_type_name', width: 22 },
+      { header: 'Scheme Name', key: 'scheme_name', width: 28 },
       { header: 'Present Days', key: 'present_days', width: 14 },
       { header: 'Absent Days', key: 'absent_days', width: 14 },
       { header: 'Total Days', key: 'total_days', width: 14 },
       { header: 'Weekly Off Days', key: 'weekly_off_days', width: 16 },
       { header: 'Leave Days', key: 'leave_days', width: 14 },
       { header: 'Half Days', key: 'half_days', width: 14 },
+      { header: 'Paid Days', key: 'paid_days', width: 14 },
+      { header: 'Deducted Days', key: 'deducted_days', width: 16 },
       { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
       { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
       { header: 'Total', key: 'total_amount', width: 16 }
@@ -119,9 +124,11 @@ router.get('/payslips/export', async (req, res, next) => {
     } else if (format === 'pdf') {
       const { sendPdfFromHtml, sanitizeFileName, buildSimpleReportHtml } = require('../../../../utils/reportExport');
       const rows = await simplePayrollViewService.getPayrollPaymentLogRows(req.user, value);
+      const filterLabels = await simplePayrollViewService.resolvePayrollFilterLabels(value);
       const subtitleParts = [`Month: ${value.month}/${value.year}`];
-      if (value.district_id) subtitleParts.push(`District: ${value.district_id}`);
-      if (value.scheme_id) subtitleParts.push(`Scheme: ${value.scheme_id}`);
+      if (filterLabels.district_name) subtitleParts.push(`District: ${filterLabels.district_name}`);
+      if (filterLabels.scheme_type_name) subtitleParts.push(`Scheme Type: ${filterLabels.scheme_type_name}`);
+      if (filterLabels.scheme_name) subtitleParts.push(`Scheme: ${filterLabels.scheme_name}`);
       if (value.employee_id) subtitleParts.push(`Employee ID: ${value.employee_id}`);
       if (value.search) subtitleParts.push(`Search: ${value.search}`);
 

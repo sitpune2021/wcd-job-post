@@ -88,6 +88,54 @@ const getSchemeInclude = () => ({
   include: [getSchemeTypeInclude()]
 });
 
+const resolvePayrollFilterLabels = async (filters = {}) => {
+  const labels = {
+    district_name: null,
+    scheme_type_name: null,
+    scheme_name: null
+  };
+
+  if (filters.district_id) {
+    const district = await DistrictMaster.findOne({
+      where: {
+        district_id: filters.district_id,
+        is_deleted: false
+      },
+      attributes: ['district_name']
+    });
+    labels.district_name = district?.district_name || null;
+  }
+
+  if (filters.scheme_id) {
+    const scheme = await Scheme.findOne({
+      where: {
+        scheme_id: filters.scheme_id,
+        is_deleted: false
+      },
+      attributes: ['scheme_name'],
+      include: [{
+        model: SchemeType,
+        as: 'schemeType',
+        attributes: ['scheme_name'],
+        required: false
+      }]
+    });
+    labels.scheme_name = scheme?.scheme_name || null;
+    labels.scheme_type_name = scheme?.schemeType?.scheme_name || null;
+  } else if (filters.scheme_type_id) {
+    const schemeType = await SchemeType.findOne({
+      where: {
+        scheme_type_id: filters.scheme_type_id,
+        is_deleted: false
+      },
+      attributes: ['scheme_name']
+    });
+    labels.scheme_type_name = schemeType?.scheme_name || null;
+  }
+
+  return labels;
+};
+
 const getEmployeeIncludes = () => [
   {
     model: PostMaster,
@@ -129,7 +177,7 @@ const getEmployeeIncludes = () => [
 ];
 
 const buildPayrollWhere = (adminUser, filters) => {
-  const { employee_id, district_id, scheme_id, search } = filters;
+  const { employee_id, district_id, scheme_id, scheme_type_id, search } = filters;
   const where = {
     is_deleted: false,
     is_active: true,
@@ -139,13 +187,16 @@ const buildPayrollWhere = (adminUser, filters) => {
   if (employee_id) where.employee_id = employee_id;
   if (district_id) where.district_id = district_id;
   if (scheme_id) where.scheme_id = scheme_id;
+  if (scheme_type_id) where['$scheme.scheme_type_id$'] = scheme_type_id;
 
   if (search) {
     const pattern = `%${String(search).trim()}%`;
     where[Op.or] = [
       { employee_code: { [Op.iLike]: pattern } },
       { '$applicant.personal.full_name$': { [Op.iLike]: pattern } },
-      { '$post.post_name$': { [Op.iLike]: pattern } }
+      { '$post.post_name$': { [Op.iLike]: pattern } },
+      { '$scheme.scheme_name$': { [Op.iLike]: pattern } },
+      { '$district.district_name$': { [Op.iLike]: pattern } }
     ];
   }
 
@@ -499,6 +550,9 @@ const toEmployeeListRow = (payslipData) => ({
   weekly_off_days: payslipData.attendance.weekly_off_days || 0,
   leave_days: payslipData.attendance.leave_days || 0,
   half_days: payslipData.attendance.half_days || 0,
+  paid_days: payslipData.attendance.paid_days || 0,
+  deducted_days: payslipData.attendance.deducted_days || 0,
+  future_days: payslipData.attendance.future_days || 0,
   deduction_breakdown: payslipData.salary.deduction_breakdown
 });
 
@@ -596,7 +650,7 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
  */
 const getEmployeesPayslips = async (adminUser, filters) => {
   try {
-    const { month, year, page = 1, limit = 10, employee_id, district_id, scheme_id, search } = filters;
+    const { month, year, page = 1, limit = 10, employee_id, district_id, scheme_id, scheme_type_id, search } = filters;
 
     if (!month || !year) {
       throw ApiError.badRequest('Month and year are required');
@@ -630,9 +684,11 @@ const getEmployeesPayslips = async (adminUser, filters) => {
         year,
         employee_id,
         district_id,
+        scheme_type_id,
         scheme_id,
         search
-      }
+      },
+      filter_labels: await resolvePayrollFilterLabels(filters)
     };
   } catch (error) {
     logger.error('Error getting employees payslips:', error);
@@ -659,6 +715,7 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     ifsc_code: payslip.bank.ifsc_code,
     state: payslip.bank.state,
     district: payslip.bank.district || payslip.employee.district_name,
+    scheme_type_name: payslip.employee.scheme_type_name,
     scheme_name: payslip.employee.scheme_name,
     present_days: payslip.attendance.present_days || 0,
     absent_days: payslip.attendance.absent_days || 0,
@@ -666,12 +723,13 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     weekly_off_days: payslip.attendance.weekly_off_days || 0,
     leave_days: payslip.attendance.leave_days || 0,
     half_days: payslip.attendance.half_days || 0,
+    paid_days: payslip.attendance.paid_days || 0,
+    deducted_days: payslip.attendance.deducted_days || 0,
     center_share_payment_amount: payslip.payment_distribution.center_share_amount,
     state_share_payment_amount: payslip.payment_distribution.state_share_amount,
     total_amount: payslip.payment_distribution.total_amount,
     employee_code: payslip.employee.employee_code,
-    post_name: payslip.employee.post_name,
-    scheme_type_name: payslip.employee.scheme_type_name
+    post_name: payslip.employee.post_name
   }));
 };
 
@@ -758,5 +816,6 @@ module.exports = {
   getEmployeesPayslips,
   getPayrollPaymentLogRows,
   getMyPayslip,
-  calculateAttendanceSummary
+  calculateAttendanceSummary,
+  resolvePayrollFilterLabels
 };
