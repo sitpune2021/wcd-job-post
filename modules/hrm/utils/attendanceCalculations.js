@@ -19,6 +19,7 @@ const countAttendanceRecords = (attendanceRecords = []) => {
     absent: 0,
     on_leave: 0,
     half_day: 0,
+    weekly_off: 0,
     holiday: 0
   };
 
@@ -35,6 +36,9 @@ const countAttendanceRecords = (attendanceRecords = []) => {
         break;
       case 'HALF_DAY':
         counts.half_day += 1;
+        break;
+      case 'WEEKLY_OFF':
+        counts.weekly_off += 1;
         break;
       case 'HOLIDAY':
         counts.holiday += 1;
@@ -79,12 +83,13 @@ const calculatePaidDays = (present, halfDays, onLeave) => {
  * @returns {Object} Attendance summary
  */
 const buildEmployeeAttendanceSummary = (employee, workingDays) => {
-  const present = parseInt(employee.present_count) || 0;
-  const absent = parseInt(employee.absent_count) || 0;
-  const onLeave = parseInt(employee.leave_count) || 0;
-  const halfDayCount = parseInt(employee.half_day_count) || 0;
+  const present = parseFloat(employee.present_count) || 0;
+  const absent = parseFloat(employee.absent_count) || 0;
+  const onLeave = parseFloat(employee.leave_count) || 0;
+  const halfDayCount = parseFloat(employee.half_day_count) || 0;
   const halfDayDays = halfDayCount * 0.5;
-  const holiday = parseInt(employee.holiday_count) || 0;
+  const weeklyOff = parseFloat(employee.weekly_off_count) || 0;
+  const holiday = parseFloat(employee.holiday_count) || 0;
 
   const attendancePercentage = calculateAttendancePercentage(present, halfDayCount, workingDays);
 
@@ -102,6 +107,7 @@ const buildEmployeeAttendanceSummary = (employee, workingDays) => {
     on_leave: onLeave,
     half_day: halfDayCount,
     half_day_days: halfDayDays,
+    weekly_off: weeklyOff,
     holiday,
     attendance_percentage: attendancePercentage
   };
@@ -119,6 +125,7 @@ const buildAggregatedSummary = (employeeSummaries, workingDays) => {
   const total_on_leave = employeeSummaries.reduce((sum, e) => sum + e.on_leave, 0);
   const total_half_day = employeeSummaries.reduce((sum, e) => sum + (e.half_day || 0), 0);
   const total_half_day_days = employeeSummaries.reduce((sum, e) => sum + (e.half_day_days || 0), 0);
+  const total_weekly_off = employeeSummaries.reduce((sum, e) => sum + (e.weekly_off || 0), 0);
   const total_holiday = employeeSummaries.reduce((sum, e) => sum + (e.holiday || 0), 0);
 
   const total_employees = employeeSummaries.length;
@@ -136,6 +143,7 @@ const buildAggregatedSummary = (employeeSummaries, workingDays) => {
     total_on_leave,
     total_half_day,
     total_half_day_days,
+    total_weekly_off,
     total_holiday,
     total_working,
     attendance_percentage: totalAttendancePercentage
@@ -153,6 +161,7 @@ const getAttendanceCountAttributes = () => [
   [fn('COUNT', literal("CASE WHEN status = 'ABSENT' THEN 1 END")), 'absent_count'],
   [fn('COUNT', literal("CASE WHEN status = 'ON_LEAVE' THEN 1 END")), 'leave_count'],
   [fn('COUNT', literal("CASE WHEN status = 'HALF_DAY' THEN 1 END")), 'half_day_count'],
+  [fn('COUNT', literal("CASE WHEN status = 'WEEKLY_OFF' THEN 1 END")), 'weekly_off_count'],
   [fn('COUNT', literal("CASE WHEN status = 'HOLIDAY' THEN 1 END")), 'holiday_count']
 ];
 

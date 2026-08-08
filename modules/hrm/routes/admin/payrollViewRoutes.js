@@ -98,7 +98,8 @@ router.get('/payslips/export', async (req, res, next) => {
       { header: 'Account Number', key: 'account_number', width: 22 },
       { header: 'IFSC Code', key: 'ifsc_code', width: 16 },
       { header: 'State', key: 'state', width: 18 },
-      { header: 'District', key: 'district', width: 18 },
+      { header: 'Bank District', key: 'district', width: 18 },
+      { header: 'Employee District', key: 'employee_district', width: 18 },
       { header: 'Scheme Type', key: 'scheme_type_name', width: 22 },
       { header: 'Scheme Name', key: 'scheme_name', width: 28 },
       { header: 'Present Days', key: 'present_days', width: 14 },
@@ -107,8 +108,6 @@ router.get('/payslips/export', async (req, res, next) => {
       { header: 'Weekly Off Days', key: 'weekly_off_days', width: 16 },
       { header: 'Leave Days', key: 'leave_days', width: 14 },
       { header: 'Half Days', key: 'half_days', width: 14 },
-      { header: 'Paid Days', key: 'paid_days', width: 14 },
-      { header: 'Deducted Days', key: 'deducted_days', width: 16 },
       { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
       { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
       { header: 'Total', key: 'total_amount', width: 16 }

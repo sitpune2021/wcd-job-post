@@ -11,6 +11,7 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
+const roundRupee = (value) => Math.round(toNumber(value));
 
 const resolveEmployeeMonthlyPay = (employee) => {
   const employeePay = toNumber(employee?.employee_pay, 0);
@@ -118,10 +119,12 @@ const calculateSalary = (employee, attendance) => {
     const deductedDays = Math.min(Math.max(toNumber(attendance?.deducted_days, 0), 0), salaryDays);
     const paidDays = Math.min(Math.max(toNumber(attendance?.paid_days, calculatePaidDays(salaryDays, deductedDays)), 0), salaryDays);
     const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
-    const perDaySalary = monthlyPay / salaryDays;
-    const earnedTillDate = perDaySalary * paidDays;
-    const attendanceDeduction = Math.min(perDaySalary * deductedDays, monthlyPay);
-    const futurePendingAmount = Math.min(perDaySalary * futureDays, monthlyPay);
+    // Payroll uses a whole-rupee day rate. Any rounding difference is absorbed
+    // into the pending/deduction remainder so the month never exceeds monthly pay.
+    const perDaySalary = roundRupee(monthlyPay / salaryDays);
+    const earnedTillDate = Math.min(perDaySalary * paidDays, monthlyPay);
+    const attendanceDeduction = Math.min(perDaySalary * deductedDays, Math.max(monthlyPay - earnedTillDate, 0));
+    const futurePendingAmount = Math.max(monthlyPay - earnedTillDate - attendanceDeduction, 0);
     const calculatedSalary = Math.max(earnedTillDate, 0);
     const deductions = calculateDeductions(employee, monthlyPay);
     const netSalary = Math.max(calculatedSalary - deductions.totalDeductions, 0);

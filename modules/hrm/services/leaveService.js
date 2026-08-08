@@ -116,22 +116,8 @@ const applyLeave = async (user, data) => {
     throw new ApiError(400, 'Cannot apply for leave on past dates.');
   }
 
-  // Check if applying leave on a holiday
-  const { safeHolidayCheck } = require('../utils/safeQueryHelpers');
-  const start = new Date(data.from_date);
-  const end = new Date(data.to_date);
-  
-  // Check each date in the range for holidays
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dateStr = d.toISOString().split('T')[0];
-    const holiday = await safeHolidayCheck(dateStr);
-    
-    if (holiday) {
-      throw new ApiError(400, `Cannot apply leave on ${d.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} as it is a holiday: ${holiday.holiday_name}. Leave cannot be granted for holidays.`);
-    }
-  }
-
-  // Calculate days (already excludes Sundays)
+  // Sundays and holidays are working/payroll days in CHRMS, so leave is
+  // counted over the full calendar date range.
   const totalDays = await calculateLeaveDays(data.from_date, data.to_date, data.is_half_day);
   if (totalDays <= 0) {
     throw new ApiError(400, 'Invalid date range. Cannot apply leave only on non-working days.');
@@ -598,7 +584,6 @@ const actionLeave = async (adminUser, leaveId, data) => {
       const start = new Date(leave.from_date);
       const end = new Date(leave.to_date);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (d.getDay() === 0) continue; // Skip Sundays
         const dateStr = d.toISOString().split('T')[0];
         
         const leaveRemark = isPaid 

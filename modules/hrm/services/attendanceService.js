@@ -14,6 +14,7 @@ const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
 const { buildEmployeeAttendanceSummary, buildAggregatedSummary, getAttendanceCountAttributes } = require('../utils/attendanceCalculations');
 const { buildQueryOptions, buildResponse, COMMON_FIELDS } = require('../utils/hrmFilterBuilder');
 const { validateGeofence, detectDevice, getAllowedRadius } = require('../utils/geofencing');
+const { calculateAttendanceSummaries } = require('./simplePayrollViewService');
 
 /**
  * Format attendance record for consistent API response
@@ -756,11 +757,11 @@ const getAttendanceSummary = async (adminUser, query) => {
       workingDays = 261;
     }
   } else {
-    // Monthly aggregation (existing logic)
+    // Monthly aggregation follows payroll policy: every calendar day in the
+    // contract overlap is payable/deductible, including Sundays and holidays.
     startDate = new Date(year, month - 1, 1);
     endDate = new Date(year, month, 0);
-    const workingDaysResult = await getWorkingDaysInMonth(month, year);
-    workingDays = workingDaysResult.workingDays;
+    workingDays = endDate.getDate();
   }
 
   // Build employee filter
@@ -838,7 +839,7 @@ const getAttendanceSummary = async (adminUser, query) => {
   const { offset } = getPagination({ page, limit });
   const employees = await EmployeeMaster.findAll({
     where: employeeFilter,
-    attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id', 'post_id'],
+    attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id', 'post_id', 'contract_start_date', 'contract_end_date'],
     include: [
       {
         model: db.DistrictMaster,
@@ -889,21 +890,36 @@ const getAttendanceSummary = async (adminUser, query) => {
     [Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
   };
 
-  // Get attendance counts per employee using centralized attributes
-  const attendanceCounts = await Attendance.findAll({
-    where: {
-      employee_id: { [Op.in]: employees.map(e => e.employee_id) },
-      attendance_date: dateRange,
-      is_deleted: false
-    },
-    attributes: getAttendanceCountAttributes(),
-    group: ['employee_id']
-  });
-
   const countMap = {};
-  attendanceCounts.forEach(ac => {
-    countMap[ac.employee_id] = ac.dataValues;
-  });
+  if (!yearly) {
+    const payrollStyleSummaries = await calculateAttendanceSummaries(employees, month, year);
+    payrollStyleSummaries.forEach((summary, employeeId) => {
+      countMap[employeeId] = {
+        present_count: summary.present_days,
+        absent_count: summary.absent_days,
+        leave_count: summary.leave_days,
+        half_day_count: summary.half_days,
+        weekly_off_count: summary.weekly_off_days,
+        holiday_count: 0,
+        working_days: summary.working_days || summary.salary_days || workingDays
+      };
+    });
+  } else {
+    // Yearly view remains an aggregate of actual saved attendance records.
+    const attendanceCounts = await Attendance.findAll({
+      where: {
+        employee_id: { [Op.in]: employees.map(e => e.employee_id) },
+        attendance_date: dateRange,
+        is_deleted: false
+      },
+      attributes: getAttendanceCountAttributes(),
+      group: ['employee_id']
+    });
+
+    attendanceCounts.forEach(ac => {
+      countMap[ac.employee_id] = ac.dataValues;
+    });
+  }
 
   
   // Build per-employee result using centralized function
@@ -924,7 +940,7 @@ const getAttendanceSummary = async (adminUser, query) => {
       ...counts
     };
     
-    return buildEmployeeAttendanceSummary(employeeData, workingDays);
+    return buildEmployeeAttendanceSummary(employeeData, counts.working_days || workingDays);
   });
 
   // Build aggregated summary using centralized function
@@ -1022,16 +1038,6 @@ const markAttendanceByAdmin = async (adminUser, data) => {
         if (dateStr < employee.contract_start_date || dateStr > employee.contract_end_date) {
           throw new ApiError(403, `Cannot mark attendance outside contract period for employee ${employee.employee_code}. Contract: ${employee.contract_start_date} to ${employee.contract_end_date}`);
         }
-      }
-      
-      // Check for holidays
-      const holiday = await Holiday.findOne({
-        where: { holiday_date: dateStr, is_active: true, is_deleted: false },
-        transaction: t
-      });
-
-      if (holiday && status !== 'HOLIDAY') {
-        throw new ApiError(400, `Cannot mark attendance on holiday (${holiday.holiday_name}). Please mark as HOLIDAY or choose another date.`);
       }
       
       // Check if attendance already exists
@@ -1692,116 +1698,233 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
       return [];
     }
 
-    const where = {
+    let startDate;
+    let endDate;
+    if (from_date && to_date) {
+      startDate = new Date(from_date);
+      endDate = new Date(to_date);
+    } else if (month && year) {
+      startDate = new Date(year, month - 1, 1);
+      endDate = new Date(year, month, 0);
+    } else {
+      throw ApiError.badRequest('Month/year or date range is required for attendance PDF');
+    }
+
+    const startDateText = startDate.toISOString().split('T')[0];
+    const endDateText = endDate.toISOString().split('T')[0];
+
+    const employeeWhere = {
       employee_id: { [Op.in]: employeeIds },
-      is_deleted: false
+      is_deleted: false,
+      is_active: true
     };
 
-    // Date filtering - support both month/year and date range
-    if (from_date && to_date) {
-      // Date range filtering
-      where.attendance_date = { [Op.between]: [from_date, to_date] };
-    } else if (month && year) {
-      // Month/year filtering (existing logic)
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
-      where.attendance_date = { [Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]] };
-    }
-
-    // Add filters
     if (district_id) {
-      where['$employee.district_id$'] = parseInt(district_id);
+      employeeWhere.district_id = parseInt(district_id, 10);
     }
 
-    // Always apply scheme_id filter if provided
     if (scheme_id) {
-      where['$employee.scheme_id$'] = parseInt(scheme_id);
+      employeeWhere.scheme_id = parseInt(scheme_id, 10);
     }
 
-    // Always apply scheme_type_id filter if provided
     if (query.scheme_type_id) {
-      where['$employee.scheme.scheme_type_id$'] = parseInt(query.scheme_type_id);
+      employeeWhere['$scheme.scheme_type_id$'] = parseInt(query.scheme_type_id, 10);
     }
 
-    // Handle filter_type for radio button selections
     if (query.filter_type === 'osc_only') {
-      where['$employee.scheme.schemeType.scheme_code$'] = 'OSC';
+      employeeWhere['$scheme.schemeType.scheme_code$'] = 'OSC';
     } else if (query.filter_type === 'hub_only') {
-      where['$employee.scheme.schemeType.scheme_code$'] = 'HUB';
+      employeeWhere['$scheme.schemeType.scheme_code$'] = 'HUB';
     }
 
     if (employee_id) {
-      if (!employeeIds.includes(parseInt(employee_id))) {
+      const requestedEmployeeId = parseInt(employee_id, 10);
+      if (!employeeIds.includes(requestedEmployeeId)) {
         throw new ApiError(403, 'You do not have access to this employee.');
       }
-      where.employee_id = parseInt(employee_id);
+      employeeWhere.employee_id = requestedEmployeeId;
     }
 
-    // Search functionality
     if (query.search && query.search.trim()) {
       const searchTerm = query.search.trim();
-      where[Op.and] = [
-        {
-          [Op.or]: [
-            { '$employee.employee_code$': { [Op.iLike]: `%${searchTerm}%` } },
-            { '$employee.applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } }
-          ]
-        }
+      employeeWhere[Op.or] = [
+        { employee_code: { [Op.iLike]: `%${searchTerm}%` } },
+        { '$applicant.personal.full_name$': { [Op.iLike]: `%${searchTerm}%` } },
+        { '$district.district_name$': { [Op.iLike]: `%${searchTerm}%` } },
+        { '$scheme.scheme_name$': { [Op.iLike]: `%${searchTerm}%` } },
+        { '$scheme.schemeType.scheme_code$': { [Op.iLike]: `%${searchTerm}%` } }
       ];
     }
 
-    const rawRecords = await Attendance.findAll({
-      where,
-      attributes: [
-        'attendance_id', 'attendance_date', 'check_in_time', 'check_out_time', 
-        'status', 'latitude', 'longitude', 'employee_id', 'total_work_hours', 'remarks'
-      ],
+    const employees = await EmployeeMaster.findAll({
+      where: employeeWhere,
+      attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id', 'contract_start_date', 'contract_end_date'],
       include: [
         {
-          model: EmployeeMaster,
-          as: 'employee',
-          attributes: ['employee_code', 'district_id', 'scheme_id'],
+          model: db.ApplicantMaster,
+          as: 'applicant',
+          attributes: ['email'],
+          required: false,
           include: [
             {
-              model: db.ApplicantMaster,
-              as: 'applicant',
-              attributes: ['email'],
-              include: [
-                {
-                  model: db.ApplicantPersonal,
-                  as: 'personal',
-                  attributes: ['full_name'],
-                  required: false
-                }
-              ],
+              model: db.ApplicantPersonal,
+              as: 'personal',
+              attributes: ['full_name'],
               required: false
-            },
-            {
-              model: db.DistrictMaster,
-              as: 'district',
-              attributes: ['district_name'],
-              required: false
-            },
-            {
-              model: db.Scheme,
-              as: 'scheme',
-              attributes: ['scheme_name', 'scheme_type_id'],
-              required: false,
-              include: [{
-                model: db.SchemeType,
-                as: 'schemeType',
-                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
-                required: false
-              }]
             }
           ]
+        },
+        {
+          model: db.DistrictMaster,
+          as: 'district',
+          attributes: ['district_name'],
+          required: false
+        },
+        {
+          model: db.Scheme,
+          as: 'scheme',
+          attributes: ['scheme_name', 'scheme_type_id'],
+          required: false,
+          include: [{
+            model: db.SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: false
+          }]
         }
       ],
-      order: [['attendance_date', 'ASC'], ['employee_id', 'ASC']], // Order for better PDF layout
-      limit: Math.min(query.pdf_limit || 5000, 10000) // Configurable limit with safety cap
+      subQuery: false,
+      order: [['employee_code', 'ASC']]
     });
 
-    return rawRecords.map(formatAttendanceRecord);
+    const selectedEmployeeIds = employees.map(employee => employee.employee_id);
+    if (selectedEmployeeIds.length === 0) {
+      return [];
+    }
+
+    const [attendanceRecords, approvedLeaves, approvedWeeklyOffs] = await Promise.all([
+      Attendance.findAll({
+        where: {
+          employee_id: { [Op.in]: selectedEmployeeIds },
+          attendance_date: { [Op.between]: [startDateText, endDateText] },
+          is_deleted: false
+        },
+        attributes: [
+          'attendance_id', 'attendance_date', 'check_in_time', 'check_out_time',
+          'status', 'latitude', 'longitude', 'employee_id', 'total_work_hours', 'remarks'
+        ]
+      }),
+      LeaveApplication.findAll({
+        where: {
+          employee_id: { [Op.in]: selectedEmployeeIds },
+          status: 'APPROVED',
+          is_deleted: false,
+          from_date: { [Op.lte]: endDateText },
+          to_date: { [Op.gte]: startDateText }
+        },
+        attributes: ['employee_id', 'from_date', 'to_date', 'is_half_day', 'is_paid', 'reason']
+      }),
+      db.HrmWeeklyOffClaim.findAll({
+        where: {
+          employee_id: { [Op.in]: selectedEmployeeIds },
+          claim_status: 'APPROVED',
+          claimed_off_date: { [Op.between]: [startDateText, endDateText] }
+        },
+        attributes: ['employee_id', 'claimed_off_date']
+      })
+    ]);
+
+    const attendanceByEmployeeDate = new Map();
+    attendanceRecords.forEach(record => {
+      attendanceByEmployeeDate.set(`${record.employee_id}:${record.attendance_date}`, record);
+    });
+
+    const weeklyOffByEmployeeDate = new Set();
+    approvedWeeklyOffs.forEach(claim => {
+      weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claim.claimed_off_date}`);
+    });
+
+    const leaveByEmployeeDate = new Map();
+    approvedLeaves.forEach(leave => {
+      const leaveStart = new Date(leave.from_date);
+      const leaveEnd = new Date(leave.to_date);
+      const effectiveStart = leaveStart > startDate ? leaveStart : startDate;
+      const effectiveEnd = leaveEnd < endDate ? leaveEnd : endDate;
+      for (let d = new Date(effectiveStart); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
+        const dateText = d.toISOString().split('T')[0];
+        leaveByEmployeeDate.set(`${leave.employee_id}:${dateText}`, leave);
+      }
+    });
+
+    const todayText = getCurrentDate();
+    const rows = [];
+    const maxRows = Math.min(query.pdf_limit || 5000, 10000);
+
+    const pushRow = (employee, dateText, source = {}) => {
+      const latitude = source.latitude;
+      const longitude = source.longitude;
+      rows.push({
+        attendance_id: source.attendance_id || null,
+        employee_id: employee.employee_id,
+        attendance_date: dateText,
+        check_in_time: source.check_in_time || null,
+        check_out_time: source.check_out_time || null,
+        total_work_hours: source.total_work_hours || null,
+        status: source.status,
+        latitude,
+        longitude,
+        employee_code: employee.employee_code || '',
+        employee_name: employee.applicant?.personal?.full_name || '',
+        employee_email: employee.applicant?.email || '',
+        district_name: employee.district?.district_name || '',
+        scheme_name: employee.scheme?.scheme_name || '',
+        scheme_type: employee.scheme?.schemeType?.scheme_name || employee.scheme?.schemeType?.scheme_code || '',
+        location: latitude && longitude ? `${parseFloat(latitude).toFixed(4)}, ${parseFloat(longitude).toFixed(4)}` : '--',
+        remarks: source.remarks || null
+      });
+    };
+
+    for (const employee of employees) {
+      const contractStartText = employee.contract_start_date || startDateText;
+      const contractEndText = employee.contract_end_date || endDateText;
+      const effectiveStartText = contractStartText > startDateText ? contractStartText : startDateText;
+      const effectiveEndText = contractEndText < endDateText ? contractEndText : endDateText;
+      if (effectiveStartText > effectiveEndText) continue;
+
+      for (let d = new Date(effectiveStartText); d <= new Date(effectiveEndText); d.setDate(d.getDate() + 1)) {
+        if (rows.length >= maxRows) break;
+        const dateText = d.toISOString().split('T')[0];
+        if (dateText > todayText) continue;
+
+        const key = `${employee.employee_id}:${dateText}`;
+        const attendance = attendanceByEmployeeDate.get(key);
+        if (attendance) {
+          pushRow(employee, dateText, attendance);
+          continue;
+        }
+
+        if (weeklyOffByEmployeeDate.has(key)) {
+          pushRow(employee, dateText, { status: 'WEEKLY_OFF', remarks: 'Approved weekly off' });
+          continue;
+        }
+
+        const leave = leaveByEmployeeDate.get(key);
+        if (leave) {
+          pushRow(employee, dateText, {
+            status: leave.is_half_day ? 'HALF_DAY' : 'ON_LEAVE',
+            remarks: `${leave.is_paid === false ? 'Unpaid' : 'Paid'} Leave${leave.reason ? `: ${leave.reason}` : ''}`
+          });
+          continue;
+        }
+
+        pushRow(employee, dateText, { status: 'ABSENT', remarks: 'Past unmarked day' });
+      }
+    }
+
+    return rows.sort((a, b) => (
+      String(a.attendance_date).localeCompare(String(b.attendance_date))
+      || String(a.employee_code).localeCompare(String(b.employee_code))
+    ));
   } catch (error) {
     logger.error('PDF: Error in getAttendanceRecordsForPDF:', error);
     logger.error('PDF: Error stack:', error.stack);

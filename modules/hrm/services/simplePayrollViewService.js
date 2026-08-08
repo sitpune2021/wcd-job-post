@@ -497,7 +497,8 @@ const buildBankDetails = (employee, fullName) => {
     account_number: bank.account_number || '',
     ifsc_code: bank.ifsc_code || '',
     state: bank.state || '',
-    district: bank.district || employee?.district?.district_name || ''
+    district: bank.district || '',
+    employee_district: employee?.district?.district_name || ''
   };
 };
 
@@ -714,7 +715,8 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     account_number: payslip.bank.account_number,
     ifsc_code: payslip.bank.ifsc_code,
     state: payslip.bank.state,
-    district: payslip.bank.district || payslip.employee.district_name,
+    district: payslip.bank.district,
+    employee_district: payslip.bank.employee_district || payslip.employee.district_name,
     scheme_type_name: payslip.employee.scheme_type_name,
     scheme_name: payslip.employee.scheme_name,
     present_days: payslip.attendance.present_days || 0,
@@ -816,6 +818,7 @@ module.exports = {
   getEmployeesPayslips,
   getPayrollPaymentLogRows,
   getMyPayslip,
+  calculateAttendanceSummaries,
   calculateAttendanceSummary,
   resolvePayrollFilterLabels
 };

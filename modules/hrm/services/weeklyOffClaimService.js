@@ -16,6 +16,7 @@ const DEFAULT_MONTHLY_QUOTA = 4;
 const MAX_MONTHLY_QUOTA = 5;
 const CLAIM_SLOT_STATUSES = ['PENDING', 'APPROVED'];
 const ACTIVE_LEAVE_STATUSES = ['PENDING', 'APPROVED'];
+const WEEKLY_OFF_OVERRIDABLE_ATTENDANCE_STATUSES = ['ABSENT', 'WEEKLY_OFF', 'SUNDAY', 'HOLIDAY', 'NOT_MARKED'];
 
 /**
  * Format date as YYYY-MM-DD
@@ -434,7 +435,10 @@ async function approveWeeklyOffClaim(claimId, adminId, remarks) {
       throw ApiError.badRequest('Cannot approve an unclaimed weekly off entitlement');
     }
 
-    const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(claim.employee_id, transaction);
+    const employee = await findEmployeeForQuota(claim.employee_id, transaction);
+    await validateWeeklyOffClaimDate(employee, claim.claimed_off_date, transaction);
+
+    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction);
     const approvedClaimsInMonth = await WeeklyOffClaim.count({
       where: {
         employee_id: claim.employee_id,
@@ -450,12 +454,49 @@ async function approveWeeklyOffClaim(claimId, adminId, remarks) {
       throw ApiError.badRequest(`Monthly weekly off quota of ${monthlyQuota} is already approved for this employee`);
     }
 
+    let attendanceId = claim.attendance_id || null;
+    const existingAttendance = await Attendance.findOne({
+      where: {
+        employee_id: claim.employee_id,
+        attendance_date: claim.claimed_off_date,
+        is_deleted: false
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+
+    if (existingAttendance) {
+      if (!WEEKLY_OFF_OVERRIDABLE_ATTENDANCE_STATUSES.includes(existingAttendance.status)) {
+        throw ApiError.badRequest(`Cannot approve weekly off because attendance is already marked as ${existingAttendance.status} for this date`);
+      }
+
+      await existingAttendance.update({
+        status: 'WEEKLY_OFF',
+        remarks: `Weekly Off Claim - Approved${remarks ? `: ${remarks}` : ''}`,
+        updated_by: adminId
+      }, { transaction });
+      attendanceId = existingAttendance.attendance_id;
+    } else {
+      const attendanceRecord = await Attendance.create({
+        employee_id: claim.employee_id,
+        attendance_date: claim.claimed_off_date,
+        status: 'WEEKLY_OFF',
+        check_in_time: null,
+        check_out_time: null,
+        total_work_hours: 0,
+        remarks: `Weekly Off Claim - Approved${remarks ? `: ${remarks}` : ''}`,
+        created_by: adminId
+      }, { transaction });
+      attendanceId = attendanceRecord.attendance_id;
+    }
+
     await claim.update({
       claim_status: 'APPROVED',
       monthly_quota: monthlyQuota,
       approved_by: adminId,
       approved_at: new Date(),
       admin_remarks: remarks,
+      attendance_id: attendanceId,
       updated_by: adminId
     }, { transaction });
 
@@ -569,13 +610,14 @@ async function autoApproveWeeklyOffClaims() {
         const existingAttendance = await Attendance.findOne({
           where: {
             employee_id: lockedClaim.employee_id,
-            attendance_date: lockedClaim.claimed_off_date
+            attendance_date: lockedClaim.claimed_off_date,
+            is_deleted: false
           },
           transaction,
           lock: transaction.LOCK.UPDATE
         });
         if (existingAttendance) {
-          if (['ABSENT', 'WEEKLY_OFF'].includes(existingAttendance.status)) {
+          if (WEEKLY_OFF_OVERRIDABLE_ATTENDANCE_STATUSES.includes(existingAttendance.status)) {
             await existingAttendance.update({
               status: 'WEEKLY_OFF',
               remarks: `Weekly Off Claim - Auto Approved (Month: ${lockedClaim.entitlement_month})`,

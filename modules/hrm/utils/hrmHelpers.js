@@ -189,37 +189,19 @@ const isWorkingDay = async (date) => {
 };
 
 /**
- * Calculate business days between two dates (for leave calculation)
- * Excludes Sundays and holidays
+ * Calculate leave days between two dates.
+ * CHRMS treats Sundays and holidays as working/payroll days, so full-day leave
+ * uses calendar days while half-day leave remains 0.5.
  */
 const calculateLeaveDays = async (fromDate, toDate, isHalfDay = false) => {
   if (isHalfDay) return 0.5;
 
   const start = new Date(fromDate);
   const end = new Date(toDate);
-  let days = 0;
-  const { Holiday } = require('../models');
-  const { safeHolidayCheck } = require('./safeQueryHelpers');
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return 0;
 
-  // Get all holidays in the date range for efficient checking
-  const holidays = await Holiday.findAll({
-    where: {
-      holiday_date: { [Op.between]: [start.toISOString().split('T')[0], end.toISOString().split('T')[0]] },
-      is_active: true,
-      is_deleted: false
-    },
-    attributes: ['holiday_date']
-  });
-  const holidayDates = new Set(holidays.map(h => h.holiday_date));
-
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dateStr = d.toISOString().split('T')[0];
-    if (d.getDay() !== 0 && !holidayDates.has(dateStr)) { // Exclude Sundays and holidays
-      days++;
-    }
-  }
-
-  return days;
+  const dayMs = 24 * 60 * 60 * 1000;
+  return Math.floor((end - start) / dayMs) + 1;
 };
 
 /**
