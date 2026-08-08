@@ -36,9 +36,29 @@ const toDateOnly = (date) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-const parseDateOnly = (value) => {
+const normalizeDateOnly = (value) => {
   if (!value) return null;
-  const [year, month, day] = String(value).slice(0, 10).split('-').map(Number);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toDateOnly(value);
+  }
+
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return toDateOnly(parsed);
+  }
+
+  return null;
+};
+
+const parseDateOnly = (value) => {
+  const dateText = normalizeDateOnly(value);
+  if (!dateText) return null;
+  const [year, month, day] = dateText.split('-').map(Number);
   if (!year || !month || !day) return null;
   return new Date(year, month - 1, day);
 };
@@ -285,14 +305,17 @@ const calculateAttendanceSummaries = async (employees, month, year) => {
 
   const attendanceByEmployeeDate = new Map();
   attendanceRecords.forEach((record) => {
-    const key = `${record.employee_id}:${record.attendance_date}`;
+    const attendanceDate = normalizeDateOnly(record.attendance_date);
+    if (!attendanceDate) return;
+    const key = `${record.employee_id}:${attendanceDate}`;
     attendanceByEmployeeDate.set(key, record.status);
   });
 
   const weeklyOffByEmployeeDate = new Set();
   approvedWeeklyOffs.forEach((claim) => {
-    if (!claim.claimed_off_date) return;
-    weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claim.claimed_off_date}`);
+    const claimedDate = normalizeDateOnly(claim.claimed_off_date);
+    if (!claimedDate) return;
+    weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claimedDate}`);
   });
 
   const approvedLeavesByEmployeeDate = new Map();

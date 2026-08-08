@@ -16,6 +16,40 @@ const { buildQueryOptions, buildResponse, COMMON_FIELDS } = require('../utils/hr
 const { validateGeofence, detectDevice, getAllowedRadius } = require('../utils/geofencing');
 const { calculateAttendanceSummaries } = require('./simplePayrollViewService');
 
+const formatDateOnlyLocal = (date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return formatDateOnlyLocal(value);
+  }
+
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatDateOnlyLocal(parsed);
+  }
+
+  return null;
+};
+
+const parseDateOnlyLocal = (value) => {
+  const dateText = normalizeDateOnly(value);
+  if (!dateText) return null;
+  const [year, month, day] = dateText.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
+
 /**
  * Format attendance record for consistent API response
  * Flattens nested employee data for easier frontend consumption
@@ -1836,22 +1870,27 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
 
     const attendanceByEmployeeDate = new Map();
     attendanceRecords.forEach(record => {
-      attendanceByEmployeeDate.set(`${record.employee_id}:${record.attendance_date}`, record);
+      const attendanceDate = normalizeDateOnly(record.attendance_date);
+      if (!attendanceDate) return;
+      attendanceByEmployeeDate.set(`${record.employee_id}:${attendanceDate}`, record);
     });
 
     const weeklyOffByEmployeeDate = new Set();
     approvedWeeklyOffs.forEach(claim => {
-      weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claim.claimed_off_date}`);
+      const claimedDate = normalizeDateOnly(claim.claimed_off_date);
+      if (!claimedDate) return;
+      weeklyOffByEmployeeDate.add(`${claim.employee_id}:${claimedDate}`);
     });
 
     const leaveByEmployeeDate = new Map();
     approvedLeaves.forEach(leave => {
-      const leaveStart = new Date(leave.from_date);
-      const leaveEnd = new Date(leave.to_date);
+      const leaveStart = parseDateOnlyLocal(leave.from_date);
+      const leaveEnd = parseDateOnlyLocal(leave.to_date);
+      if (!leaveStart || !leaveEnd) return;
       const effectiveStart = leaveStart > startDate ? leaveStart : startDate;
       const effectiveEnd = leaveEnd < endDate ? leaveEnd : endDate;
       for (let d = new Date(effectiveStart); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
-        const dateText = d.toISOString().split('T')[0];
+        const dateText = formatDateOnlyLocal(d);
         leaveByEmployeeDate.set(`${leave.employee_id}:${dateText}`, leave);
       }
     });
@@ -1885,15 +1924,19 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
     };
 
     for (const employee of employees) {
-      const contractStartText = employee.contract_start_date || startDateText;
-      const contractEndText = employee.contract_end_date || endDateText;
+      const contractStartText = normalizeDateOnly(employee.contract_start_date) || startDateText;
+      const contractEndText = normalizeDateOnly(employee.contract_end_date) || endDateText;
       const effectiveStartText = contractStartText > startDateText ? contractStartText : startDateText;
       const effectiveEndText = contractEndText < endDateText ? contractEndText : endDateText;
       if (effectiveStartText > effectiveEndText) continue;
 
-      for (let d = new Date(effectiveStartText); d <= new Date(effectiveEndText); d.setDate(d.getDate() + 1)) {
+      const effectiveStartDate = parseDateOnlyLocal(effectiveStartText);
+      const effectiveEndDate = parseDateOnlyLocal(effectiveEndText);
+      if (!effectiveStartDate || !effectiveEndDate) continue;
+
+      for (let d = effectiveStartDate; d <= effectiveEndDate; d.setDate(d.getDate() + 1)) {
         if (rows.length >= maxRows) break;
-        const dateText = d.toISOString().split('T')[0];
+        const dateText = formatDateOnlyLocal(d);
         if (dateText > todayText) continue;
 
         const key = `${employee.employee_id}:${dateText}`;
