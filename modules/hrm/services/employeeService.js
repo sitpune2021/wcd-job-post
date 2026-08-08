@@ -161,7 +161,7 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
           model: db.PostMaster,
           as: 'post',
           required: false,
-          attributes: ['post_id', 'post_name', 'post_code']
+          attributes: ['post_id', 'post_name', 'post_code', 'amount']
         },
         {
           model: db.DistrictMaster,
@@ -195,6 +195,7 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       // Format key dates for display
       return {
         ...employeeData,
+        post_pay: employeeData.post?.amount ?? null,
         onboarding_email_sent_at: formatDate(employeeData.onboarding_email_sent_at),
         contract_start_date: formatDate(employeeData.contract_start_date),
         contract_end_date: formatDate(employeeData.contract_end_date),
