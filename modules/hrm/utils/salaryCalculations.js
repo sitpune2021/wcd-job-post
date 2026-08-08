@@ -13,6 +13,18 @@ const toNumber = (value, fallback = 0) => {
 const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
 const roundRupee = (value) => Math.round(toNumber(value));
 
+const normalizeMonthlyPay = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    throw new ApiError(400, 'Monthly pay must be a valid number');
+  }
+
+  return Number(parsed.toFixed(2));
+};
+
 const resolveEmployeeMonthlyPay = (employee) => {
   const employeePay = toNumber(employee?.employee_pay, 0);
   if (employeePay > 0) {
@@ -235,6 +247,7 @@ module.exports = {
   calculateSalary,
   calculatePaymentSplit,
   generatePayslip,
+  normalizeMonthlyPay,
   resolveEmployeeMonthlyPay,
   validateSalaryInputs
 };

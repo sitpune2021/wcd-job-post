@@ -16,11 +16,10 @@ const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { applyHRMHierarchyFilter } = hrmHierarchy;
 const { sendXlsxFromRows, sendPdfFromHtml, buildSimpleReportHtml, sanitizeFileName } = require('../../../../utils/reportExport');
 const adminActionAudit = require('../../services/adminActionAuditService');
-const { resolveEmployeeMonthlyPay } = require('../../utils/salaryCalculations');
 const {
   normalizeMonthlyPay,
-  syncPostAmountAndEmployeePay
-} = require('../../utils/paySync');
+  resolveEmployeeMonthlyPay
+} = require('../../utils/salaryCalculations');
 
 const formatDateOnly = (value) => {
   if (!value) return '-';
@@ -516,23 +515,12 @@ router.put('/:employeeId',
       throw new ApiError(400, 'No data provided for update');
     }
 
-    const targetPostId = updateData.post_id !== undefined ? updateData.post_id : employee.post_id;
-
     await EmployeeMaster.update(updateData, {
       where: { employee_id: parseInt(employeeId) }
     });
 
     updateData.updated_at = new Date();
     await employee.update(updateData);
-
-    if (req.body.employee_pay !== undefined && targetPostId) {
-      await syncPostAmountAndEmployeePay({
-        db,
-        postId: targetPostId,
-        amount: updateData.employee_pay,
-        updatedBy: req.user.admin_id
-      });
-    }
 
     const after = await getEmployeeAuditSnapshot(employeeId);
 

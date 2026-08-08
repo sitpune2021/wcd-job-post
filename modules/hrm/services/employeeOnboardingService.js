@@ -13,7 +13,6 @@ const logger = require('../../../config/logger');
 const { Op } = require('sequelize');
 const { ApiError } = require('../../../middleware/errorHandler');
 const { resolveEmployeeMonthlyPay } = require('../utils/salaryCalculations');
-const { syncPostAmountAndEmployeePay } = require('../utils/paySync');
 
 /**
  * Parse date from DD/MM/YYYY format to YYYY-MM-DD
@@ -141,16 +140,6 @@ async function onboardSelectedApplicant(applicantId, contractData, adminId, ipAd
       employee_pay: contractData.employee_pay,
       post: application.post
     });
-
-    if (contractData.employee_pay !== undefined) {
-      await syncPostAmountAndEmployeePay({
-        db,
-        postId: application.post_id,
-        amount: resolvedEmployeePay || null,
-        updatedBy: adminId,
-        transaction
-      });
-    }
 
     const employee = await EmployeeMaster.create({
       employee_code: employeeCode,
@@ -365,16 +354,6 @@ async function onboardExistingEmployee(employeeData, adminId, ipAddress) {
         employee_pay,
         post
       });
-
-      if (employee_pay !== undefined) {
-        await syncPostAmountAndEmployeePay({
-          db,
-          postId: post_id,
-          amount: resolvedEmployeePay || null,
-          updatedBy: adminId,
-          transaction
-        });
-      }
 
       employee = await EmployeeMaster.create({
         applicant_id: applicantId,
