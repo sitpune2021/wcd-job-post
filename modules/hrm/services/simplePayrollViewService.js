@@ -256,7 +256,8 @@ const getPayrollEmployees = async (adminUser, filters, options = {}) => {
  * - Explicit absent, unpaid leave, half-day shortage, and past unmarked days are deducted.
  * - In the current month, future contract days are neutral: not paid in day counts and not deducted yet.
  */
-const calculateAttendanceSummaries = async (employees, month, year) => {
+const calculateAttendanceSummaries = async (employees, month, year, options = {}) => {
+  const includeFutureApprovedCounts = options.includeFutureApprovedCounts === true;
   const employeeList = Array.isArray(employees) ? employees : [employees];
   const employeeIds = employeeList.map((employee) => employee.employee_id).filter(Boolean);
   const summaries = new Map();
@@ -379,6 +380,19 @@ const calculateAttendanceSummaries = async (employees, month, year) => {
       const isFutureUndueDay = dateText > dueEndText;
 
       if (isFutureUndueDay) {
+        if (includeFutureApprovedCounts) {
+          if (hasApprovedWeeklyOff) {
+            summary.weekly_off_days += 1;
+          } else if (leaves.some((leave) => leave.is_half_day)) {
+            summary.leave_days += 0.5;
+            summary.paid_leave_days += leaves.some((leave) => leave.is_paid === false) ? 0 : 0.5;
+            summary.unpaid_leave_days += leaves.some((leave) => leave.is_paid === false) ? 0.5 : 0;
+          } else if (leaves.length > 0) {
+            summary.leave_days += 1;
+            summary.paid_leave_days += leaves.some((leave) => leave.is_paid === false) ? 0 : 1;
+            summary.unpaid_leave_days += leaves.some((leave) => leave.is_paid === false) ? 1 : 0;
+          }
+        }
         summary.future_days += 1;
         return;
       }

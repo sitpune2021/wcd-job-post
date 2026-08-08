@@ -926,7 +926,9 @@ const getAttendanceSummary = async (adminUser, query) => {
 
   const countMap = {};
   if (!yearly) {
-    const payrollStyleSummaries = await calculateAttendanceSummaries(employees, month, year);
+    const payrollStyleSummaries = await calculateAttendanceSummaries(employees, month, year, {
+      includeFutureApprovedCounts: true
+    });
     payrollStyleSummaries.forEach((summary, employeeId) => {
       countMap[employeeId] = {
         present_count: summary.present_days,
@@ -1937,7 +1939,6 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
       for (let d = effectiveStartDate; d <= effectiveEndDate; d.setDate(d.getDate() + 1)) {
         if (rows.length >= maxRows) break;
         const dateText = formatDateOnlyLocal(d);
-        if (dateText > todayText) continue;
 
         const key = `${employee.employee_id}:${dateText}`;
         const attendance = attendanceByEmployeeDate.get(key);
@@ -1959,6 +1960,8 @@ const getAttendanceRecordsForPDF = async (adminUser, query) => {
           });
           continue;
         }
+
+        if (dateText > todayText) continue;
 
         pushRow(employee, dateText, { status: 'ABSENT', remarks: 'Past unmarked day' });
       }

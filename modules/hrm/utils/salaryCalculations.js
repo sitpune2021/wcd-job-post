@@ -129,7 +129,20 @@ const calculateSalary = (employee, attendance) => {
     }
 
     const deductedDays = Math.min(Math.max(toNumber(attendance?.deducted_days, 0), 0), salaryDays);
-    const paidDays = Math.min(Math.max(toNumber(attendance?.paid_days, calculatePaidDays(salaryDays, deductedDays)), 0), salaryDays);
+    const componentPaidDays = (
+      toNumber(attendance?.present_days, 0)
+      + toNumber(attendance?.weekly_off_days, 0)
+      + toNumber(attendance?.paid_leave_days, 0)
+      + toNumber(attendance?.half_day_days, 0)
+    );
+    const paidDays = Math.min(
+      Math.max(
+        toNumber(attendance?.paid_days, calculatePaidDays(salaryDays, deductedDays)),
+        componentPaidDays,
+        0
+      ),
+      salaryDays
+    );
     const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
     // Payroll uses a whole-rupee day rate. Any rounding difference is absorbed
     // into the pending/deduction remainder so the month never exceeds monthly pay.

@@ -268,6 +268,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         ap.aadhar_no,
         ap.photo_path,
         pm.post_name,
+        pm.amount as post_pay,
         dm.district_name,
         s.scheme_name,
         st.scheme_code as scheme_type,
@@ -411,6 +412,7 @@ async function getEmployeeById(employeeId, hrmScope = null) {
         scheme_name: employee.scheme_name,
         scheme_type: employee.scheme_type,
         employee_pay: employee.employee_pay,
+        post_pay: employee.post_pay || null,
         contract_start_date: employee.contract_start_date,
         contract_end_date: employee.contract_end_date,
         joining_date: employee.joining_date,
@@ -1195,6 +1197,7 @@ async function getCompleteEmployeeProfile(applicantId) {
       contract_end_date: employee.contract_end_date,
       joining_date: employee.created_at,
       employee_pay: employee.employee_pay || employee.post?.amount || null,
+      post_pay: employee.post?.amount || null,
       // Post details (handle null joins gracefully)
       post_id: employee.post_id,
       post_name: employee.post?.post_name || null,
