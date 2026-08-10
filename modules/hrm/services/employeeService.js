@@ -80,6 +80,10 @@ async function getEmployeeList(filters = {}, hrmScope = null, pagination = {}) {
       where.post_id = filters.post_id;
     }
 
+    if (filters.post_name) {
+      where['$post.post_name$'] = filters.post_name;
+    }
+
     if (filters.onboarding_status) {
       where.onboarding_status = filters.onboarding_status;
     }

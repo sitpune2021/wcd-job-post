@@ -382,6 +382,9 @@ const getLeaveApprovals = async (adminUser, query) => {
       '$employee.employee_code$',
       '$employee.applicant.personal.full_name$',
       '$employee.district.district_name$',
+      '$employee.scheme.scheme_name$',
+      '$employee.scheme.schemeType.scheme_name$',
+      '$employee.post.post_name$',
       '$leaveType.leave_name$',
       'reason',
       'rejection_reason'
@@ -413,12 +416,32 @@ const getLeaveApprovals = async (adminUser, query) => {
       {
         model: EmployeeMaster, 
         as: 'employee',
-        attributes: ['employee_id', 'employee_code', 'district_id', 'applicant_id'],
+        attributes: ['employee_id', 'employee_code', 'district_id', 'applicant_id', 'scheme_id', 'post_id'],
         include: [
           {
             model: db.DistrictMaster,
             as: 'district',
             attributes: ['district_name'],
+            required: false
+          },
+          {
+            model: db.Scheme,
+            as: 'scheme',
+            attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+            include: [
+              {
+                model: db.SchemeType,
+                as: 'schemeType',
+                attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+                required: false
+              }
+            ],
+            required: false
+          },
+          {
+            model: db.PostMaster,
+            as: 'post',
+            attributes: ['post_id', 'post_name'],
             required: false
           },
           {
@@ -500,6 +523,13 @@ const getLeaveApprovals = async (adminUser, query) => {
     return {
       ...leaveData,
       employee_name: employeeName || 'Unknown',
+      employee_district_name: leaveData.employee?.district?.district_name || null,
+      employee_scheme_name: leaveData.employee?.scheme?.scheme_name || null,
+      employee_scheme_type_name:
+        leaveData.employee?.scheme?.schemeType?.scheme_name ||
+        leaveData.employee?.scheme?.schemeType?.scheme_code ||
+        null,
+      employee_post_name: leaveData.employee?.post?.post_name || null,
       leave_balance: leaveBalance
     };
   }));
