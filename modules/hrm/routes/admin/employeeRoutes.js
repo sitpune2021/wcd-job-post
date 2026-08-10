@@ -135,9 +135,17 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.export', 'hrm.*'
 
     // Format data for export
     const exportData = result.employees.map(emp => {
-      const status = emp.employment_status === 'INACTIVE' ? 'Inactive' :
-                     emp.employment_status === 'ACTIVE' ? 'Active' :
-                     emp.contract_end_date && new Date(emp.contract_end_date) < new Date() ? 'Expired' : 'Active';
+      const accountStatus = emp.is_active ? 'Active' : 'Inactive';
+      const employmentStatus =
+        emp.employment_status === 'ACTIVE'
+          ? 'Active'
+          : emp.employment_status === 'INACTIVE'
+            ? 'Inactive'
+            : (emp.employment_status || '-')
+                .toString()
+                .replace(/_/g, ' ')
+                .toLowerCase()
+                .replace(/\b\w/g, (char) => char.toUpperCase());
 
       return {
         employee_code: emp.employee_code,
@@ -150,10 +158,23 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.export', 'hrm.*'
         location_type: emp.scheme?.schemeType?.scheme_code || '-',
         contract_start_date: formatDateOnly(emp.contract_start_date),
         contract_end_date: formatDateOnly(emp.contract_end_date),
-        status: status,
+        account_status: accountStatus,
+        // employment_status: employmentStatus,
         onboarding_status: emp.onboarding_status,
-        employment_status: emp.employment_status
+        is_active: emp.is_active
       };
+    }).sort((a, b) => {
+      if (a.is_active !== b.is_active) {
+        return a.is_active ? -1 : 1;
+      }
+
+      const districtCompare = (a.district_name || '').localeCompare(b.district_name || '', 'en', { sensitivity: 'base' });
+      if (districtCompare !== 0) return districtCompare;
+
+      const locationCompare = (a.location_name || '').localeCompare(b.location_name || '', 'en', { sensitivity: 'base' });
+      if (locationCompare !== 0) return locationCompare;
+
+      return (a.full_name || '').localeCompare(b.full_name || '', 'en', { sensitivity: 'base' });
     });
 
     const columns = [
@@ -165,7 +186,9 @@ router.get('/export', requireHRMAdminPermission(['hrm.employees.export', 'hrm.*'
       { header: 'District', key: 'district_name', width: 15 },
       { header: 'Location', key: 'location_name', width: 15 },
       { header: 'Contract Start', key: 'contract_start_date', width: 12 },
-      { header: 'Contract End', key: 'contract_end_date', width: 12 }
+      { header: 'Contract End', key: 'contract_end_date', width: 12 },
+      { header: 'Account Status', key: 'account_status', width: 14 },
+      // { header: 'Employment Status', key: 'employment_status', width: 16 }
     ];
 
     const filename = sanitizeFileName('employee-records');
