@@ -69,6 +69,26 @@ const getAllPosts = async (filters = {}, language = 'en') => {
       replacements.district_specific = filters.district_specific;
     }
 
+    if (filters.district_id) {
+      query += ` AND p.district_id = :district_id`;
+      replacements.district_id = filters.district_id;
+    }
+
+    if (filters.scheme_id) {
+      query += ` AND p.scheme_id = :scheme_id`;
+      replacements.scheme_id = filters.scheme_id;
+    }
+
+    if (filters.scheme_type_id) {
+      query += ` AND EXISTS (
+        SELECT 1
+        FROM ms_schemes s
+        WHERE s.scheme_id = p.scheme_id
+          AND s.scheme_type_id = :scheme_type_id
+      )`;
+      replacements.scheme_type_id = filters.scheme_type_id;
+    }
+
     query += ` ORDER BY p.updated_at DESC, p.created_at DESC, p.post_id DESC`;
 
     const [posts] = await sequelize.query(query, { replacements });
@@ -81,6 +101,9 @@ const getAllPosts = async (filters = {}, language = 'en') => {
         post_name: language === 'mr' && p.post_name_mr ? p.post_name_mr : p.post_name,
         post_name_en: p.post_name,
         post_name_mr: p.post_name_mr,
+        district_id: p.district_id,
+        scheme_id: p.scheme_id,
+        scheme_type_id: p.scheme_type_id,
         description: language === 'mr' && p.description_mr ? p.description_mr : p.description,
         description_en: p.description,
         description_mr: p.description_mr,
