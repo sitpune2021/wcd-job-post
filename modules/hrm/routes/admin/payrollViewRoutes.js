@@ -22,6 +22,10 @@ const payslipQuerySchema = Joi.object({
   scheme_type_id: Joi.number().integer().optional(),
   scheme_id: Joi.number().integer().optional(),
   search: Joi.string().max(100).optional(),
+  sortBy: Joi.string()
+    .valid('code', 'name', 'district', 'schemeType', 'scheme', 'post', 'basic', 'total_deduct', 'center_share', 'state_share', 'net')
+    .optional(),
+  sortOrder: Joi.string().valid('asc', 'desc').optional(),
   format: Joi.string().valid('excel', 'pdf').optional(),
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10)

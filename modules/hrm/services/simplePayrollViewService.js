@@ -29,6 +29,52 @@ const toNumber = (value, fallback = 0) => {
 
 const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
 
+const PAYSLIP_SORT_ACCESSORS = {
+  code: (row) => row.employee_code,
+  name: (row) => row.full_name,
+  district: (row) => row.district_name,
+  schemeType: (row) => row.scheme_type_name,
+  scheme: (row) => row.scheme_name,
+  post: (row) => row.post_name,
+  basic: (row) => toNumber(row.basic_salary),
+  total_deduct: (row) => toNumber(row.total_deduction),
+  center_share: (row) => toNumber(row.center_share_amount),
+  state_share: (row) => toNumber(row.state_share_amount),
+  net: (row) => toNumber(row.net_pay)
+};
+
+const compareMixedValues = (left, right) => {
+  const leftMissing = left === null || left === undefined || left === '';
+  const rightMissing = right === null || right === undefined || right === '';
+
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right;
+  }
+
+  return String(left).localeCompare(String(right), 'en', {
+    numeric: true,
+    sensitivity: 'base'
+  });
+};
+
+const sortPayslipRows = (rows, sortBy = 'code', sortOrder = 'asc') => {
+  const accessor = PAYSLIP_SORT_ACCESSORS[sortBy] || PAYSLIP_SORT_ACCESSORS.code;
+  const direction = sortOrder === 'desc' ? -1 : 1;
+
+  return [...rows].sort((leftRow, rightRow) => {
+    const primaryCompare = compareMixedValues(accessor(leftRow), accessor(rightRow));
+    if (primaryCompare !== 0) {
+      return primaryCompare * direction;
+    }
+
+    return compareMixedValues(leftRow.employee_code, rightRow.employee_code);
+  });
+};
+
 const toDateOnly = (date) => {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -688,33 +734,40 @@ const getEmployeePayslip = async (adminUser, employeeId, month, year) => {
  */
 const getEmployeesPayslips = async (adminUser, filters) => {
   try {
-    const { month, year, page = 1, limit = 10, employee_id, district_id, scheme_id, scheme_type_id, search } = filters;
+    const {
+      month,
+      year,
+      page = 1,
+      limit = 10,
+      employee_id,
+      district_id,
+      scheme_id,
+      scheme_type_id,
+      search,
+      sortBy = 'code',
+      sortOrder = 'asc'
+    } = filters;
 
     if (!month || !year) {
       throw ApiError.badRequest('Month and year are required');
     }
 
-    const [allEmployees, pagedResult] = await Promise.all([
-      getPayrollEmployees(adminUser, filters, { paginated: false }),
-      getPayrollEmployees(adminUser, filters, { paginated: true })
-    ]);
-
+    const allEmployees = await getPayrollEmployees(adminUser, filters, { paginated: false });
     const allPayslips = await buildPayslipsForEmployees(allEmployees, month, year);
-    const payslipByEmployeeId = new Map(allPayslips.map((payslip) => [payslip.employee.employee_id, payslip]));
-    const employeePayslips = pagedResult.rows
-      .map((employee) => payslipByEmployeeId.get(employee.employee_id))
-      .filter(Boolean)
-      .map(toEmployeeListRow);
-
     const pageLimit = parseInt(limit, 10);
+    const currentPage = parseInt(page, 10);
+    const allRows = sortPayslipRows(allPayslips.map(toEmployeeListRow), sortBy, sortOrder);
+    const totalRecords = allRows.length;
+    const offset = (currentPage - 1) * pageLimit;
+    const employeePayslips = allRows.slice(offset, offset + pageLimit);
 
     return {
       summary: summarizePayslips(allPayslips, month, year),
       employees: employeePayslips,
       pagination: {
-        current_page: parseInt(page, 10),
-        total_pages: Math.ceil(pagedResult.count / pageLimit),
-        total_records: pagedResult.count,
+        current_page: currentPage,
+        total_pages: Math.ceil(totalRecords / pageLimit) || 1,
+        total_records: totalRecords,
         records_on_page: employeePayslips.length
       },
       filters: {
@@ -724,7 +777,9 @@ const getEmployeesPayslips = async (adminUser, filters) => {
         district_id,
         scheme_type_id,
         scheme_id,
-        search
+        search,
+        sortBy,
+        sortOrder
       },
       filter_labels: await resolvePayrollFilterLabels(filters)
     };
