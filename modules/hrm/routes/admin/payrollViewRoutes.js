@@ -106,15 +106,18 @@ router.get('/payslips/export', async (req, res, next) => {
       { header: 'Employee District', key: 'employee_district', width: 18 },
       { header: 'Scheme Type', key: 'scheme_type_name', width: 22 },
       { header: 'Scheme Name', key: 'scheme_name', width: 28 },
+      { header: 'Basic Pay', key: 'basic_pay', width: 16 },
       { header: 'Present Days', key: 'present_days', width: 14 },
       { header: 'Absent Days', key: 'absent_days', width: 14 },
       { header: 'Total Days', key: 'total_days', width: 14 },
       { header: 'Weekly Off Days', key: 'weekly_off_days', width: 16 },
       { header: 'Leave Days', key: 'leave_days', width: 14 },
       { header: 'Half Days', key: 'half_days', width: 14 },
+      { header: 'Attendance Deduction', key: 'attendance_deduction', width: 20 },
+      { header: 'PT Deduction', key: 'pt_deduction', width: 16 },
       { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
       { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
-      { header: 'Total', key: 'total_amount', width: 16 }
+      { header: 'Net Payable', key: 'total_amount', width: 16 }
     ];
     
     if (format === 'excel') {
@@ -309,7 +312,7 @@ const generatePaymentLogPdfHtml = (rows, filters) => {
                 <th class="nowrap">Half Days</th>
                 <th class="nowrap">Centre Share Payment Amount</th>
                 <th class="nowrap">State Share Payment Amount</th>
-                <th class="nowrap">Total</th>
+                <th class="nowrap">Net Payable</th>
               </tr>
             </thead>
             <tbody>

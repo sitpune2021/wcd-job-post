@@ -75,6 +75,26 @@ const sortPayslipRows = (rows, sortBy = 'code', sortOrder = 'asc') => {
   });
 };
 
+const sortPayrollPaymentLogRows = (rows) => {
+  return [...rows].sort((leftRow, rightRow) => {
+    const comparisons = [
+      compareMixedValues(leftRow.employee_district, rightRow.employee_district),
+      compareMixedValues(leftRow.scheme_type_name, rightRow.scheme_type_name),
+      compareMixedValues(leftRow.scheme_name, rightRow.scheme_name),
+      compareMixedValues(leftRow.beneficiary_name, rightRow.beneficiary_name),
+      compareMixedValues(leftRow.employee_code, rightRow.employee_code)
+    ];
+
+    for (const comparison of comparisons) {
+      if (comparison !== 0) {
+        return comparison;
+      }
+    }
+
+    return 0;
+  });
+};
+
 const toDateOnly = (date) => {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -799,7 +819,8 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
   const employees = await getPayrollEmployees(adminUser, filters, { paginated: false });
   const payslips = await buildPayslipsForEmployees(employees, month, year);
 
-  return payslips.map((payslip) => ({
+  const rows = payslips.map((payslip) => ({
+    basic_pay: payslip.salary.monthly_pay,
     beneficiary_name: payslip.bank.beneficiary_name,
     beneficiary_name_as_per_bank: payslip.bank.beneficiary_name_as_per_bank,
     bank_name: payslip.bank.bank_name,
@@ -817,14 +838,18 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     weekly_off_days: payslip.attendance.weekly_off_days || 0,
     leave_days: payslip.attendance.leave_days || 0,
     half_days: payslip.attendance.half_days || 0,
-    paid_days: payslip.attendance.paid_days || 0,
-    deducted_days: payslip.attendance.deducted_days || 0,
+    attendance_deduction: payslip.salary.attendance_deduction,
+    pt_deduction: (payslip.salary.deduction_breakdown || [])
+      .filter((deduction) => String(deduction.name || '').trim().toLowerCase() === 'professional tax')
+      .reduce((sum, deduction) => sum + toNumber(deduction.amount), 0),
     center_share_payment_amount: payslip.payment_distribution.center_share_amount,
     state_share_payment_amount: payslip.payment_distribution.state_share_amount,
     total_amount: payslip.payment_distribution.total_amount,
     employee_code: payslip.employee.employee_code,
     post_name: payslip.employee.post_name
   }));
+
+  return sortPayrollPaymentLogRows(rows);
 };
 
 /**
