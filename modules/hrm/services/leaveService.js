@@ -14,12 +14,112 @@ const DistrictMaster = require('../../../models/DistrictMaster');
 const PostMaster = require('../../../models/PostMaster');
 const ApplicantMaster = require('../../../models/ApplicantMaster');
 const ApplicantPersonal = require('../../../models/ApplicantPersonal');
-const { getEmployeeFromUser, buildHierarchyFilter, getEmployeeIdsUnderAdmin, calculateLeaveDays, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
+const Scheme = db.Scheme;
+const SchemeType = db.SchemeType;
+const { getEmployeeFromUser, getEmployeeIdsUnderAdmin, calculateLeaveDays, getPagination, paginatedResponse } = require('../utils/hrmHelpers');
 const { buildQueryOptions, buildResponse } = require('../utils/hrmFilterBuilder');
 
 // Enhanced utilities for precise date/time handling and safe queries
-const { getCurrentDate, getCurrentYear, validateYear, validateDateRange, isPastDate } = require('../utils/dateTimeHelpers');
-const { safeQuery, safeLeaveOverlapCheck, safeUpdateLeaveBalance } = require('../utils/safeQueryHelpers');
+const { isPastDate } = require('../utils/dateTimeHelpers');
+const { safeLeaveOverlapCheck } = require('../utils/safeQueryHelpers');
+
+const PAID_CL_MAX_CONSECUTIVE_DAYS = 3;
+const ACTIVE_LEAVE_STATUSES = ['PENDING', 'APPROVED'];
+
+const parseDateOnly = (value) => {
+  if (!value) return null;
+  const text = String(value).slice(0, 10);
+  const [year, month, day] = text.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
+
+const formatDateOnly = (date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const addDays = (dateText, days) => {
+  const date = parseDateOnly(dateText);
+  date.setDate(date.getDate() + days);
+  return formatDateOnly(date);
+};
+
+const getDateRange = (fromDate, toDate) => {
+  const start = parseDateOnly(fromDate);
+  const end = parseDateOnly(toDate);
+  const dates = [];
+
+  if (!start || !end) return dates;
+
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    dates.push(formatDateOnly(cursor));
+  }
+
+  return dates;
+};
+
+const isCasualLeave = (leaveType) => String(leaveType?.leave_code || '').trim().toUpperCase() === 'CL';
+
+const validatePaidCasualLeaveConsecutiveLimit = async ({
+  employeeId,
+  leaveType,
+  fromDate,
+  toDate,
+  excludeLeaveId = null,
+  transaction = null
+}) => {
+  if (!isCasualLeave(leaveType)) return;
+
+  const requestedDates = getDateRange(fromDate, toDate);
+  if (requestedDates.length === 0) return;
+
+  const where = {
+    employee_id: employeeId,
+    leave_type_id: leaveType.leave_type_id,
+    is_deleted: false,
+    status: { [Op.in]: ACTIVE_LEAVE_STATUSES },
+    is_paid: { [Op.ne]: false },
+    from_date: { [Op.lte]: addDays(toDate, PAID_CL_MAX_CONSECUTIVE_DAYS) },
+    to_date: { [Op.gte]: addDays(fromDate, -PAID_CL_MAX_CONSECUTIVE_DAYS) }
+  };
+
+  if (excludeLeaveId) {
+    where.leave_id = { [Op.ne]: excludeLeaveId };
+  }
+
+  const nearbyPaidCl = await LeaveApplication.findAll({
+    where,
+    attributes: ['leave_id', 'from_date', 'to_date'],
+    transaction
+  });
+
+  const paidClDates = new Set(requestedDates);
+  nearbyPaidCl.forEach((leave) => {
+    getDateRange(leave.from_date, leave.to_date).forEach((dateText) => paidClDates.add(dateText));
+  });
+
+  for (const requestedDate of requestedDates) {
+    let consecutiveDays = 1;
+    let cursor = addDays(requestedDate, -1);
+    while (paidClDates.has(cursor)) {
+      consecutiveDays++;
+      cursor = addDays(cursor, -1);
+    }
+
+    cursor = addDays(requestedDate, 1);
+    while (paidClDates.has(cursor)) {
+      consecutiveDays++;
+      cursor = addDays(cursor, 1);
+    }
+
+    if (consecutiveDays > PAID_CL_MAX_CONSECUTIVE_DAYS) {
+      throw new ApiError(400, `Paid Casual Leave cannot be more than ${PAID_CL_MAX_CONSECUTIVE_DAYS} consecutive days.`);
+    }
+  }
+};
 
 /**
  * Ensure leave balances exist for an employee for the current year
@@ -130,6 +230,15 @@ const applyLeave = async (user, data) => {
   const balance = await LeaveBalance.findOne({
     where: { employee_id: employee.employee_id, leave_type_id: data.leave_type_id, year }
   });
+
+  if (isCasualLeave(leaveType) && (!balance || parseFloat(balance.remaining || 0) >= totalDays)) {
+    await validatePaidCasualLeaveConsecutiveLimit({
+      employeeId: employee.employee_id,
+      leaveType,
+      fromDate: data.from_date,
+      toDate: data.to_date
+    });
+  }
 
   // Only check balance for paid leaves during application
   // Unpaid leaves can be applied regardless of balance
@@ -546,7 +655,10 @@ const getLeaveApprovals = async (adminUser, query) => {
 const actionLeave = async (adminUser, leaveId, data) => {
   const leave = await LeaveApplication.findOne({
     where: { leave_id: leaveId, is_deleted: false },
-    include: [{ model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id'], required: false }]
+    include: [
+      { model: EmployeeMaster, as: 'employee', attributes: ['employee_id', 'employee_code', 'district_id', 'scheme_id'], required: false },
+      { model: LeaveType, as: 'leaveType', attributes: ['leave_type_id', 'leave_code', 'leave_name'], required: false }
+    ]
   });
   if (!leave) throw new ApiError(404, 'Leave application not found.');
   if (leave.status !== 'PENDING') throw new ApiError(400, 'Only pending leaves can be acted upon.');
@@ -591,6 +703,17 @@ const actionLeave = async (adminUser, leaveId, data) => {
       }
 
       leave.is_paid = isPaid;
+
+      if (isPaid) {
+        await validatePaidCasualLeaveConsecutiveLimit({
+          employeeId: leave.employee_id,
+          leaveType: leave.leaveType,
+          fromDate: leave.from_date,
+          toDate: leave.to_date,
+          excludeLeaveId: leave.leave_id,
+          transaction: t
+        });
+      }
 
       // Only decrement balance if leave is PAID
       if (isPaid) {
@@ -699,10 +822,6 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           transform: (value) => parseInt(value),
           validate: (value) => !isNaN(value) && value > 0
         },
-        scheme_type_id: {
-          transform: (value) => parseInt(value),
-          validate: (value) => !isNaN(value) && value > 0
-        },
         scheme_id: {
           transform: (value) => parseInt(value),
           validate: (value) => !isNaN(value) && value > 0
@@ -728,6 +847,20 @@ const getAdminLeaveSummary = async (adminUser, query) => {
           required: false
         },
         {
+          model: Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          required: false,
+          include: [
+            {
+              model: SchemeType,
+              as: 'schemeType',
+              attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+              required: false
+            }
+          ]
+        },
+        {
           model: ApplicantMaster,
           as: 'applicant',
           attributes: ['applicant_id', 'mobile_no'],
@@ -743,6 +876,10 @@ const getAdminLeaveSummary = async (adminUser, query) => {
         }
       ]
     });
+
+    if (query.scheme_type_id) {
+      employeeQueryOptions.where['$scheme.scheme_type_id$'] = parseInt(query.scheme_type_id, 10);
+    }
 
     const result = await EmployeeMaster.findAndCountAll(employeeQueryOptions);
     employees = result.rows;
@@ -920,6 +1057,8 @@ const getAdminLeaveSummary = async (adminUser, query) => {
     let fullName = emp.applicant?.personal?.full_name || emp.employee_code;
     let mobileNumber = emp.applicant?.mobile_no || null;
     let districtName = emp.district?.district_name || 'N/A';
+    let schemeName = emp.scheme?.scheme_name || 'N/A';
+    let schemeTypeName = emp.scheme?.schemeType?.scheme_name || emp.scheme?.schemeType?.scheme_code || 'N/A';
     let postName = emp.post?.post_name || 'N/A';
 
     // Debug: Log what we're getting
@@ -990,6 +1129,8 @@ const getAdminLeaveSummary = async (adminUser, query) => {
       full_name: fullName,
       mobile_number: mobileNumber,
       district_name: districtName,
+      scheme_name: schemeName,
+      scheme_type_name: schemeTypeName,
       post_name: postName,
       employment_status: emp.employment_status,
       leave_usage: leaveUsage,
@@ -1036,6 +1177,32 @@ const getAdminLeaveSummary = async (adminUser, query) => {
   });
 };
 
+const getAdminLeaveSummaryPdfRows = async (adminUser, query) => {
+  const summaryResponse = await getAdminLeaveSummary(adminUser, {
+    ...query,
+    page: 1,
+    limit: 10000
+  });
+
+  const records = summaryResponse?.data?.records || [];
+
+  return records.map((record) => ({
+    employee_code: record.employee_code || '',
+    full_name: record.full_name || '',
+    district_name: record.district_name || '',
+    scheme_type_name: record.scheme_type_name || '',
+    scheme_name: record.scheme_name || '',
+    post_name: record.post_name || '',
+    total_allocated: record.leave_balances?.CL?.allocated ?? 11,
+    total_used: record.total_used_days ?? 0,
+    total_remaining: record.leave_balances?.CL?.balance ?? 0,
+    pending_count: record.pending_count ?? 0,
+    approved_count: record.approved_count ?? 0,
+    rejected_count: record.rejected_count ?? 0,
+    applications_count: record.applications_count ?? 0
+  }));
+};
+
 /**
  * Get all leave types
  */
@@ -1054,5 +1221,6 @@ module.exports = {
   getLeaveApprovals,
   actionLeave,
   getAdminLeaveSummary,
+  getAdminLeaveSummaryPdfRows,
   getLeaveTypes
 };

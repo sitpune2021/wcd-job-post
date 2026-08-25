@@ -173,7 +173,6 @@ const errorHandler = (err, req, res, next) => {
     message,
     path: req.path,
     method: req.method,
-    ip: req.ip,
     userId: req.user?.id || req.user?.admin_id || null
   };
 

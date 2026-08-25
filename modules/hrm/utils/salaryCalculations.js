@@ -144,15 +144,14 @@ const calculateSalary = (employee, attendance) => {
       salaryDays
     );
     const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
-    // Payroll uses a whole-rupee day rate. Any rounding difference is absorbed
-    // into the pending/deduction remainder so the month never exceeds monthly pay.
-    const perDaySalary = roundRupee(monthlyPay / salaryDays);
+    // Keep the day rate exact for calculation; only final payable/net amount is rounded.
+    const perDaySalary = monthlyPay / salaryDays;
     const earnedTillDate = Math.min(perDaySalary * paidDays, monthlyPay);
     const attendanceDeduction = Math.min(perDaySalary * deductedDays, Math.max(monthlyPay - earnedTillDate, 0));
     const futurePendingAmount = Math.max(monthlyPay - earnedTillDate - attendanceDeduction, 0);
     const calculatedSalary = Math.max(earnedTillDate, 0);
     const deductions = calculateDeductions(employee, monthlyPay);
-    const netSalary = Math.max(calculatedSalary - deductions.totalDeductions, 0);
+    const netSalary = roundRupee(Math.max(calculatedSalary - deductions.totalDeductions, 0));
 
     return {
       monthly_pay: roundMoney(monthlyPay),
@@ -167,7 +166,7 @@ const calculateSalary = (employee, attendance) => {
       attendance_deduction: roundMoney(attendanceDeduction),
       additional_deductions: roundMoney(deductions.totalDeductions),
       total_deduction: roundMoney(attendanceDeduction + deductions.totalDeductions),
-      net_salary: roundMoney(netSalary),
+      net_salary: netSalary,
       deduction_breakdown: deductions.breakdown
     };
   } catch (error) {

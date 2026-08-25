@@ -219,7 +219,7 @@ const initMiddleware = (app) => {
     const routeKey = `${req.method} ${req.route ? req.route.path : req.originalUrl}`;
 
     apiHitCounts[routeKey] = (apiHitCounts[routeKey] || 0) + 1;
-    logger.info(`${req.method} ${req.originalUrl} - IP: ${req.ip} - CID: ${req.correlationId} - Hits: ${apiHitCounts[routeKey]}`);
+    logger.info(`${req.method} ${req.originalUrl} - CID: ${req.correlationId} - Hits: ${apiHitCounts[routeKey]}`);
 
     res.on('finish', () => {
       const responseTime = Date.now() - startTime;
@@ -233,7 +233,7 @@ const initMiddleware = (app) => {
       try { res.setHeader('X-Response-Time', `${responseTime}ms`); } catch (_) {}
 
       if (responseTime > 1000) {
-        logger.warn(`SLOW API: ${req.method} ${req.originalUrl} - ${responseTime}ms - IP: ${req.ip} - CID: ${req.correlationId}`);
+        logger.warn(`SLOW API: ${req.method} ${req.originalUrl} - ${responseTime}ms - CID: ${req.correlationId}`);
       }
 
       if (apiHitCounts[routeKey] > 100 && apiHitCounts[routeKey] % 100 === 0) {

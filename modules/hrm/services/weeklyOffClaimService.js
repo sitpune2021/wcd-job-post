@@ -8,8 +8,7 @@ const {
   EmployeeMaster,
   HrmAttendance: Attendance,
   HrmLeaveApplication: LeaveApplication,
-  Scheme,
-  WeeklyOffSetting
+  Scheme
 } = db;
 
 const DEFAULT_MONTHLY_QUOTA = 4;
@@ -22,7 +21,10 @@ const WEEKLY_OFF_OVERRIDABLE_ATTENDANCE_STATUSES = ['ABSENT', 'WEEKLY_OFF', 'SUN
  * Format date as YYYY-MM-DD
  */
 function formatDate(date) {
-  return date.toISOString().split('T')[0];
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 /**
@@ -33,10 +35,37 @@ function getMonthCode(date) {
   return d.getFullYear() * 100 + (d.getMonth() + 1);
 }
 
-function normalizeMonthlyQuota(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) return DEFAULT_MONTHLY_QUOTA;
-  return Math.min(Math.max(parsed, 0), MAX_MONTHLY_QUOTA);
+function getMonthPartsFromCode(monthCode) {
+  const code = Number.parseInt(monthCode, 10);
+  if (!Number.isFinite(code)) {
+    const today = new Date();
+    return { year: today.getFullYear(), month: today.getMonth() + 1 };
+  }
+
+  return {
+    year: Math.floor(code / 100),
+    month: code % 100
+  };
+}
+
+function getSundayQuotaForMonthCode(monthCode) {
+  const { year, month } = getMonthPartsFromCode(monthCode);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  let sundayCount = 0;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    if (new Date(year, month - 1, day).getDay() === 0) {
+      sundayCount++;
+    }
+  }
+
+  return Math.min(Math.max(sundayCount, DEFAULT_MONTHLY_QUOTA), MAX_MONTHLY_QUOTA);
+}
+
+function addDaysToDateText(dateText, days) {
+  const date = new Date(`${dateText}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return formatDate(date);
 }
 
 async function findEmployeeForQuota(employeeId, transaction = null) {
@@ -56,37 +85,13 @@ async function findEmployeeForQuota(employeeId, transaction = null) {
   });
 }
 
-async function getWeeklyOffQuotaForEmployee(employee, transaction = null) {
-  if (!employee) {
-    return DEFAULT_MONTHLY_QUOTA;
-  }
-
-  const schemeTypeId = employee.scheme?.scheme_type_id || employee.schemeTypeId || null;
-  if (!schemeTypeId || !WeeklyOffSetting) {
-    return DEFAULT_MONTHLY_QUOTA;
-  }
-
-  try {
-    const setting = await WeeklyOffSetting.findOne({
-      where: { scheme_type_id: schemeTypeId },
-      attributes: ['monthly_quota'],
-      transaction
-    });
-
-    return normalizeMonthlyQuota(setting?.monthly_quota);
-  } catch (error) {
-    logger.warn('Weekly off quota setting lookup failed; using default quota', {
-      employeeId: employee.employee_id,
-      schemeTypeId,
-      error: error.message
-    });
-    return DEFAULT_MONTHLY_QUOTA;
-  }
+async function getWeeklyOffQuotaForEmployee(employee, transaction = null, monthCode = null) {
+  return getSundayQuotaForMonthCode(monthCode || getMonthCode(new Date()));
 }
 
-async function getWeeklyOffQuotaForEmployeeId(employeeId, transaction = null) {
+async function getWeeklyOffQuotaForEmployeeId(employeeId, transaction = null, monthCode = null) {
   const employee = await findEmployeeForQuota(employeeId, transaction);
-  return getWeeklyOffQuotaForEmployee(employee, transaction);
+  return getWeeklyOffQuotaForEmployee(employee, transaction, monthCode);
 }
 
 async function validateWeeklyOffClaimDate(employee, claimedOffDate, transaction = null) {
@@ -135,6 +140,50 @@ async function countClaimedSlots(employeeId, entitlementMonth, excludeClaimId = 
   return WeeklyOffClaim.count({ where, transaction });
 }
 
+async function validateWeeklyOffSpacing(employeeId, claimedOffDate, excludeClaimId = null, transaction = null) {
+  const adjacentDates = [
+    addDaysToDateText(claimedOffDate, -1),
+    addDaysToDateText(claimedOffDate, 1)
+  ];
+
+  const claimWhere = {
+    employee_id: employeeId,
+    claimed_off_date: { [Op.in]: adjacentDates },
+    claim_status: { [Op.in]: CLAIM_SLOT_STATUSES }
+  };
+
+  if (excludeClaimId) {
+    claimWhere.claim_id = { [Op.ne]: excludeClaimId };
+  }
+
+  const adjacentClaim = await WeeklyOffClaim.findOne({
+    where: claimWhere,
+    attributes: ['claim_id', 'claimed_off_date', 'claim_status'],
+    transaction,
+    lock: transaction ? transaction.LOCK.UPDATE : undefined
+  });
+
+  if (adjacentClaim) {
+    throw ApiError.badRequest(`Weekly off cannot be claimed on consecutive days. Another weekly off already exists on ${adjacentClaim.claimed_off_date}.`);
+  }
+
+  const adjacentAttendance = await Attendance.findOne({
+    where: {
+      employee_id: employeeId,
+      attendance_date: { [Op.in]: adjacentDates },
+      status: 'WEEKLY_OFF',
+      is_deleted: false
+    },
+    attributes: ['attendance_id', 'attendance_date'],
+    transaction,
+    lock: transaction ? transaction.LOCK.UPDATE : undefined
+  });
+
+  if (adjacentAttendance) {
+    throw ApiError.badRequest(`Weekly off cannot be claimed on consecutive days. Attendance already has weekly off on ${adjacentAttendance.attendance_date}.`);
+  }
+}
+
 async function ensureClaimWithinMonthlyQuota(claim, monthlyQuota, transaction = null) {
   if (monthlyQuota <= 0) {
     throw ApiError.badRequest('Weekly off is not available for your scheme this month');
@@ -170,7 +219,7 @@ function trimVisibleClaimsToQuota(claims, monthlyQuota) {
 
 /**
  * Generate monthly weekly off entitlements for all active employees.
- * Monthly quota comes from HRM settings per scheme type, with default 4.
+ * Monthly quota is derived from the number of Sundays in the entitlement month.
  */
 async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) {
   try {
@@ -205,7 +254,7 @@ async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) 
     let disabled = 0;
 
     for (const employee of employees) {
-      const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee);
+      const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, null, monthCode);
 
       if (monthlyQuota <= 0) {
         disabled++;
@@ -292,10 +341,7 @@ async function getEmployeeWeeklyOffClaims(employeeId, filters = {}) {
       ]
     });
 
-    const settingQuota = await getWeeklyOffQuotaForEmployeeId(employeeId);
-    const monthlyQuota = requestedMonthCode === currentMonthCode
-      ? settingQuota
-      : normalizeMonthlyQuota(claims[0]?.monthly_quota ?? settingQuota);
+    const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(employeeId, null, requestedMonthCode);
     const visibleClaims = trimVisibleClaimsToQuota(claims, monthlyQuota);
 
     const pendingClaims = visibleClaims.filter(c => c.claim_status === 'PENDING' && !c.claimed_off_date);
@@ -369,8 +415,9 @@ async function submitWeeklyOffClaim(employeeId, claimId, claimedOffDate, updated
     const employee = await findEmployeeForQuota(employeeId, transaction);
     await validateWeeklyOffClaimDate(employee, claimedDateOnly, transaction);
 
-    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction);
+    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction, entitlementMonth);
     await ensureClaimWithinMonthlyQuota(claim, monthlyQuota, transaction);
+    await validateWeeklyOffSpacing(employeeId, claimedDateOnly, claimId, transaction);
 
     const existingClaimForDate = await WeeklyOffClaim.findOne({
       where: {
@@ -438,7 +485,8 @@ async function approveWeeklyOffClaim(claimId, adminId, remarks) {
     const employee = await findEmployeeForQuota(claim.employee_id, transaction);
     await validateWeeklyOffClaimDate(employee, claim.claimed_off_date, transaction);
 
-    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction);
+    const monthlyQuota = await getWeeklyOffQuotaForEmployee(employee, transaction, claim.entitlement_month);
+    await validateWeeklyOffSpacing(claim.employee_id, claim.claimed_off_date, claimId, transaction);
     const approvedClaimsInMonth = await WeeklyOffClaim.count({
       where: {
         employee_id: claim.employee_id,
@@ -554,7 +602,8 @@ async function autoApproveWeeklyOffClaims() {
           continue;
         }
 
-        const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(lockedClaim.employee_id, transaction);
+        const monthlyQuota = await getWeeklyOffQuotaForEmployeeId(lockedClaim.employee_id, transaction, lockedClaim.entitlement_month);
+        await validateWeeklyOffSpacing(lockedClaim.employee_id, lockedClaim.claimed_off_date, lockedClaim.claim_id, transaction);
         const approvedClaimsInMonth = await WeeklyOffClaim.count({
           where: {
             employee_id: lockedClaim.employee_id,
