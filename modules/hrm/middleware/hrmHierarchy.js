@@ -17,6 +17,7 @@ const applyHRMHierarchyFilter = async (req, res, next) => {
 
   const userRole = getAdminRoleCode(req.user);
   req.hrmScope = await resolveAdminHRMScope(req.user);
+  req.user.hrm_scope_filters = req.hrmScope.filters || {};
   logger.info('HRM Scope resolved', {
     admin_id: req.user.admin_id,
     role: userRole,
@@ -41,7 +42,9 @@ const buildEmployeeWhereClause = (baseWhere, hrmScope) => {
     return where;
   }
   
-  if (hrmScope.filters.district_id) {
+  if (Array.isArray(hrmScope.filters.district_ids) && hrmScope.filters.district_ids.length > 0) {
+    where.district_id = { [Op.in]: hrmScope.filters.district_ids };
+  } else if (hrmScope.filters.district_id) {
     where.district_id = hrmScope.filters.district_id;
   }
   
@@ -67,6 +70,10 @@ const canAccessEmployee = (employee, hrmScope) => {
   const filters = hrmScope.filters;
 
   if (filters.block_all) {
+    return false;
+  }
+
+  if (Array.isArray(filters.district_ids) && filters.district_ids.length > 0 && !filters.district_ids.includes(employee.district_id)) {
     return false;
   }
 

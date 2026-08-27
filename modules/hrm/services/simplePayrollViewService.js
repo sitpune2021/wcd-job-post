@@ -20,6 +20,7 @@ const DistrictMaster = db.DistrictMaster;
 const Scheme = db.Scheme;
 const SchemeType = db.SchemeType;
 const PaymentDistributionSetting = db.PaymentDistributionSetting;
+const PayrollCalculationSetting = db.PayrollCalculationSetting;
 const { Op } = db.Sequelize;
 
 const toNumber = (value, fallback = 0) => {
@@ -158,12 +159,20 @@ const getPaymentSettingInclude = () => ({
   required: false
 });
 
+const getPayrollCalculationSettingInclude = () => ({
+  model: PayrollCalculationSetting,
+  as: 'payrollCalculationSetting',
+  attributes: ['setting_id', 'rounding_basis', 'rounding_method'],
+  where: { is_active: true },
+  required: false
+});
+
 const getSchemeTypeInclude = () => ({
   model: SchemeType,
   as: 'schemeType',
   attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
   required: false,
-  include: [getPaymentSettingInclude()]
+  include: [getPaymentSettingInclude(), getPayrollCalculationSettingInclude()]
 });
 
 const getSchemeInclude = () => ({
@@ -588,6 +597,20 @@ const resolvePaymentDistribution = (employee) => {
   };
 };
 
+const resolvePayrollCalculationRule = (employee) => {
+  const scheme = resolveScheme(employee);
+  const schemeType = scheme?.schemeType || null;
+  const rule = schemeType?.payrollCalculationSetting || null;
+
+  return {
+    scheme_id: scheme?.scheme_id || null,
+    scheme_type_id: schemeType?.scheme_type_id || null,
+    rounding_basis: rule?.rounding_basis || 'NET_PAYABLE',
+    rounding_method: rule?.rounding_method || 'NEAREST',
+    has_custom_rule: Boolean(rule)
+  };
+};
+
 const buildBankDetails = (employee, fullName) => {
   const bank = employee?.bankDetail || {};
   const personal = employee?.applicant?.personal || {};
@@ -606,7 +629,8 @@ const buildBankDetails = (employee, fullName) => {
 };
 
 const buildEmployeePayslip = (employee, attendance, month, year) => {
-  const payslipData = generatePayslip(employee, attendance, month, year);
+  const payrollCalculationRule = resolvePayrollCalculationRule(employee);
+  const payslipData = generatePayslip(employee, attendance, month, year, payrollCalculationRule);
   const fullName = payslipData.employee.full_name;
   const paymentDistribution = resolvePaymentDistribution(employee);
   const split = calculatePaymentSplit(payslipData.salary.net_salary, paymentDistribution);
@@ -622,6 +646,7 @@ const buildEmployeePayslip = (employee, attendance, month, year) => {
     ...paymentDistribution,
     ...split
   };
+  payslipData.payroll_calculation_rule = payrollCalculationRule;
   payslipData.salary.center_share_amount = split.center_share_amount;
   payslipData.salary.state_share_amount = split.state_share_amount;
   payslipData.salary.undistributed_amount = split.undistributed_amount;

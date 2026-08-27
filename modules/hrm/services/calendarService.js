@@ -18,6 +18,82 @@ const { getWorkingDaysInMonth } = require('../utils/workingDayHelpers');
 const { getCurrentDate, validateYear, isWeekend } = require('../utils/dateTimeHelpers');
 const { safeQuery } = require('../utils/safeQueryHelpers');
 
+const normalizeIds = (values) => Array.from(new Set(
+  (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0)
+));
+
+const buildScopedSchemeWhere = (adminUser, extraWhere = {}) => {
+  const filters = adminUser?.hrm_scope_filters || adminUser?.dataValues?.hrm_scope_filters || {};
+  const where = { is_deleted: false, ...extraWhere };
+
+  if (filters.block_all) {
+    where.scheme_id = { [Op.in]: [] };
+    return where;
+  }
+  if (Array.isArray(filters.scheme_ids) && filters.scheme_ids.length > 0) {
+    where.scheme_id = { [Op.in]: filters.scheme_ids };
+  }
+  if (Array.isArray(filters.district_ids) && filters.district_ids.length > 0) {
+    where.district_id = { [Op.in]: filters.district_ids };
+  } else if (filters.district_id) {
+    where.district_id = filters.district_id;
+  }
+  if (Array.isArray(filters.scheme_type_ids) && filters.scheme_type_ids.length > 0) {
+    where.scheme_type_id = { [Op.in]: filters.scheme_type_ids };
+  } else if (filters.scheme_type_id) {
+    where.scheme_type_id = filters.scheme_type_id;
+  }
+
+  return where;
+};
+
+const assertHolidayScopeAllowed = async (adminUser, holiday) => {
+  if (!adminUser) return;
+
+  const filters = adminUser.hrm_scope_filters || adminUser.dataValues?.hrm_scope_filters || {};
+  if (filters.block_all) {
+    throw new ApiError(403, 'Holiday scope is outside your CHRMS access scope');
+  }
+
+  const restrictedSchemeIds = normalizeIds([
+    ...(Array.isArray(filters.scheme_ids) ? filters.scheme_ids : []),
+    filters.scheme_id
+  ]);
+  const restrictedSchemeTypeIds = normalizeIds([
+    ...(Array.isArray(filters.scheme_type_ids) ? filters.scheme_type_ids : []),
+    filters.scheme_type_id
+  ]);
+  const restrictedDistrictIds = normalizeIds([
+    ...(Array.isArray(filters.district_ids) ? filters.district_ids : []),
+    filters.district_id
+  ]);
+
+  if (restrictedSchemeIds.length > 0) {
+    if (!holiday.scheme_id || !restrictedSchemeIds.includes(Number(holiday.scheme_id))) {
+      throw new ApiError(403, 'Holiday scope is outside your assigned scheme access');
+    }
+  }
+  if (restrictedSchemeTypeIds.length > 0 && !restrictedSchemeTypeIds.includes(Number(holiday.scheme_type_id))) {
+    throw new ApiError(403, 'Holiday scope is outside your assigned scheme type access');
+  }
+  if (restrictedDistrictIds.length > 0 && !holiday.district_id) {
+    throw new ApiError(403, 'District is required for your holiday calendar access scope');
+  }
+  if (restrictedDistrictIds.length > 0 && !restrictedDistrictIds.includes(Number(holiday.district_id))) {
+    throw new ApiError(403, 'Holiday scope is outside your assigned district access');
+  }
+
+  if (holiday.scheme_id) {
+    const schemeWhere = buildScopedSchemeWhere(adminUser, { is_active: true, scheme_id: holiday.scheme_id });
+    const exists = await db.Scheme.count({ where: schemeWhere });
+    if (!exists) {
+      throw new ApiError(403, 'Holiday scope is outside your CHRMS access scope');
+    }
+  }
+};
+
 /**
  * Get comprehensive calendar for an employee
  * Shows all days with their status: PRESENT, ABSENT, SUNDAY, HOLIDAY, ON_LEAVE
@@ -44,6 +120,21 @@ const getEmployeeCalendar = async (user, query) => {
   const startDate = new Date(currentYear, currentMonth - 1, 1);
   const endDate = new Date(currentYear, currentMonth, 0);
   const totalDays = endDate.getDate();
+  const employeeScheme = employee.scheme_id
+    ? await db.Scheme.findOne({
+      where: { scheme_id: employee.scheme_id, is_deleted: false },
+      attributes: ['scheme_id', 'district_id', 'scheme_type_id'],
+      raw: true
+    })
+    : null;
+  const holidayScope = {
+    [Op.or]: [
+      { scheme_id: null, scheme_type_id: null, district_id: null }
+    ]
+  };
+  if (employeeScheme?.scheme_id) holidayScope[Op.or].push({ scheme_id: employeeScheme.scheme_id });
+  if (employeeScheme?.scheme_type_id) holidayScope[Op.or].push({ scheme_type_id: employeeScheme.scheme_type_id, scheme_id: null });
+  if (employeeScheme?.district_id) holidayScope[Op.or].push({ district_id: employeeScheme.district_id, scheme_id: null });
 
   // Fetch all relevant data for the month
   const [attendanceRecords, holidays, approvedLeaves, weeklyOffs] = await Promise.all([
@@ -72,7 +163,8 @@ const getEmployeeCalendar = async (user, query) => {
           ]
         },
         is_active: true,
-        is_deleted: false
+        is_deleted: false,
+        ...holidayScope
       }
     }),
 
@@ -356,7 +448,7 @@ const getEmployeeCalendar = async (user, query) => {
  * Get holidays for a specific year/month (Admin view)
  * Enhanced with proper year validation
  */
-const getHolidaysByYear = async (year, month) => {
+const getHolidaysByYear = async (year, month, filters = {}, adminUser = null) => {
   // Validate year using enhanced utility
   const validatedYear = year ? validateYear(year) : new Date().getFullYear();
   
@@ -382,8 +474,50 @@ const getHolidaysByYear = async (year, month) => {
     };
   }
 
+  if (filters.district_id) {
+    whereClause.district_id = filters.district_id;
+  }
+  if (filters.scheme_type_id) {
+    whereClause.scheme_type_id = filters.scheme_type_id;
+  }
+  if (filters.scheme_id) {
+    whereClause.scheme_id = filters.scheme_id;
+  }
+
+  if (adminUser) {
+    const scopedSchemes = await db.Scheme.findAll({
+      where: buildScopedSchemeWhere(adminUser, { is_active: true }),
+      attributes: ['scheme_id', 'district_id', 'scheme_type_id'],
+      raw: true
+    });
+    const visibleSchemeIds = normalizeIds(scopedSchemes.map((scheme) => scheme.scheme_id));
+    const visibleDistrictIds = normalizeIds(scopedSchemes.map((scheme) => scheme.district_id));
+    const visibleSchemeTypeIds = normalizeIds(scopedSchemes.map((scheme) => scheme.scheme_type_id));
+
+    if (visibleSchemeIds.length === 0) {
+      whereClause.holiday_id = { [Op.in]: [] };
+    } else {
+      whereClause[Op.and] = [
+        ...(whereClause[Op.and] || []),
+        {
+          [Op.or]: [
+            { scheme_id: null, scheme_type_id: null, district_id: null },
+            { scheme_id: { [Op.in]: visibleSchemeIds } },
+            { scheme_type_id: { [Op.in]: visibleSchemeTypeIds } },
+            { district_id: { [Op.in]: visibleDistrictIds } }
+          ]
+        }
+      ];
+    }
+  }
+
   const holidays = await Holiday.findAll({
     where: whereClause,
+    include: [
+      { model: db.DistrictMaster, as: 'district', attributes: ['district_name'], required: false },
+      { model: db.SchemeType, as: 'schemeType', attributes: ['scheme_code', 'scheme_name'], required: false },
+      { model: db.Scheme, as: 'scheme', attributes: ['scheme_code', 'scheme_name'], required: false }
+    ],
     order: [['holiday_date', 'ASC']]
   });
 
@@ -412,18 +546,27 @@ const manageHolidays = async (adminUser, data) => {
 
   for (const holiday of holidays) {
     try {
-      const { date, name, type, description } = holiday;
+      const { date, name, type, description, district_id, scheme_type_id, scheme_id } = holiday;
 
-      if (!date || !name) {
-        results.errors.push({ date, error: 'Date and name are required', fullHoliday: holiday });
+      if (!date || !name || !scheme_type_id) {
+        results.errors.push({ date, error: 'Date, name, and scheme type are required', fullHoliday: holiday });
         continue;
       }
 
-      // Check if holiday already exists for this date and year (including deleted ones)
+      await assertHolidayScopeAllowed(adminUser, {
+        district_id: district_id || null,
+        scheme_type_id,
+        scheme_id: scheme_id || null
+      });
+
+      // Scope is part of identity: each scheme type/scheme can have its own calendar.
       const anyHoliday = await Holiday.findOne({
         where: {
           holiday_date: date,
-          year: validatedYear
+          year: validatedYear,
+          district_id: district_id || null,
+          scheme_type_id,
+          scheme_id: scheme_id || null
         }
       });
 
@@ -434,6 +577,9 @@ const manageHolidays = async (adminUser, data) => {
             holiday_name: name,
             holiday_type: type || 'NATIONAL',
             description: description || null,
+            district_id: district_id || null,
+            scheme_type_id,
+            scheme_id: scheme_id || null,
             is_active: true,
             is_deleted: false,
             updated_by: adminUser.admin_id
@@ -445,6 +591,9 @@ const manageHolidays = async (adminUser, data) => {
             holiday_name: name,
             holiday_type: type || anyHoliday.holiday_type,
             description: description || anyHoliday.description,
+            district_id: district_id || null,
+            scheme_type_id,
+            scheme_id: scheme_id || null,
             updated_by: adminUser.admin_id
           });
           results.updated++;
@@ -457,6 +606,9 @@ const manageHolidays = async (adminUser, data) => {
           year: validatedYear,
           holiday_type: type || 'NATIONAL',
           description: description || null,
+          district_id: district_id || null,
+          scheme_type_id,
+          scheme_id: scheme_id || null,
           is_active: true,
           is_deleted: false,
           created_by: adminUser.admin_id
@@ -481,6 +633,10 @@ const manageHolidays = async (adminUser, data) => {
     errorDetails: results.errors.length > 0 ? results.errors : null
   });
 
+  if (results.errors.length > 0 && results.created === 0 && results.updated === 0) {
+    throw new ApiError(400, results.errors[0].error || 'Holiday could not be saved');
+  }
+
   return results;
 };
 
@@ -502,6 +658,8 @@ const deleteHoliday = async (adminUser, holidayId, year) => {
   if (holiday.year !== validatedYear) {
     throw new ApiError(400, 'Holiday year mismatch');
   }
+
+  await assertHolidayScopeAllowed(adminUser, holiday);
 
   await holiday.update({
     is_deleted: true,

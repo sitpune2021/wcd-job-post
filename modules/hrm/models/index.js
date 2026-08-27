@@ -252,6 +252,22 @@ const setupAssociations = (db) => {
     foreignKey: 'attendance_id',
     as: 'weeklyOffClaim'
   });
+
+  // Holiday scope metadata
+  Holiday.belongsTo(db.DistrictMaster, {
+    foreignKey: 'district_id',
+    as: 'district'
+  });
+
+  Holiday.belongsTo(db.SchemeType, {
+    foreignKey: 'scheme_type_id',
+    as: 'schemeType'
+  });
+
+  Holiday.belongsTo(db.Scheme, {
+    foreignKey: 'scheme_id',
+    as: 'scheme'
+  });
 };
 
 module.exports = {

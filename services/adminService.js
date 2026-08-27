@@ -123,6 +123,19 @@ const normalizeSchemeTypeId = (schemeTypeId) => {
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
 };
 
+const normalizeIdList = (ids, fallbackId) => {
+  const rawValues = Array.isArray(ids) ? [...ids] : [];
+  if (fallbackId !== undefined && fallbackId !== null && fallbackId !== '') {
+    rawValues.unshift(fallbackId);
+  }
+
+  return Array.from(new Set(
+    rawValues
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  ));
+};
+
 const validateSchemeTypeId = async (schemeTypeId, transaction) => {
   if (!schemeTypeId) return;
 
@@ -136,6 +149,38 @@ const validateSchemeTypeId = async (schemeTypeId, transaction) => {
 
   if (!exists) {
     throw new ApiError(400, 'Selected scheme type is invalid');
+  }
+};
+
+const validateSchemeTypeIds = async (schemeTypeIds, transaction) => {
+  if (!schemeTypeIds.length) return;
+
+  const activeCount = await SchemeType.count({
+    where: {
+      scheme_type_id: { [Op.in]: schemeTypeIds },
+      is_deleted: false
+    },
+    transaction
+  });
+
+  if (activeCount !== schemeTypeIds.length) {
+    throw new ApiError(400, 'One or more selected scheme types are invalid');
+  }
+};
+
+const validateDistrictIds = async (districtIds, transaction) => {
+  if (!districtIds.length) return;
+
+  const activeCount = await DistrictMaster.count({
+    where: {
+      district_id: { [Op.in]: districtIds },
+      is_deleted: false
+    },
+    transaction
+  });
+
+  if (activeCount !== districtIds.length) {
+    throw new ApiError(400, 'One or more selected districts are invalid');
   }
 };
 
@@ -156,7 +201,10 @@ class AdminService {
   async createUser(data, currentUser) {
     const { username, password, full_name, email, mobile_no, role_id, district_id, scheme_id, scheme_type_id, linked_employee_id } = data;
     const schemeIds = normalizeSchemeIds(data.scheme_ids, scheme_id);
-    const schemeTypeId = normalizeSchemeTypeId(scheme_type_id);
+    const districtIds = normalizeIdList(data.district_ids, district_id);
+    const schemeTypeIds = normalizeIdList(data.scheme_type_ids, scheme_type_id);
+    const schemeTypeId = schemeTypeIds[0] || null;
+    const primaryDistrictId = districtIds[0] || null;
     const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
     const actorId = getActorId(currentUser);
 
@@ -184,7 +232,8 @@ class AdminService {
       }
 
       await validateSchemeIds(schemeIds, transaction);
-      await validateSchemeTypeId(schemeTypeId, transaction);
+      await validateDistrictIds(districtIds, transaction);
+      await validateSchemeTypeIds(schemeTypeIds, transaction);
 
       // Handle employee linking
       let finalUsername = username;
@@ -233,9 +282,11 @@ class AdminService {
         email: finalEmail,
         mobile_no,
         role_id,
-        district_id,
+        district_id: primaryDistrictId,
+        district_ids: districtIds.length ? districtIds : null,
         scheme_id: primarySchemeId,
         scheme_type_id: schemeTypeId,
+        scheme_type_ids: schemeTypeIds.length ? schemeTypeIds : null,
         linked_employee_id,
         created_by: actorId,
         is_active: true
@@ -374,9 +425,11 @@ class AdminService {
    * @returns {Promise<Object>} - Updated user
    */
   async updateUser(userId, data, currentUser) {
-    const { full_name, email, mobile_no, role_id, district_id, scheme_id, scheme_type_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
-    const hasSchemeIdsPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_ids');
-    const hasSchemeTypeIdPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_type_id');
+      const { full_name, email, mobile_no, role_id, district_id, scheme_id, scheme_type_id, linked_employee_id, is_active, password, review_batch_start, review_batch_end } = data;
+      const hasSchemeIdsPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_ids');
+      const hasSchemeTypeIdPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_type_id');
+      const hasDistrictIdsPayload = Object.prototype.hasOwnProperty.call(data, 'district_ids');
+      const hasSchemeTypeIdsPayload = Object.prototype.hasOwnProperty.call(data, 'scheme_type_ids');
     const actorId = getActorId(currentUser);
     let transaction;
 
@@ -419,12 +472,18 @@ class AdminService {
       const schemeIds = hasSchemeIdsPayload
         ? normalizeSchemeIds(data.scheme_ids, null)
         : normalizeSchemeIds([], scheme_id !== undefined ? scheme_id : user.scheme_id);
-      const schemeTypeId = hasSchemeTypeIdPayload
-        ? normalizeSchemeTypeId(data.scheme_type_id)
-        : normalizeSchemeTypeId(user.scheme_type_id);
+      const districtIds = hasDistrictIdsPayload
+        ? normalizeIdList(data.district_ids, null)
+        : normalizeIdList(user.district_ids || [], district_id !== undefined ? district_id : user.district_id);
+      const schemeTypeIds = hasSchemeTypeIdsPayload
+        ? normalizeIdList(data.scheme_type_ids, null)
+        : normalizeIdList(user.scheme_type_ids || [], scheme_type_id !== undefined ? scheme_type_id : user.scheme_type_id);
+      const schemeTypeId = (hasSchemeTypeIdsPayload || hasSchemeTypeIdPayload) ? (schemeTypeIds[0] || null) : normalizeSchemeTypeId(user.scheme_type_id);
+      const primaryDistrictId = (hasDistrictIdsPayload || district_id !== undefined) ? (districtIds[0] || null) : user.district_id;
       const primarySchemeId = schemeIds.length ? schemeIds[0] : null;
       await validateSchemeIds(schemeIds, transaction);
-      await validateSchemeTypeId(schemeTypeId, transaction);
+      await validateDistrictIds(districtIds, transaction);
+      await validateSchemeTypeIds(schemeTypeIds.length ? schemeTypeIds : (schemeTypeId ? [schemeTypeId] : []), transaction);
 
       // Prepare update data
       const updateData = {
@@ -432,9 +491,11 @@ class AdminService {
         email: email || user.email,
         mobile_no: mobile_no !== undefined ? mobile_no : user.mobile_no,
         role_id: role_id || user.role_id,
-        district_id: district_id !== undefined ? district_id : user.district_id,
+        district_id: primaryDistrictId,
+        district_ids: districtIds.length ? districtIds : null,
         scheme_id: hasSchemeIdsPayload || scheme_id !== undefined ? primarySchemeId : user.scheme_id,
-        scheme_type_id: hasSchemeTypeIdPayload ? schemeTypeId : user.scheme_type_id,
+        scheme_type_id: (hasSchemeTypeIdsPayload || hasSchemeTypeIdPayload) ? schemeTypeId : user.scheme_type_id,
+        scheme_type_ids: schemeTypeIds.length ? schemeTypeIds : null,
         linked_employee_id: linked_employee_id !== undefined ? linked_employee_id : user.linked_employee_id,
         is_active: is_active !== undefined ? is_active : user.is_active
       };

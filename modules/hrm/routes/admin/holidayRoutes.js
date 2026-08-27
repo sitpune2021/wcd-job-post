@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../../../../middleware/auth');
-const { hrmFeatureFlag } = require('../../middleware');
+const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const { requireHRMAdminPermission } = require('../../middleware/permissionGuard');
 const calendarService = require('../../services/calendarService');
 const ApiResponse = require('../../../../utils/ApiResponse');
+const adminActionAudit = require('../../services/adminActionAuditService');
 const Joi = require('joi');
 
 router.use(hrmFeatureFlag.checkHRMEnabled);
 router.use(authenticate);
+router.use(hrmHierarchy.applyHRMHierarchyFilter);
 router.use(requireHRMAdminPermission('hrm.calendar.manage'));
 
 /**
@@ -19,7 +21,10 @@ router.get('/', async (req, res, next) => {
   try {
     const schema = Joi.object({
       year: Joi.number().integer().min(2020).max(2100).default(new Date().getFullYear()),
-      month: Joi.number().integer().min(1).max(12).optional()
+      month: Joi.number().integer().min(1).max(12).optional(),
+      district_id: Joi.number().integer().positive().optional(),
+      scheme_type_id: Joi.number().integer().positive().optional(),
+      scheme_id: Joi.number().integer().positive().optional()
     });
 
     const { error, value } = schema.validate(req.query);
@@ -27,7 +32,7 @@ router.get('/', async (req, res, next) => {
       return res.status(400).json({ success: false, message: error.details[0].message });
     }
 
-    const holidays = await calendarService.getHolidaysByYear(value.year, value.month);
+    const holidays = await calendarService.getHolidaysByYear(value.year, value.month, value, req.user);
     return ApiResponse.success(res, holidays, 'Holidays retrieved successfully');
   } catch (err) {
     next(err);
@@ -45,15 +50,21 @@ router.get('/', async (req, res, next) => {
  *   ]
  * }
  */
-router.post('/', async (req, res, next) => {
+router.post('/', adminActionAudit.requireAuditRemark, async (req, res, next) => {
   try {
     const schema = Joi.object({
       year: Joi.number().integer().min(2020).max(2100).required(),
+      admin_remark: Joi.string().allow('', null).optional(),
+      audit_remark: Joi.string().allow('', null).optional(),
       holidays: Joi.array().items(
         Joi.object({
           date: Joi.date().iso().required(),
           name: Joi.string().max(100).required(),
-          type: Joi.string().valid('NATIONAL', 'STATE', 'OPTIONAL').default('NATIONAL')
+          type: Joi.string().valid('NATIONAL', 'STATE', 'OPTIONAL').default('NATIONAL'),
+          description: Joi.string().allow('', null).optional(),
+          district_id: Joi.number().integer().positive().allow(null).optional(),
+          scheme_type_id: Joi.number().integer().positive().required(),
+          scheme_id: Joi.number().integer().positive().allow(null).optional()
         })
       ).min(1).required()
     });
@@ -64,6 +75,12 @@ router.post('/', async (req, res, next) => {
     }
 
     const result = await calendarService.manageHolidays(req.user, value);
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_HOLIDAY_CALENDAR',
+      entityId: String(value.year),
+      oldData: null,
+      newData: { request: value, result }
+    });
     return ApiResponse.success(res, result, 'Holidays set successfully');
   } catch (err) {
     next(err);
@@ -74,7 +91,7 @@ router.post('/', async (req, res, next) => {
  * Delete a holiday (requires year parameter)
  * DELETE /api/hrm/admin/holidays/:holidayId?year=2026
  */
-router.delete('/:holidayId', async (req, res, next) => {
+router.delete('/:holidayId', adminActionAudit.requireAuditRemark, async (req, res, next) => {
   try {
     const holidayId = parseInt(req.params.holidayId);
     const schema = Joi.object({
@@ -87,6 +104,12 @@ router.delete('/:holidayId', async (req, res, next) => {
     }
 
     const result = await calendarService.deleteHoliday(req.user, holidayId, value.year);
+    await adminActionAudit.recordAction(req, {
+      entityType: 'HRM_HOLIDAY_CALENDAR',
+      entityId: holidayId,
+      oldData: null,
+      newData: { deleted: true, year: value.year }
+    });
     return ApiResponse.success(res, result, 'Holiday deleted successfully');
   } catch (err) {
     next(err);

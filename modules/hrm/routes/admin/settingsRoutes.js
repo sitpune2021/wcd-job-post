@@ -12,13 +12,165 @@ const ApiResponse = require('../../../../utils/ApiResponse');
 const { ApiError } = require('../../../../middleware/errorHandler');
 const { requireHRMAdminPermission } = require('../../middleware/permissionGuard');
 const { authenticate } = require('../../../../middleware/auth');
+const { hrmFeatureFlag, hrmHierarchy } = require('../../middleware');
 const logger = require('../../../../config/logger');
 const adminActionAudit = require('../../services/adminActionAuditService');
+const { Op } = db.Sequelize;
+
+router.use(hrmFeatureFlag.checkHRMEnabled);
+router.use(authenticate);
+router.use(hrmHierarchy.applyHRMHierarchyFilter);
+
+const normalizeIds = (values) => Array.from(new Set(
+  (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0)
+));
+
+const buildScopedSchemeWhere = (adminUser, extraWhere = {}) => {
+  const filters = adminUser?.hrm_scope_filters || adminUser?.dataValues?.hrm_scope_filters || {};
+  const where = { is_deleted: false, ...extraWhere };
+
+  if (filters.block_all) {
+    where.scheme_id = { [Op.in]: [] };
+    return where;
+  }
+
+  if (Array.isArray(filters.scheme_ids) && filters.scheme_ids.length > 0) {
+    where.scheme_id = { [Op.in]: filters.scheme_ids };
+  }
+
+  if (Array.isArray(filters.district_ids) && filters.district_ids.length > 0) {
+    where.district_id = { [Op.in]: filters.district_ids };
+  } else if (filters.district_id) {
+    where.district_id = filters.district_id;
+  }
+
+  if (Array.isArray(filters.scheme_type_ids) && filters.scheme_type_ids.length > 0) {
+    where.scheme_type_id = { [Op.in]: filters.scheme_type_ids };
+  } else if (filters.scheme_type_id) {
+    where.scheme_type_id = filters.scheme_type_id;
+  }
+
+  return where;
+};
+
+const getScopedSchemes = async (adminUser, extraWhere = {}) => db.Scheme.findAll({
+  where: buildScopedSchemeWhere(adminUser, extraWhere),
+  attributes: ['scheme_id', 'scheme_code', 'scheme_name', 'district_id', 'scheme_type_id'],
+  include: [
+    {
+      model: db.DistrictMaster,
+      as: 'district',
+      attributes: ['district_id', 'district_name'],
+      required: false
+    },
+    {
+      model: db.SchemeType,
+      as: 'schemeType',
+      attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+      required: false
+    }
+  ],
+  order: [['scheme_name', 'ASC']]
+});
+
+const getScopeOptions = async (adminUser) => {
+  const schemes = await getScopedSchemes(adminUser, { is_active: true });
+  const districtMap = new Map();
+  const schemeTypeMap = new Map();
+
+  schemes.forEach((scheme) => {
+    if (scheme.district) {
+      districtMap.set(scheme.district.district_id, {
+        district_id: scheme.district.district_id,
+        district_name: scheme.district.district_name
+      });
+    }
+    if (scheme.schemeType) {
+      schemeTypeMap.set(scheme.schemeType.scheme_type_id, {
+        scheme_type_id: scheme.schemeType.scheme_type_id,
+        scheme_code: scheme.schemeType.scheme_code,
+        scheme_name: scheme.schemeType.scheme_name
+      });
+    }
+  });
+
+  return {
+    districts: Array.from(districtMap.values()).sort((a, b) => String(a.district_name).localeCompare(String(b.district_name))),
+    scheme_types: Array.from(schemeTypeMap.values()).sort((a, b) => String(a.scheme_name).localeCompare(String(b.scheme_name))),
+    schemes: schemes.map((scheme) => ({
+      scheme_id: scheme.scheme_id,
+      scheme_code: scheme.scheme_code,
+      scheme_name: scheme.scheme_name,
+      district_id: scheme.district_id,
+      district_name: scheme.district?.district_name || null,
+      scheme_type_id: scheme.scheme_type_id,
+      scheme_type_code: scheme.schemeType?.scheme_code || null,
+      scheme_type_name: scheme.schemeType?.scheme_name || null
+    }))
+  };
+};
+
+const getVisibleSchemeTypeIds = async (adminUser) => {
+  const filters = adminUser?.hrm_scope_filters || adminUser?.dataValues?.hrm_scope_filters || {};
+
+  if (filters.block_all) {
+    return [];
+  }
+
+  if (Array.isArray(filters.scheme_type_ids) && filters.scheme_type_ids.length > 0) {
+    return normalizeIds(filters.scheme_type_ids);
+  }
+
+  if (filters.scheme_type_id) {
+    return normalizeIds([filters.scheme_type_id]);
+  }
+
+  const options = await getScopeOptions(adminUser);
+  return normalizeIds(options.scheme_types.map((type) => type.scheme_type_id));
+};
+
+const canManageGlobalSettings = (req) => {
+  const scopeLevel = req.hrmScope?.level;
+  return ['STATE', 'ALL'].includes(scopeLevel);
+};
+
+const assertGlobalSettingScope = (req) => {
+  if (!canManageGlobalSettings(req)) {
+    throw new ApiError(403, 'Only unrestricted CHRMS admins can manage global audit settings');
+  }
+};
+
+const assertSchemeTypeInScope = async (adminUser, schemeTypeId) => {
+  const visibleSchemeTypeIds = await getVisibleSchemeTypeIds(adminUser);
+  if (!visibleSchemeTypeIds.includes(Number(schemeTypeId))) {
+    throw new ApiError(403, 'Selected scheme type is outside your CHRMS access scope');
+  }
+};
+
+const assertSchemeInScope = async (adminUser, schemeId) => {
+  const scheme = await db.Scheme.findOne({
+    where: buildScopedSchemeWhere(adminUser, {
+      scheme_id: Number(schemeId),
+      is_active: true
+    }),
+    attributes: ['scheme_id']
+  });
+
+  if (!scheme) {
+    throw new ApiError(403, 'Selected scheme is outside your CHRMS access scope');
+  }
+};
+
+const PAYROLL_ROUNDING_BASIS = ['NET_PAYABLE', 'PER_DAY_RATE', 'BOTH'];
+const PAYROLL_ROUNDING_METHOD = ['NONE', 'NEAREST', 'UP', 'DOWN', 'HALF_UP', 'HALF_DOWN'];
 
 // ==================== CHRMS ADMIN AUDIT SETTINGS ====================
 
 router.get('/admin-audit', authenticate, requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
   try {
+    assertGlobalSettingScope(req);
     const settings = await adminActionAudit.getSettings();
     return ApiResponse.success(res, {
       enabled: settings.enabled,
@@ -35,6 +187,7 @@ router.put('/admin-audit',
   adminActionAudit.requireAuditRemark,
   async (req, res, next) => {
     try {
+      assertGlobalSettingScope(req);
       const before = await adminActionAudit.getSettings({ forceRefresh: true });
       const enabled = req.body.enabled;
       const remarkRequired = req.body.remark_required ?? req.body.remarkRequired;
@@ -61,6 +214,18 @@ router.put('/admin-audit',
   }
 );
 
+router.get('/scope-options', authenticate, requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
+  try {
+    const options = await getScopeOptions(req.user);
+    return ApiResponse.success(res, {
+      ...options,
+      can_manage_global_settings: canManageGlobalSettings(req)
+    }, 'CHRMS settings scope options retrieved');
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ==================== PAYMENT DISTRIBUTION SETTINGS ====================
 
 /**
@@ -69,7 +234,11 @@ router.put('/admin-audit',
  */
 router.get('/payment-distribution', requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
   try {
+    const visibleSchemeTypeIds = await getVisibleSchemeTypeIds(req.user);
     const settings = await db.PaymentDistributionSetting.findAll({
+      where: visibleSchemeTypeIds.length > 0
+        ? { scheme_type_id: { [Op.in]: visibleSchemeTypeIds } }
+        : { scheme_type_id: { [Op.in]: [] } },
       include: [{
         model: db.SchemeType,
         as: 'schemeType',
@@ -95,6 +264,163 @@ router.get('/payment-distribution', requireHRMAdminPermission(['hrm.settings.vie
     next(error);
   }
 });
+
+// ==================== PAYROLL CALCULATION SETTINGS ====================
+
+router.get('/payroll-calculation-rules', authenticate, requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
+  try {
+    const visibleSchemeTypeIds = await getVisibleSchemeTypeIds(req.user);
+
+    const settings = visibleSchemeTypeIds.length > 0
+      ? await db.PayrollCalculationSetting.findAll({
+        where: {
+          scheme_type_id: { [Op.in]: visibleSchemeTypeIds },
+          is_active: true
+        },
+        include: [{
+          model: db.SchemeType,
+          as: 'schemeType',
+          attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+          required: true
+        }],
+        order: [['scheme_type_id', 'ASC']]
+      })
+      : [];
+
+    const result = settings.map((setting) => ({
+      setting_id: setting.setting_id,
+      scheme_type_id: setting.scheme_type_id,
+      scheme_type_code: setting.schemeType?.scheme_code || null,
+      scheme_type_name: setting.schemeType?.scheme_name || null,
+      rounding_basis: setting.rounding_basis,
+      rounding_method: setting.rounding_method,
+      created_at: setting.created_at,
+      updated_at: setting.updated_at
+    }));
+
+    return ApiResponse.success(res, {
+      rules: result,
+      options: {
+        rounding_basis: PAYROLL_ROUNDING_BASIS,
+        rounding_method: PAYROLL_ROUNDING_METHOD
+      }
+    }, 'Payroll calculation rules retrieved');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/payroll-calculation-rules/:schemeTypeId',
+  authenticate,
+  requireHRMAdminPermission(['hrm.settings.edit', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
+    try {
+      const schemeTypeId = Number(req.params.schemeTypeId);
+      const roundingBasis = String(req.body.rounding_basis || '').trim().toUpperCase();
+      const roundingMethod = String(req.body.rounding_method || '').trim().toUpperCase();
+
+      if (!Number.isInteger(schemeTypeId) || schemeTypeId <= 0) {
+        throw new ApiError(400, 'Valid scheme type is required');
+      }
+      if (!PAYROLL_ROUNDING_BASIS.includes(roundingBasis)) {
+        throw new ApiError(400, 'Invalid rounding basis');
+      }
+      if (!PAYROLL_ROUNDING_METHOD.includes(roundingMethod)) {
+        throw new ApiError(400, 'Invalid rounding method');
+      }
+
+      await assertSchemeTypeInScope(req.user, schemeTypeId);
+
+      const before = await db.PayrollCalculationSetting.findOne({
+        where: { scheme_type_id: schemeTypeId, is_active: true },
+        raw: true
+      });
+
+      const setting = before
+        ? await db.PayrollCalculationSetting.findByPk(before.setting_id)
+        : null;
+
+      const savedSetting = setting
+        ? await setting.update({
+          rounding_basis: roundingBasis,
+          rounding_method: roundingMethod,
+          updated_by: req.user.admin_id,
+          updated_at: new Date()
+        })
+        : await db.PayrollCalculationSetting.create({
+          scheme_type_id: schemeTypeId,
+          rounding_basis: roundingBasis,
+          rounding_method: roundingMethod,
+          is_active: true,
+          created_by: req.user.admin_id,
+          updated_by: req.user.admin_id
+        });
+
+      const responseData = {
+        setting_id: savedSetting.setting_id,
+        scheme_type_id: savedSetting.scheme_type_id,
+        rounding_basis: savedSetting.rounding_basis,
+        rounding_method: savedSetting.rounding_method
+      };
+
+      await adminActionAudit.recordAction(req, {
+        entityType: 'HRM_PAYROLL_CALCULATION_RULE',
+        entityId: schemeTypeId,
+        oldData: before,
+        newData: responseData
+      });
+
+      return ApiResponse.success(res, responseData, before ? 'Payroll calculation rule updated' : 'Payroll calculation rule created');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.delete('/payroll-calculation-rules/:schemeTypeId',
+  authenticate,
+  requireHRMAdminPermission(['hrm.settings.edit', 'hrm.*']),
+  adminActionAudit.requireAuditRemark,
+  async (req, res, next) => {
+    try {
+      const schemeTypeId = Number(req.params.schemeTypeId);
+      if (!Number.isInteger(schemeTypeId) || schemeTypeId <= 0) {
+        throw new ApiError(400, 'Valid scheme type is required');
+      }
+
+      await assertSchemeTypeInScope(req.user, schemeTypeId);
+
+      const before = await db.PayrollCalculationSetting.findOne({
+        where: { scheme_type_id: schemeTypeId, is_active: true },
+        raw: true
+      });
+
+      const deleted = await db.PayrollCalculationSetting.update({
+        is_active: false,
+        updated_by: req.user.admin_id,
+        updated_at: new Date()
+      }, {
+        where: { scheme_type_id: schemeTypeId, is_active: true }
+      });
+
+      if (!deleted[0]) {
+        throw new ApiError(404, 'Payroll calculation rule not found');
+      }
+
+      await adminActionAudit.recordAction(req, {
+        entityType: 'HRM_PAYROLL_CALCULATION_RULE',
+        entityId: schemeTypeId,
+        oldData: before,
+        newData: { is_active: false }
+      });
+
+      return ApiResponse.success(res, null, 'Payroll calculation rule removed');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 /**
  * @route PUT /api/hrm/admin/settings/payment-distribution/:schemeTypeId
@@ -134,6 +460,7 @@ router.put('/payment-distribution/:schemeTypeId',
     if (!schemeType) {
       throw new ApiError(404, 'Scheme type not found');
     }
+    await assertSchemeTypeInScope(req.user, schemeTypeId);
 
     // Check if setting already exists
     const existingSetting = await db.PaymentDistributionSetting.findOne({
@@ -199,6 +526,7 @@ router.delete('/payment-distribution/:schemeTypeId',
   async (req, res, next) => {
   try {
     const { schemeTypeId } = req.params;
+    await assertSchemeTypeInScope(req.user, schemeTypeId);
 
     const beforeSetting = await db.PaymentDistributionSetting.findOne({
       where: { scheme_type_id: parseInt(schemeTypeId) },
@@ -234,7 +562,11 @@ router.delete('/payment-distribution/:schemeTypeId',
  */
 router.get('/weekly-off-quota', requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
   try {
+    const visibleSchemeTypeIds = await getVisibleSchemeTypeIds(req.user);
     const settings = await db.WeeklyOffSetting.findAll({
+      where: visibleSchemeTypeIds.length > 0
+        ? { scheme_type_id: { [Op.in]: visibleSchemeTypeIds } }
+        : { scheme_type_id: { [Op.in]: [] } },
       include: [{
         model: db.SchemeType,
         as: 'schemeType',
@@ -286,6 +618,7 @@ router.put('/weekly-off-quota/:schemeTypeId',
     if (!schemeType || schemeType.is_deleted) {
       throw new ApiError(404, 'Scheme type not found');
     }
+    await assertSchemeTypeInScope(req.user, schemeTypeId);
 
     const existingSetting = await db.WeeklyOffSetting.findOne({
       where: { scheme_type_id: parseInt(schemeTypeId, 10) }
@@ -344,6 +677,7 @@ router.delete('/weekly-off-quota/:schemeTypeId',
   async (req, res, next) => {
   try {
     const { schemeTypeId } = req.params;
+    await assertSchemeTypeInScope(req.user, schemeTypeId);
 
     const beforeSetting = await db.WeeklyOffSetting.findOne({
       where: { scheme_type_id: parseInt(schemeTypeId, 10) },

@@ -44,7 +44,9 @@ const buildHierarchyFilter = (adminUser) => {
     }
 
     const where = {};
-    if (scopeFilters.district_id) {
+    if (Array.isArray(scopeFilters.district_ids) && scopeFilters.district_ids.length > 0) {
+      where.district_id = { [Op.in]: scopeFilters.district_ids };
+    } else if (scopeFilters.district_id) {
       where.district_id = scopeFilters.district_id;
     }
     if (Array.isArray(scopeFilters.scheme_ids)) {
@@ -74,7 +76,10 @@ const buildHierarchyFilter = (adminUser) => {
   }
 
   // District-level filtering (applies to District and Scheme admins)
-  if (adminUser.district_id) {
+  const districtIds = adminUser.district_ids || adminUser.dataValues?.district_ids || [];
+  if (Array.isArray(districtIds) && districtIds.length > 0) {
+    where.district_id = { [Op.in]: districtIds };
+  } else if (adminUser.district_id) {
     where.district_id = adminUser.district_id;
   }
 

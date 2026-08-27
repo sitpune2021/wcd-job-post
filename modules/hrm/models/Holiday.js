@@ -28,6 +28,33 @@ const Holiday = sequelize.define('HrmHoliday', {
       isIn: [['NATIONAL', 'STATE', 'OPTIONAL']]
     }
   },
+  district_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'district_master',
+      key: 'district_id'
+    },
+    comment: 'Optional district scope for HRM holiday'
+  },
+  scheme_type_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_scheme_types',
+      key: 'scheme_type_id'
+    },
+    comment: 'Optional scheme type scope for HRM holiday'
+  },
+  scheme_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'ms_schemes',
+      key: 'scheme_id'
+    },
+    comment: 'Optional scheme scope for HRM holiday'
+  },
   description: {
     type: DataTypes.TEXT,
     allowNull: true,

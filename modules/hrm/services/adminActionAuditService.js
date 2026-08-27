@@ -34,16 +34,35 @@ const cleanRequestData = (body = {}) => {
   return clone;
 };
 
+const parseBooleanSetting = (value, fallback = false) => {
+  if (value === true || value === false) return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off', ''].includes(normalized)) return false;
+    try {
+      return parseBooleanSetting(JSON.parse(value), fallback);
+    } catch (_error) {
+      return fallback;
+    }
+  }
+  if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
+    return parseBooleanSetting(value.value, fallback);
+  }
+  return fallback;
+};
+
 const getBooleanSetting = async (key, fallback = false) => {
   const setting = await db.PortalSetting.findOne({
     where: { setting_key: key },
     attributes: ['setting_value']
   });
 
-  if (setting?.setting_value === true || setting?.setting_value === false) {
-    return setting.setting_value;
-  }
-  return fallback;
+  return parseBooleanSetting(setting?.setting_value, fallback);
 };
 
 const getSettings = async ({ forceRefresh = false } = {}) => {
@@ -115,7 +134,7 @@ const getAdminName = (req) => (
 
 const requireAuditRemark = async (req, _res, next) => {
   try {
-    const settings = await getSettings();
+    const settings = await getSettings({ forceRefresh: true });
     if (!settings.enabled || !settings.remarkRequired) {
       return next();
     }
@@ -132,7 +151,7 @@ const requireAuditRemark = async (req, _res, next) => {
 
 const recordAction = async (req, options = {}) => {
   try {
-    const settings = await getSettings();
+    const settings = await getSettings({ forceRefresh: true });
     if (!settings.enabled) return null;
 
     const sql = `

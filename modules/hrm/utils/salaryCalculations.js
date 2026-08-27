@@ -13,6 +13,38 @@ const toNumber = (value, fallback = 0) => {
 const roundMoney = (value) => parseFloat(toNumber(value).toFixed(2));
 const roundRupee = (value) => Math.round(toNumber(value));
 
+const DEFAULT_PAYROLL_RULE = {
+  rounding_basis: 'NET_PAYABLE',
+  rounding_method: 'NEAREST'
+};
+
+const normalizePayrollRule = (rule = {}) => ({
+  rounding_basis: rule?.rounding_basis || DEFAULT_PAYROLL_RULE.rounding_basis,
+  rounding_method: rule?.rounding_method || DEFAULT_PAYROLL_RULE.rounding_method
+});
+
+const applyRoundingRule = (value, method) => {
+  const amount = toNumber(value);
+  switch (method) {
+    case 'NONE':
+      return roundMoney(amount);
+    case 'UP':
+      return Math.ceil(amount);
+    case 'DOWN':
+      return Math.floor(amount);
+    case 'HALF_UP':
+    case 'NEAREST':
+      return Math.round(amount);
+    case 'HALF_DOWN': {
+      const floorValue = Math.floor(amount);
+      const fraction = amount - floorValue;
+      return fraction > 0.5 ? Math.ceil(amount) : floorValue;
+    }
+    default:
+      return roundRupee(amount);
+  }
+};
+
 const normalizeMonthlyPay = (value) => {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
@@ -110,8 +142,9 @@ const calculatePaidDays = (salaryDays, deductedDays) => {
  * - Additional deductions such as PT are applied after attendance proration.
  * - Net salary is till-date payable and is later split by payment distribution.
  */
-const calculateSalary = (employee, attendance) => {
+const calculateSalary = (employee, attendance, payrollRuleInput = null) => {
   try {
+    const payrollRule = normalizePayrollRule(payrollRuleInput);
     const monthlyPay = resolveEmployeeMonthlyPay(employee);
     const salaryDays = toNumber(attendance?.salary_days || attendance?.working_days, 0);
 
@@ -144,14 +177,20 @@ const calculateSalary = (employee, attendance) => {
       salaryDays
     );
     const futureDays = Math.min(Math.max(toNumber(attendance?.future_days, 0), 0), salaryDays);
-    // Keep the day rate exact for calculation; only final payable/net amount is rounded.
-    const perDaySalary = monthlyPay / salaryDays;
+    const rawPerDaySalary = monthlyPay / salaryDays;
+    // By default the day rate remains exact; scheme settings may explicitly round it.
+    const perDaySalary = ['PER_DAY_RATE', 'BOTH'].includes(payrollRule.rounding_basis)
+      ? applyRoundingRule(rawPerDaySalary, payrollRule.rounding_method)
+      : rawPerDaySalary;
     const earnedTillDate = Math.min(perDaySalary * paidDays, monthlyPay);
     const attendanceDeduction = Math.min(perDaySalary * deductedDays, Math.max(monthlyPay - earnedTillDate, 0));
     const futurePendingAmount = Math.max(monthlyPay - earnedTillDate - attendanceDeduction, 0);
     const calculatedSalary = Math.max(earnedTillDate, 0);
     const deductions = calculateDeductions(employee, monthlyPay);
-    const netSalary = roundRupee(Math.max(calculatedSalary - deductions.totalDeductions, 0));
+    const rawNetSalary = Math.max(calculatedSalary - deductions.totalDeductions, 0);
+    const netSalary = ['NET_PAYABLE', 'BOTH'].includes(payrollRule.rounding_basis)
+      ? applyRoundingRule(rawNetSalary, payrollRule.rounding_method)
+      : roundMoney(rawNetSalary);
 
     return {
       monthly_pay: roundMoney(monthlyPay),
@@ -167,7 +206,11 @@ const calculateSalary = (employee, attendance) => {
       additional_deductions: roundMoney(deductions.totalDeductions),
       total_deduction: roundMoney(attendanceDeduction + deductions.totalDeductions),
       net_salary: netSalary,
-      deduction_breakdown: deductions.breakdown
+      deduction_breakdown: deductions.breakdown,
+      calculation_rule: {
+        rounding_basis: payrollRule.rounding_basis,
+        rounding_method: payrollRule.rounding_method
+      }
     };
   } catch (error) {
     logger.error('Error calculating salary:', error);
@@ -214,10 +257,10 @@ const calculatePaymentSplit = (netSalary, paymentDistribution) => {
 /**
  * Generate complete payslip data.
  */
-const generatePayslip = (employee, attendance, month, year) => {
+const generatePayslip = (employee, attendance, month, year, payrollRule = null) => {
   try {
     const fullName = employee?.full_name || employee?.applicant?.personal?.full_name || employee?.employee_code;
-    const salary = calculateSalary(employee, attendance);
+    const salary = calculateSalary(employee, attendance, payrollRule);
 
     return {
       employee: {

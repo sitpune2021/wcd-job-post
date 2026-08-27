@@ -80,6 +80,7 @@ db.SchemeType = require('./SchemeType');
 db.Scheme = require('./Scheme')(sequelize, DataTypes);
 db.PaymentDistributionSetting = require('./PaymentDistributionSetting');
 db.WeeklyOffSetting = require('./WeeklyOffSetting');
+db.PayrollCalculationSetting = require('./PayrollCalculationSetting');
 
 // HRM Module Models
 const hrmModels = require('../modules/hrm/models');
@@ -309,6 +310,10 @@ db.SchemeType.hasOne(db.PaymentDistributionSetting, { foreignKey: 'scheme_type_i
 db.PaymentDistributionSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 db.SchemeType.hasOne(db.WeeklyOffSetting, { foreignKey: 'scheme_type_id', as: 'weeklyOffSetting' });
 db.WeeklyOffSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
+db.Scheme.hasOne(db.PayrollCalculationSetting, { foreignKey: 'scheme_id', as: 'payrollCalculationSetting' });
+db.PayrollCalculationSetting.belongsTo(db.Scheme, { foreignKey: 'scheme_id', as: 'scheme' });
+db.SchemeType.hasOne(db.PayrollCalculationSetting, { foreignKey: 'scheme_type_id', as: 'payrollCalculationSetting' });
+db.PayrollCalculationSetting.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // EmployeeMaster -> SchemeType (TODO: Add scheme_type_id column to ms_employee_master when implementing migration)
 // db.EmployeeMaster.belongsTo(db.SchemeType, { foreignKey: 'scheme_type_id', as: 'schemeType' });
 // db.SchemeType.hasMany(db.EmployeeMaster, { foreignKey: 'scheme_type_id', as: 'employees' });
@@ -375,6 +380,7 @@ const modelsWithAudit = [
   'PostAllotmentUpload', 'DocumentVerification', 'BannerMaster',
   'AllotmentEmailSchedule',
   'SchemeType', 'PaymentDistributionSetting', 'WeeklyOffSetting',
+  'PayrollCalculationSetting',
   'EmployeeMaster', 'EmployeeOnboardingLog', 'EmployeeBankDetail',
   // Phase 2 HRM Models
   'HrmAttendance', 'HrmLeaveType', 'HrmLeaveBalance', 'HrmLeaveApplication',

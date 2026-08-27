@@ -54,6 +54,11 @@ const AdminUser = sequelize.define('AdminUser', {
     },
     comment: 'District assignment for district-level admins'
   },
+  district_ids: {
+    type: DataTypes.ARRAY(DataTypes.INTEGER),
+    allowNull: true,
+    comment: 'Optional multiple district scope for CHRMS admins'
+  },
   scheme_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
@@ -71,6 +76,11 @@ const AdminUser = sequelize.define('AdminUser', {
       key: 'scheme_type_id'
     },
     comment: 'Optional scheme type filter for CHRMS scope'
+  },
+  scheme_type_ids: {
+    type: DataTypes.ARRAY(DataTypes.INTEGER),
+    allowNull: true,
+    comment: 'Optional multiple scheme type scope for CHRMS admins'
   },
   linked_employee_id: {
     type: DataTypes.INTEGER,
