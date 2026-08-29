@@ -582,6 +582,7 @@ router.get('/weekly-off-quota', requireHRMAdminPermission(['hrm.settings.view', 
       scheme_code: s.schemeType?.scheme_code,
       scheme_name: s.schemeType?.scheme_name,
       monthly_quota: parseInt(s.monthly_quota, 10),
+      quota_mode: s.quota_mode || 'COUNT_BASED',
       created_at: s.created_at,
       updated_at: s.updated_at
     }));
@@ -604,6 +605,11 @@ router.put('/weekly-off-quota/:schemeTypeId',
   try {
     const { schemeTypeId } = req.params;
     const { monthly_quota } = req.body;
+    const quotaMode = String(req.body.quota_mode || 'COUNT_BASED').trim().toUpperCase();
+
+    if (!['COUNT_BASED', 'SUNDAY_BASED'].includes(quotaMode)) {
+      throw new ApiError(400, 'Invalid weekly off quota mode');
+    }
 
     if (monthly_quota === undefined || monthly_quota === null || monthly_quota === '') {
       throw new ApiError(400, 'monthly_quota is required');
@@ -629,6 +635,7 @@ router.put('/weekly-off-quota/:schemeTypeId',
     if (existingSetting) {
       setting = await existingSetting.update({
         monthly_quota: monthlyQuota,
+        quota_mode: quotaMode,
         updated_by: req.user.admin_id,
         updated_at: new Date()
       });
@@ -636,6 +643,7 @@ router.put('/weekly-off-quota/:schemeTypeId',
       setting = await db.WeeklyOffSetting.create({
         scheme_type_id: parseInt(schemeTypeId, 10),
         monthly_quota: monthlyQuota,
+        quota_mode: quotaMode,
         created_by: req.user.admin_id
       });
     }
@@ -650,7 +658,8 @@ router.put('/weekly-off-quota/:schemeTypeId',
       scheme_type_id: setting.scheme_type_id,
       scheme_code: schemeType.scheme_code,
       scheme_name: schemeType.scheme_name,
-      monthly_quota: monthlyQuota
+      monthly_quota: monthlyQuota,
+      quota_mode: quotaMode
     };
 
     await adminActionAudit.recordAction(req, {

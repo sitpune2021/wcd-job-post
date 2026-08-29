@@ -27,6 +27,19 @@ router.get('/approvals', async (req, res, next) => {
   }
 });
 
+// Get leave application history under admin CHRMS scope
+router.get('/history', async (req, res, next) => {
+  try {
+    const { error, value } = leaveQuerySchema.validate(req.query);
+    if (error) return res.status(400).json({ success: false, message: error.details[0].message });
+
+    const result = await leaveService.getLeaveHistory(req.user, value);
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Approve or reject a leave application
 router.patch('/:id/action',
   requireHRMAdminPermission('hrm.leave.manage'),

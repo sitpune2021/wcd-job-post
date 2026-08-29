@@ -121,6 +121,70 @@ const validatePaidCasualLeaveConsecutiveLimit = async ({
   }
 };
 
+const getActiveLeaveType = async (leaveTypeId, transaction = null) => {
+  const where = leaveTypeId
+    ? { leave_type_id: leaveTypeId, is_active: true, is_deleted: false }
+    : { leave_code: 'CL', is_active: true, is_deleted: false };
+
+  let leaveType = await LeaveType.findOne({ where, transaction });
+  if (!leaveType && !leaveTypeId) {
+    leaveType = await LeaveType.findOne({
+      where: { is_active: true, is_deleted: false },
+      order: [['leave_type_id', 'ASC']],
+      transaction
+    });
+  }
+
+  if (!leaveType) {
+    throw new ApiError(400, leaveTypeId ? 'Invalid leave type.' : 'No active leave type found.');
+  }
+
+  return leaveType;
+};
+
+const getOrCreateUnifiedLeaveBalance = async (employeeId, year, transaction = null) => {
+  let balance = await LeaveBalance.findOne({
+    where: { employee_id: employeeId, leave_type_id: 1, year, is_deleted: false },
+    transaction,
+    lock: transaction ? transaction.LOCK.UPDATE : undefined
+  });
+
+  if (!balance) {
+    const defaultDays = parseInt(process.env.DEFAULT_LEAVE_DAYS, 10) || 11;
+    balance = await LeaveBalance.create({
+      employee_id: employeeId,
+      leave_type_id: 1,
+      year,
+      total_allocated: defaultDays,
+      used: 0,
+      remaining: defaultDays,
+      created_by: employeeId
+    }, { transaction });
+  }
+
+  return balance;
+};
+
+const applyUnifiedLeaveBalanceDelta = async (employeeId, year, deltaDays, transaction = null) => {
+  if (!deltaDays) return null;
+
+  const balance = await getOrCreateUnifiedLeaveBalance(employeeId, year, transaction);
+  const currentUsed = Number(balance.used || 0);
+  const currentRemaining = Number(balance.remaining || 0);
+
+  if (deltaDays > 0 && currentRemaining < deltaDays) {
+    throw new ApiError(400, `Insufficient leave balance. Available: ${currentRemaining}, requested: ${deltaDays}`);
+  }
+
+  await balance.update({
+    used: Math.max(currentUsed + deltaDays, 0),
+    remaining: Math.min(currentRemaining - deltaDays, Number(balance.total_allocated || currentRemaining - deltaDays)),
+    updated_at: new Date()
+  }, { transaction });
+
+  return balance;
+};
+
 /**
  * Ensure leave balances exist for an employee for the current year
  * Uses simple default days per year from leave type configuration
@@ -647,6 +711,240 @@ const getLeaveApprovals = async (adminUser, query) => {
   return buildResponse({ rows: processedRows, count }, query, {
     message: 'Leave approvals retrieved successfully'
   });
+};
+
+/**
+ * Get leave application history for admins, scoped by CHRMS hierarchy.
+ */
+const getLeaveHistory = async (adminUser, query = {}) => {
+  const employeeIds = await getEmployeeIdsUnderAdmin(adminUser, EmployeeMaster);
+
+  if (employeeIds.length === 0) {
+    return buildResponse({ rows: [], count: 0 }, query, {
+      message: 'No leave applications found under your jurisdiction'
+    });
+  }
+
+  const { page, limit, offset } = getPagination(query);
+  const now = new Date();
+  const year = parseInt(query.year, 10) || now.getFullYear();
+  const month = query.month ? parseInt(query.month, 10) : null;
+  const startDate = query.from_date || (month ? `${year}-${String(month).padStart(2, '0')}-01` : `${year}-01-01`);
+  const endDate = query.to_date || (month ? new Date(year, month, 0).toISOString().split('T')[0] : `${year}-12-31`);
+
+  const where = {
+    employee_id: { [Op.in]: employeeIds },
+    is_deleted: false,
+    [Op.and]: [
+      { from_date: { [Op.lte]: endDate } },
+      { to_date: { [Op.gte]: startDate } }
+    ]
+  };
+
+  if (query.status) {
+    where.status = query.status;
+  }
+  if (query.employee_id) {
+    const requestedEmployeeId = parseInt(query.employee_id, 10);
+    if (!employeeIds.includes(requestedEmployeeId)) {
+      throw new ApiError(403, 'You do not have permission to view this employee.');
+    }
+    where.employee_id = requestedEmployeeId;
+  }
+  if (query.search) {
+    const searchTerm = `%${String(query.search).trim()}%`;
+    where[Op.or] = [
+      { reason: { [Op.iLike]: searchTerm } },
+      { rejection_reason: { [Op.iLike]: searchTerm } },
+      { '$employee.employee_code$': { [Op.iLike]: searchTerm } },
+      { '$employee.applicant.email$': { [Op.iLike]: searchTerm } },
+      { '$employee.applicant.personal.full_name$': { [Op.iLike]: searchTerm } },
+      { '$employee.district.district_name$': { [Op.iLike]: searchTerm } },
+      { '$employee.scheme.scheme_name$': { [Op.iLike]: searchTerm } },
+      { '$employee.scheme.schemeType.scheme_name$': { [Op.iLike]: searchTerm } },
+      { '$employee.post.post_name$': { [Op.iLike]: searchTerm } },
+      { '$leaveType.leave_name$': { [Op.iLike]: searchTerm } },
+      { '$approver.full_name$': { [Op.iLike]: searchTerm } },
+      { '$approver.username$': { [Op.iLike]: searchTerm } }
+    ];
+  }
+
+  const employeeWhere = {};
+  if (query.district_id) employeeWhere.district_id = parseInt(query.district_id, 10);
+  if (query.scheme_id) employeeWhere.scheme_id = parseInt(query.scheme_id, 10);
+
+  const schemeWhere = {};
+  if (query.scheme_type_id) schemeWhere.scheme_type_id = parseInt(query.scheme_type_id, 10);
+
+  const include = [
+    {
+      model: LeaveType,
+      as: 'leaveType',
+      attributes: ['leave_code', 'leave_name'],
+      required: false
+    },
+    {
+      model: db.AdminUser,
+      as: 'approver',
+      attributes: ['admin_id', 'username', 'full_name'],
+      required: false
+    },
+    {
+      model: EmployeeMaster,
+      as: 'employee',
+      attributes: ['employee_id', 'employee_code', 'district_id', 'applicant_id', 'scheme_id', 'post_id', 'employment_status'],
+      where: employeeWhere,
+      required: true,
+      include: [
+        { model: DistrictMaster, as: 'district', attributes: ['district_name'], required: false },
+        { model: PostMaster, as: 'post', attributes: ['post_id', 'post_name'], required: false },
+        {
+          model: Scheme,
+          as: 'scheme',
+          attributes: ['scheme_id', 'scheme_name', 'scheme_type_id'],
+          where: schemeWhere,
+          required: Boolean(query.scheme_type_id),
+          include: [{
+            model: SchemeType,
+            as: 'schemeType',
+            attributes: ['scheme_type_id', 'scheme_code', 'scheme_name'],
+            required: false
+          }]
+        },
+        {
+          model: ApplicantMaster,
+          as: 'applicant',
+          attributes: ['applicant_id', 'email', 'mobile_no'],
+          include: [{
+            model: ApplicantPersonal,
+            as: 'personal',
+            attributes: ['full_name'],
+            required: false
+          }],
+          required: false
+        }
+      ]
+    }
+  ];
+
+  const { count, rows } = await LeaveApplication.findAndCountAll({
+    where,
+    include,
+    distinct: true,
+    subQuery: false,
+    order: [['created_at', 'DESC'], ['leave_id', 'DESC']],
+    limit,
+    offset
+  });
+
+  const processedRows = rows.map((leave) => {
+    const data = leave.toJSON ? leave.toJSON() : leave;
+    return {
+      ...data,
+      employee_name: data.employee?.applicant?.personal?.full_name || data.employee?.employee_code || 'Unknown',
+      employee_email: data.employee?.applicant?.email || null,
+      employee_mobile_no: data.employee?.applicant?.mobile_no || null,
+      employee_district_name: data.employee?.district?.district_name || null,
+      employee_scheme_name: data.employee?.scheme?.scheme_name || null,
+      employee_scheme_type_name:
+        data.employee?.scheme?.schemeType?.scheme_name ||
+        data.employee?.scheme?.schemeType?.scheme_code ||
+        null,
+      employee_post_name: data.employee?.post?.post_name || null,
+      action_by_name: data.approver?.full_name || data.approver?.username || null,
+      action_by_username: data.approver?.username || null
+    };
+  });
+
+  return buildResponse({ rows: processedRows, count }, query, {
+    message: 'Leave application history retrieved successfully'
+  });
+};
+
+/**
+ * Create or update a one-day approved leave when admin marks attendance as leave.
+ * Balance is adjusted only when the paid/unpaid state changes.
+ */
+const upsertAdminMarkedLeave = async ({
+  adminUser,
+  employee,
+  dateStr,
+  leaveTypeId = null,
+  isPaid = true,
+  reason = '',
+  transaction = null
+}) => {
+  const leaveType = await getActiveLeaveType(leaveTypeId, transaction);
+  const year = new Date(dateStr).getFullYear();
+  const paidLeave = isPaid !== false;
+  const totalDays = 1;
+
+  const overlappingLeaves = await LeaveApplication.findAll({
+    where: {
+      employee_id: employee.employee_id,
+      is_deleted: false,
+      status: { [Op.in]: ACTIVE_LEAVE_STATUSES },
+      from_date: { [Op.lte]: dateStr },
+      to_date: { [Op.gte]: dateStr }
+    },
+    transaction,
+    lock: transaction ? transaction.LOCK.UPDATE : undefined
+  });
+
+  const exactLeave = overlappingLeaves.find((leave) =>
+    String(leave.from_date).slice(0, 10) === dateStr &&
+    String(leave.to_date).slice(0, 10) === dateStr
+  );
+
+  if (overlappingLeaves.length > 0 && !exactLeave) {
+    throw new ApiError(400, `Leave application already exists for ${dateStr}. Please act on the existing leave application.`);
+  }
+
+  const wasPaid = exactLeave?.status === 'APPROVED' && exactLeave?.is_paid !== false;
+  const balanceDelta = (paidLeave ? totalDays : 0) - (wasPaid ? totalDays : 0);
+
+  if (paidLeave && isCasualLeave(leaveType)) {
+    await validatePaidCasualLeaveConsecutiveLimit({
+      employeeId: employee.employee_id,
+      leaveType,
+      fromDate: dateStr,
+      toDate: dateStr,
+      excludeLeaveId: exactLeave?.leave_id || null,
+      transaction
+    });
+  }
+
+  if (balanceDelta !== 0) {
+    await applyUnifiedLeaveBalanceDelta(employee.employee_id, year, balanceDelta, transaction);
+  }
+
+  const leavePayload = {
+    employee_id: employee.employee_id,
+    leave_type_id: leaveType.leave_type_id,
+    from_date: dateStr,
+    to_date: dateStr,
+    total_days: totalDays,
+    is_half_day: false,
+    half_day_type: null,
+    reason: reason || 'Marked by admin',
+    status: 'APPROVED',
+    approved_by: adminUser.admin_id,
+    approved_at: new Date(),
+    rejection_reason: null,
+    is_paid: paidLeave,
+    updated_by: adminUser.admin_id,
+    updated_at: new Date()
+  };
+
+  if (exactLeave) {
+    await exactLeave.update(leavePayload, { transaction });
+    return exactLeave;
+  }
+
+  return LeaveApplication.create({
+    ...leavePayload,
+    created_by: adminUser.admin_id
+  }, { transaction });
 };
 
 /**
@@ -1219,7 +1517,9 @@ module.exports = {
   getMyLeaves,
   cancelLeave,
   getLeaveApprovals,
+  getLeaveHistory,
   actionLeave,
+  upsertAdminMarkedLeave,
   getAdminLeaveSummary,
   getAdminLeaveSummaryPdfRows,
   getLeaveTypes

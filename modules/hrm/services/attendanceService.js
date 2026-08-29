@@ -15,6 +15,7 @@ const { buildEmployeeAttendanceSummary, buildAggregatedSummary, getAttendanceCou
 const { buildQueryOptions, buildResponse, COMMON_FIELDS } = require('../utils/hrmFilterBuilder');
 const { validateGeofence, detectDevice, getAllowedRadius } = require('../utils/geofencing');
 const { calculateAttendanceSummaries } = require('./simplePayrollViewService');
+const leaveService = require('./leaveService');
 
 const formatDateOnlyLocal = (date) => {
   const yyyy = date.getFullYear();
@@ -999,7 +1000,7 @@ const getAttendanceSummary = async (adminUser, query) => {
  * Mark attendance for employees (admin function)
  */
 const markAttendanceByAdmin = async (adminUser, data) => {
-  const { employee_ids, attendance_date, status, remarks, half_day_type, shift_type_id } = data;
+  const { employee_ids, attendance_date, status, remarks, half_day_type, shift_type_id, leave_type_id, is_paid } = data;
   
   // Validate admin permissions
   const employeeIds = await getEmployeeIdsUnderAdmin(adminUser, EmployeeMaster);
@@ -1075,6 +1076,21 @@ const markAttendanceByAdmin = async (adminUser, data) => {
           throw new ApiError(403, `Cannot mark attendance outside contract period for employee ${employee.employee_code}. Contract: ${employee.contract_start_date} to ${employee.contract_end_date}`);
         }
       }
+
+      let linkedLeave = null;
+      let effectiveRemarks = remarks || null;
+      if (status === 'ON_LEAVE') {
+        linkedLeave = await leaveService.upsertAdminMarkedLeave({
+          adminUser,
+          employee,
+          dateStr,
+          leaveTypeId: leave_type_id,
+          isPaid: is_paid !== false,
+          reason: remarks || 'Marked by admin',
+          transaction: t
+        });
+        effectiveRemarks = `${linkedLeave.is_paid === false ? 'Unpaid' : 'Paid'} Leave${remarks ? `: ${remarks}` : ': Marked by admin'}`;
+      }
       
       // Check if attendance already exists
       const existing = await Attendance.findOne({
@@ -1093,7 +1109,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
         const previousStatus = existing.status;
         attendance.previous_status = previousStatus;
         attendance.status = status;
-        attendance.remarks = remarks;
+        attendance.remarks = effectiveRemarks;
         attendance.half_day_type = (status === 'HALF_DAY') ? half_day_type : null;
         attendance.status_changed_by = adminUser.admin_id;
         attendance.status_changed_at = new Date();
@@ -1109,7 +1125,7 @@ const markAttendanceByAdmin = async (adminUser, data) => {
           employee_id: parseInt(employee_id),
           attendance_date: dateStr,
           status: status,
-          remarks: remarks || null,
+          remarks: effectiveRemarks,
           half_day_type: (status === 'HALF_DAY') ? half_day_type : null,
           shift_type_id: shift_type_id || null,
           check_in_time: status === 'PRESENT' ? '09:00:00' : null,
@@ -1131,6 +1147,11 @@ const markAttendanceByAdmin = async (adminUser, data) => {
         status: attendance.status,
         action: existing ? 'updated' : 'created'
       };
+
+      if (linkedLeave) {
+        result.leave_id = linkedLeave.leave_id;
+        result.is_paid_leave = linkedLeave.is_paid !== false;
+      }
       
       // Include audit trail info when attendance was overridden
       if (existing) {

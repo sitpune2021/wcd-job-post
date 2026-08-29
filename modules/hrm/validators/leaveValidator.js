@@ -34,6 +34,8 @@ const leaveQuery = Joi.object({
   status: Joi.string().valid('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'),
   month: Joi.number().integer().min(1).max(12),
   year: Joi.number().integer().min(2020).max(2100),
+  from_date: Joi.date().iso(),
+  to_date: Joi.date().iso().min(Joi.ref('from_date')),
   employee_id: Joi.number().integer().min(1),
   district_id: Joi.number().integer().min(1),
   scheme_type_id: Joi.number().integer().min(1),

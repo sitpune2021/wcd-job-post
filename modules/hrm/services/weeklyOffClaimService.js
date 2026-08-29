@@ -8,7 +8,8 @@ const {
   EmployeeMaster,
   HrmAttendance: Attendance,
   HrmLeaveApplication: LeaveApplication,
-  Scheme
+  Scheme,
+  WeeklyOffSetting
 } = db;
 
 const DEFAULT_MONTHLY_QUOTA = 4;
@@ -86,7 +87,27 @@ async function findEmployeeForQuota(employeeId, transaction = null) {
 }
 
 async function getWeeklyOffQuotaForEmployee(employee, transaction = null, monthCode = null) {
-  return getSundayQuotaForMonthCode(monthCode || getMonthCode(new Date()));
+  const schemeTypeId = employee?.scheme?.scheme_type_id;
+  if (!schemeTypeId) {
+    return DEFAULT_MONTHLY_QUOTA;
+  }
+
+  const setting = await WeeklyOffSetting.findOne({
+    where: { scheme_type_id: schemeTypeId },
+    transaction
+  });
+
+  const quotaMode = String(setting?.quota_mode || 'COUNT_BASED').trim().toUpperCase();
+  if (quotaMode === 'SUNDAY_BASED') {
+    return getSundayQuotaForMonthCode(monthCode || getMonthCode(new Date()));
+  }
+
+  const configuredQuota = Number.parseInt(setting?.monthly_quota, 10);
+  if (Number.isInteger(configuredQuota) && configuredQuota >= 0) {
+    return Math.min(configuredQuota, MAX_MONTHLY_QUOTA);
+  }
+
+  return DEFAULT_MONTHLY_QUOTA;
 }
 
 async function getWeeklyOffQuotaForEmployeeId(employeeId, transaction = null, monthCode = null) {
@@ -219,7 +240,7 @@ function trimVisibleClaimsToQuota(claims, monthlyQuota) {
 
 /**
  * Generate monthly weekly off entitlements for all active employees.
- * Monthly quota is derived from the number of Sundays in the entitlement month.
+ * Each scheme type can use either a fixed quota or a Sunday-based quota.
  */
 async function generateWeeklyOffEntitlements(employeeId = null, retryCount = 0) {
   try {

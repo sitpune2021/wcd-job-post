@@ -25,6 +25,12 @@ const WeeklyOffSetting = sequelize.define('WeeklyOffSetting', {
       max: 10
     }
   },
+  quota_mode: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    defaultValue: 'COUNT_BASED',
+    comment: 'COUNT_BASED uses monthly_quota. SUNDAY_BASED derives quota from Sundays in the month.'
+  },
   created_by: {
     type: DataTypes.INTEGER,
     allowNull: true
