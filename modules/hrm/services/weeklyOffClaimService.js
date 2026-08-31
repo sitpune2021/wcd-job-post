@@ -13,7 +13,7 @@ const {
 } = db;
 
 const DEFAULT_MONTHLY_QUOTA = 4;
-const MAX_MONTHLY_QUOTA = 5;
+const MAX_MONTHLY_QUOTA = 10;
 const CLAIM_SLOT_STATUSES = ['PENDING', 'APPROVED'];
 const ACTIVE_LEAVE_STATUSES = ['PENDING', 'APPROVED'];
 const WEEKLY_OFF_OVERRIDABLE_ATTENDANCE_STATUSES = ['ABSENT', 'WEEKLY_OFF', 'SUNDAY', 'HOLIDAY', 'NOT_MARKED'];
@@ -60,7 +60,7 @@ function getSundayQuotaForMonthCode(monthCode) {
     }
   }
 
-  return Math.min(Math.max(sundayCount, DEFAULT_MONTHLY_QUOTA), MAX_MONTHLY_QUOTA);
+  return Math.max(sundayCount, DEFAULT_MONTHLY_QUOTA);
 }
 
 function addDaysToDateText(dateText, days) {
@@ -99,7 +99,7 @@ async function getWeeklyOffQuotaForEmployee(employee, transaction = null, monthC
 
   const quotaMode = String(setting?.quota_mode || 'COUNT_BASED').trim().toUpperCase();
   if (quotaMode === 'SUNDAY_BASED') {
-    return getSundayQuotaForMonthCode(monthCode || getMonthCode(new Date()));
+    return Math.min(getSundayQuotaForMonthCode(monthCode || getMonthCode(new Date())), MAX_MONTHLY_QUOTA);
   }
 
   const configuredQuota = Number.parseInt(setting?.monthly_quota, 10);
