@@ -107,14 +107,15 @@ router.get('/payslips/export', async (req, res, next) => {
       { header: 'Scheme Type', key: 'scheme_type_name', width: 22 },
       { header: 'Scheme Name', key: 'scheme_name', width: 28 },
       { header: 'Basic Pay', key: 'basic_pay', width: 16 },
-      { header: 'Present Days', key: 'present_days', width: 14 },
-      { header: 'Absent Days', key: 'absent_days', width: 14 },
-      { header: 'Total Days', key: 'total_days', width: 14 },
-      { header: 'Weekly Off Days', key: 'weekly_off_days', width: 16 },
-      { header: 'Leave Days', key: 'leave_days', width: 14 },
-      { header: 'Half Days', key: 'half_days', width: 14 },
-      { header: 'Attendance Deduction', key: 'attendance_deduction', width: 20 },
-      { header: 'PT Deduction', key: 'pt_deduction', width: 16 },
+      // Payroll totals already apply the approved weekly-off/leave precedence.
+      // Keep absent/total-day columns available for a later report layout change.
+      // { header: 'Absent Days', key: 'absent_days', width: 14 },
+      // { header: 'Total Days', key: 'total_days', width: 14 },
+      { header: 'Total Present Days', key: 'total_present_days', width: 18 },
+      { header: 'Paid Leave Days', key: 'paid_leave_days', width: 17, group: 'Leave Days' },
+      { header: 'Unpaid Leave / Absent Days', key: 'unpaid_leave_absent_days', width: 22, group: 'Leave Days' },
+      { header: 'Attendance Deduction', key: 'attendance_deduction', width: 20, group: 'Deductions' },
+      { header: 'PT Deduction', key: 'pt_deduction', width: 16, group: 'Deductions' },
       { header: 'Centre Share Payment Amount', key: 'center_share_payment_amount', width: 24 },
       { header: 'State Share Payment Amount', key: 'state_share_payment_amount', width: 24 },
       { header: 'Net Payable', key: 'total_amount', width: 16 }

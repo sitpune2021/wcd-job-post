@@ -384,7 +384,7 @@ const calculateAttendanceSummaries = async (employees, month, year, options = {}
     const attendanceDate = normalizeDateOnly(record.attendance_date);
     if (!attendanceDate) return;
     const key = `${record.employee_id}:${attendanceDate}`;
-    attendanceByEmployeeDate.set(key, record.status);
+    attendanceByEmployeeDate.set(key, record);
   });
 
   const weeklyOffByEmployeeDate = new Set();
@@ -449,7 +449,8 @@ const calculateAttendanceSummaries = async (employees, month, year, options = {}
 
     salaryDates.forEach((dateText) => {
       const dayKey = `${employee.employee_id}:${dateText}`;
-      const attendanceStatus = attendanceByEmployeeDate.get(dayKey);
+      const attendanceRecord = attendanceByEmployeeDate.get(dayKey);
+      const attendanceStatus = attendanceRecord?.status;
       const leaves = approvedLeavesByEmployeeDate.get(dayKey) || [];
       const hasApprovedWeeklyOff = weeklyOffByEmployeeDate.has(dayKey) || attendanceStatus === 'WEEKLY_OFF';
       const isFutureUndueDay = dateText > dueEndText;
@@ -481,6 +482,45 @@ const calculateAttendanceSummaries = async (employees, month, year, options = {}
       const paidFullLeave = leaves.find((leave) => !leave.is_half_day && leave.is_paid !== false);
       const unpaidFullLeave = leaves.find((leave) => !leave.is_half_day && leave.is_paid === false);
       const halfDayLeave = leaves.find((leave) => leave.is_half_day);
+
+      // Leave approval creates ON_LEAVE/HALF_DAY attendance records. Any different
+      // saved attendance status is an explicit admin override and must match the
+      // attendance PDF instead of counting the same date as leave as well.
+      const attendanceMatchesApprovedLeave = (
+        (attendanceStatus === 'ON_LEAVE' && (paidFullLeave || unpaidFullLeave))
+        || (attendanceStatus === 'HALF_DAY' && halfDayLeave)
+      );
+      if (attendanceStatus && !attendanceMatchesApprovedLeave) {
+        switch (attendanceStatus) {
+          case 'PRESENT':
+            summary.present_days += 1;
+            summary.paid_days += 1;
+            break;
+          case 'HALF_DAY':
+            summary.half_days += 1;
+            summary.half_day_days += 0.5;
+            summary.paid_days += 0.5;
+            summary.deducted_days += 0.5;
+            break;
+          case 'ON_LEAVE':
+            summary.leave_days += 1;
+            summary.paid_leave_days += 1;
+            summary.paid_days += 1;
+            break;
+          case 'WEEKLY_OFF':
+            summary.weekly_off_days += 1;
+            summary.paid_days += 1;
+            break;
+          case 'ABSENT':
+          case 'HOLIDAY':
+          case 'SUNDAY':
+          default:
+            summary.absent_days += 1;
+            summary.deducted_days += 1;
+            break;
+        }
+        return;
+      }
 
       if (paidFullLeave) {
         summary.leave_days += 1;
@@ -857,12 +897,17 @@ const getPayrollPaymentLogRows = async (adminUser, filters) => {
     employee_district: payslip.bank.employee_district || payslip.employee.district_name,
     scheme_type_name: payslip.employee.scheme_type_name,
     scheme_name: payslip.employee.scheme_name,
-    present_days: payslip.attendance.present_days || 0,
+    // Use the same attendance summary used to calculate salary. Weekly offs and
+    // half-days are paid attendance; paid/unpaid leave remains separately visible.
+    total_present_days: toNumber(payslip.attendance.present_days)
+      + toNumber(payslip.attendance.weekly_off_days)
+      + toNumber(payslip.attendance.half_day_days),
     absent_days: payslip.attendance.absent_days || 0,
     total_days: payslip.attendance.salary_days || payslip.attendance.working_days || 0,
-    weekly_off_days: payslip.attendance.weekly_off_days || 0,
-    leave_days: payslip.attendance.leave_days || 0,
-    half_days: payslip.attendance.half_days || 0,
+    paid_leave_days: payslip.attendance.paid_leave_days || 0,
+    // deducted_days is the complete unpaid-day total: direct absences, unpaid
+    // leave, and the unpaid 0.5 portion of every half-day attendance record.
+    unpaid_leave_absent_days: payslip.attendance.deducted_days || 0,
     attendance_deduction: payslip.salary.attendance_deduction,
     pt_deduction: (payslip.salary.deduction_breakdown || [])
       .filter((deduction) => String(deduction.name || '').trim().toLowerCase() === 'professional tax')

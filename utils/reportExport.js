@@ -10,11 +10,17 @@ const sanitizeFileName = (value) => {
 const sendXlsxFromRows = async (res, filename, columns, rows) => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Report');
-  sheet.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 25 }));
-  const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true };
-  headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-  headerRow.eachCell((cell) => {
+  const hasHeaderGroups = columns.some((column) => column.group);
+  sheet.columns = columns.map((c) => ({
+    ...(hasHeaderGroups ? {} : { header: c.header }),
+    key: c.key,
+    width: c.width || 25
+  }));
+
+  const styleHeaderRow = (headerRow) => {
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    headerRow.eachCell((cell) => {
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
@@ -26,7 +32,37 @@ const sendXlsxFromRows = async (res, filename, columns, rows) => {
       bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
       right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
     };
-  });
+    });
+  };
+
+  if (hasHeaderGroups) {
+    let columnIndex = 1;
+    while (columnIndex <= columns.length) {
+      const column = columns[columnIndex - 1];
+      if (!column.group) {
+        sheet.getCell(1, columnIndex).value = column.header;
+        sheet.mergeCells(1, columnIndex, 2, columnIndex);
+        columnIndex += 1;
+        continue;
+      }
+
+      let groupEnd = columnIndex;
+      while (groupEnd < columns.length && columns[groupEnd].group === column.group) {
+        groupEnd += 1;
+      }
+      sheet.getCell(1, columnIndex).value = column.group;
+      sheet.mergeCells(1, columnIndex, 1, groupEnd);
+      for (let childIndex = columnIndex; childIndex <= groupEnd; childIndex += 1) {
+        sheet.getCell(2, childIndex).value = columns[childIndex - 1].header;
+      }
+      columnIndex = groupEnd + 1;
+    }
+    styleHeaderRow(sheet.getRow(1));
+    styleHeaderRow(sheet.getRow(2));
+  } else {
+    styleHeaderRow(sheet.getRow(1));
+  }
+
   rows.forEach((r, idx) => {
     const rowData = {};
     columns.forEach((c) => {
@@ -265,7 +301,33 @@ const buildSimpleReportHtml = (title, columns, rows, options = {}) => {
     return `<col style="width: ${widthPercent}%;" />`;
   }).join('');
   
-  const ths = columns.map((c) => `<th>${escapeHtml(c.header)}</th>`).join('');
+  const hasHeaderGroups = columns.some((column) => column.group);
+  const headerRows = hasHeaderGroups
+    ? (() => {
+      const topCells = [];
+      const childCells = [];
+      let columnIndex = 0;
+      while (columnIndex < columns.length) {
+        const column = columns[columnIndex];
+        if (!column.group) {
+          topCells.push(`<th rowspan="2">${escapeHtml(column.header)}</th>`);
+          columnIndex += 1;
+          continue;
+        }
+
+        let groupEnd = columnIndex + 1;
+        while (groupEnd < columns.length && columns[groupEnd].group === column.group) {
+          groupEnd += 1;
+        }
+        topCells.push(`<th colspan="${groupEnd - columnIndex}">${escapeHtml(column.group)}</th>`);
+        for (let childIndex = columnIndex; childIndex < groupEnd; childIndex += 1) {
+          childCells.push(`<th>${escapeHtml(columns[childIndex].header)}</th>`);
+        }
+        columnIndex = groupEnd;
+      }
+      return `<tr>${topCells.join('')}</tr><tr>${childCells.join('')}</tr>`;
+    })()
+    : `<tr>${columns.map((c) => `<th>${escapeHtml(c.header)}</th>`).join('')}</tr>`;
   const trs =
     rows.length === 0
       ? `<tr class="empty"><td colspan="${columns.length}">No records found</td></tr>`
@@ -357,7 +419,7 @@ const buildSimpleReportHtml = (title, columns, rows, options = {}) => {
     <div class="subdesc">Generated on ${generatedAt} • Records: ${rows.length}</div>
     <table>
       <colgroup>${colgroup}</colgroup>
-      <thead><tr>${ths}</tr></thead>
+      <thead>${headerRows}</thead>
       <tbody>${trs}</tbody>
     </table>
   </div>
