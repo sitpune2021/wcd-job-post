@@ -6,7 +6,7 @@
 module.exports = {
   // Work hour thresholds (in hours)
   FULL_DAY_MIN_HOURS: 8,       // Reference only (not used for status)
-  HALF_DAY_MIN_HOURS: 4,       // >= 4h = PRESENT, < 4h = HALF_DAY
+  HALF_DAY_MIN_HOURS: 7,       // >= 4h = PRESENT, < 4h = HALF_DAY
   
   // Double shift detection
   DOUBLE_SHIFT_HOURS: 16,      // >= 16h total = double shift flag
