@@ -464,11 +464,12 @@ const getPostById = async (postId, language = 'en') => {
  * @param {number} userId - User creating the post
  * @returns {Promise<Object>} Created post
  */
-const createPost = async (data, userId) => {
+const createPost = async (data, userId, options = {}) => {
   try {
+    const { transaction } = options;
     const requestedDriveId = parseOptionalInt(data.recruitment_drive_id);
     const targetDrive = Number.isInteger(requestedDriveId)
-      ? await db.RecruitmentDrive.findByPk(requestedDriveId)
+      ? await db.RecruitmentDrive.findByPk(requestedDriveId, { transaction })
       : null;
     if (Number.isInteger(requestedDriveId) && !targetDrive) {
       throw new ApiError(404, 'Recruitment drive not found');
@@ -535,7 +536,7 @@ const createPost = async (data, userId) => {
       ),
       is_deleted: parseOptionalBool(data.is_deleted) || false,
       created_by: userId
-    });
+    }, { transaction });
 
     if (Object.prototype.hasOwnProperty.call(data, 'allowed_category_ids')) {
       await setPostCategories(post.post_id, parseIntArray(data.allowed_category_ids), userId);

@@ -55,7 +55,10 @@ class EmailService {
     if (userType === 'ADMIN') {
       return process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL;
     }
-    return process.env.APPLICANT_FRONTEND_URL || process.env.FRONTEND_URL;
+    if (userType === 'HRM') {
+      return process.env.HRM_FRONTEND_URL || process.env.APPLICANT_FRONTEND_URL || process.env.FRONTEND_URL;
+    }
+    return process.env.RECRUITMENT_FRONTEND_URL || process.env.APPLICANT_FRONTEND_URL || process.env.FRONTEND_URL;
   }
 
   /**

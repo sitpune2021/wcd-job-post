@@ -550,7 +550,7 @@ async function sendEmployeeOnboardingEmail(employeeId, adminId, ipAddress, force
       districtName: employee.district?.district_name || 'N/A',
       schemeName: employee.scheme?.scheme_name || 'N/A',
       contractStartDate: employee.contract_start_date,
-      loginUrl: process.env.APPLICANT_FRONTEND_URL + '/login',
+      loginUrl: `${process.env.HRM_FRONTEND_URL || process.env.APPLICANT_FRONTEND_URL || process.env.FRONTEND_URL || ''}/login`,
       customMessage: customMessage || 'Welcome to the team!'
     };
 

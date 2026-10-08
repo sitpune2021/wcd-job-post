@@ -217,9 +217,14 @@ router.put('/admin-audit',
 router.get('/scope-options', authenticate, requireHRMAdminPermission(['hrm.settings.view', 'hrm.*']), async (req, res, next) => {
   try {
     const options = await getScopeOptions(req.user);
+    const auditSettings = await adminActionAudit.getSettings();
     return ApiResponse.success(res, {
       ...options,
-      can_manage_global_settings: canManageGlobalSettings(req)
+      can_manage_global_settings: canManageGlobalSettings(req),
+      // Scoped admins may not change this global setting, but need its value
+      // so the frontend can collect the required remark before mutating data.
+      audit_enabled: auditSettings.enabled,
+      audit_remark_required: auditSettings.remarkRequired
     }, 'CHRMS settings scope options retrieved');
   } catch (error) {
     next(error);
