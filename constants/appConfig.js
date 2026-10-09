@@ -80,7 +80,7 @@ const APP_CONFIG = {
   
   // ==================== MERIT CALCULATION CRITERIA ====================
   MERIT_CRITERIA: {
-    AGE_PREFERENCE: 'OLDER', // Options: 'YOUNGER' or 'OLDER'
+    AGE_PREFERENCE: 'YOUNGER', // Options: 'YOUNGER' or 'OLDER'
   }
 };
 

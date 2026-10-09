@@ -97,9 +97,9 @@ const changeStatus = async (applicationId, newStatus, options = {}) => {
  * 
  * @param {number|Object} applicationOrId - Application ID or pre-fetched Application object with includes
  * @param {Object} transaction - Optional Sequelize transaction
- * @returns {Promise<number>} Calculated merit score
+ * @returns {Promise<Object>} Explicit merit factors used for ranking
  */
-const calculateMeritScore = async (applicationOrId, transaction = null) => {
+const calculateMeritFactors = async (applicationOrId, transaction = null) => {
   try {
     let application;
     let applicationId;
@@ -204,14 +204,19 @@ const calculateMeritScore = async (applicationOrId, transaction = null) => {
 
     if (applicant?.experience && applicant.experience.length > 0) {
       for (const exp of applicant.experience) {
-        // Use pre-calculated total_months if available
-        if (exp.total_months) {
-          totalExperienceMonths += exp.total_months;
-        } else if (exp.start_date) {
+        // Prefer dates so a correction to an experience record is reflected
+        // immediately; use the stored value only when dates are unavailable.
+        if (exp.start_date) {
           const start = new Date(exp.start_date);
           const end = exp.is_current || !exp.end_date ? new Date() : new Date(exp.end_date);
-          const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-          totalExperienceMonths += Math.max(0, months);
+          if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+            const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+            totalExperienceMonths += Math.max(0, months);
+          } else {
+            totalExperienceMonths += Number(exp.total_months) || 0;
+          }
+        } else if (exp.total_months) {
+          totalExperienceMonths += Number(exp.total_months) || 0;
         }
       }
     }
@@ -226,43 +231,69 @@ const calculateMeritScore = async (applicationOrId, transaction = null) => {
     if (dob) {
       const birthDate = new Date(dob);
       const today = new Date();
-      let age = today.getFullYear() - birthDate.getFullYear();
-      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (!Number.isNaN(birthDate.getTime())) {
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
 
-      // Adjust age if birthday hasn't occurred this year
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-      }
+        // Adjust age if birthday hasn't occurred this year
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
 
-      // Cap age between 0-100 for score calculation
-      age = Math.max(0, Math.min(age, 100));
+        // Cap age between 0-100 for score calculation
+        age = Math.max(0, Math.min(age, 100));
 
-      const agePreference = APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE || 'YOUNGER';
+        const agePreference = APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE || 'YOUNGER';
 
-      if (agePreference === 'OLDER') {
-        // OLDER Candidates preferred: higher age = higher score (0-100)
-        ageScore = age;
-      } else {
-        // YOUNGER Candidates preferred: lower age = higher score (100-0)
-        ageScore = 100 - age;
+        if (agePreference === 'OLDER') {
+          // OLDER Candidates preferred: higher age = higher score (0-100)
+          ageScore = age;
+        } else {
+          // YOUNGER Candidates preferred: lower age = higher score (100-0)
+          ageScore = 100 - age;
+        }
       }
     }
+
+    const factors = {
+      educationRank: highestEduRank,
+      educationPercentage: highestPercentageInTopLevel,
+      locality: localityBonus,
+      experienceMonths: totalExperienceMonths,
+      ageScore,
+      agePreference: APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE || 'YOUNGER'
+    };
+
+    return factors;
+  } catch (error) {
+    logger.error('Calculate merit factors error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Keep the legacy numeric score for existing API/database consumers. Ranking
+ * itself is performed by the explicit factor comparator in meritListService.
+ */
+const calculateMeritScore = async (applicationOrId, transaction = null) => {
+  try {
+    const factors = await calculateMeritFactors(applicationOrId, transaction);
 
     // ========== COMPUTE MERIT SCORE ==========
     // Formula: edu_rank * 100,000,000 + percentage * 100,000 + locality * 10,000 + experience * 10 + age_score
     const score =
-      (highestEduRank * 100000000) +
-      (highestPercentageInTopLevel * 100000) +
-      (localityBonus * 10000) +
-      (totalExperienceMonths * 10) +
-      ageScore;
+      (factors.educationRank * 100000000) +
+      (factors.educationPercentage * 100000) +
+      (factors.locality * 10000) +
+      (factors.experienceMonths * 10) +
+      factors.ageScore;
 
     // NOTE: We do NOT store merit_score in database anymore for live view,
     // though we return it for the API response.
     
     // Cache removed
     
-    logger.info(`Merit score calculated for app ${appId}: ${score} (edu=${highestEduRank}, pct=${highestPercentageInTopLevel}, local=${localityBonus}, exp=${totalExperienceMonths}, age_pre=${APP_CONFIG?.MERIT_CRITERIA?.AGE_PREFERENCE})`);
+    logger.info(`Merit score calculated for app ${applicationOrId?.application_id || applicationOrId}: ${score}`);
     return score;
   } catch (error) {
     logger.error('Calculate merit score error:', error);
@@ -421,6 +452,7 @@ const getStatusHistory = async (applicationId) => {
 module.exports = {
   changeStatus,
   calculateMeritScore,
+  calculateMeritFactors,
   processSubmission,
   bulkChangeStatus,
   getStatusHistory,

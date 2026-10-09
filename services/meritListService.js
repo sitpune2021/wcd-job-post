@@ -8,7 +8,31 @@ const db = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
 const { ApiError } = require('../middleware/errorHandler');
-const { calculateMeritScore } = require('./applicationWorkflowService');
+const { calculateMeritFactors } = require('./applicationWorkflowService');
+
+const compareMeritEntries = (a, b) => {
+  const factorDifference = (b.factors.educationRank - a.factors.educationRank)
+    || (b.factors.educationPercentage - a.factors.educationPercentage)
+    || (b.factors.locality - a.factors.locality)
+    || (b.factors.experienceMonths - a.factors.experienceMonths)
+    || (b.factors.ageScore - a.factors.ageScore);
+  if (factorDifference !== 0) return factorDifference;
+
+  const submittedDifference = new Date(a.submittedAt || 0) - new Date(b.submittedAt || 0);
+  if (submittedDifference !== 0) return submittedDifference;
+  return String(a.applicationNo || '').localeCompare(String(b.applicationNo || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base'
+  });
+};
+
+const scoreFromFactors = (factors) => (
+  (factors.educationRank * 100000000)
+  + (factors.educationPercentage * 100000)
+  + (factors.locality * 10000)
+  + (factors.experienceMonths * 10)
+  + factors.ageScore
+);
 
 class MeritListService {
   async generateMeritList(postId, districtId, generatedBy) {
@@ -50,7 +74,8 @@ class MeritListService {
         status: 'PROCESSING',
         is_official: isOfficial,
         formula_snapshot: {
-          formula: 'applicationWorkflowService.calculateMeritScore',
+          formula: 'education_rank DESC, education_percentage DESC, locality DESC, experience_months DESC, age_preference DESC',
+          age_preference: 'YOUNGER',
           tie_breakers: ['submitted_at ASC', 'application_no ASC']
         },
         generated_by: generatedBy,
@@ -78,9 +103,10 @@ class MeritListService {
               {
                 model: db.ApplicantEducation,
                 as: 'education',
+                separate: true,
                 include: [{ model: db.EducationLevel, as: 'educationLevel' }]
               },
-              { model: db.ApplicantExperience, as: 'experience' }
+              { model: db.ApplicantExperience, as: 'experience', separate: true }
             ]
           }
         ],
@@ -100,7 +126,8 @@ class MeritListService {
 
       const scored = [];
       for (const application of applications) {
-        const score = await calculateMeritScore(application, transaction);
+        const factors = await calculateMeritFactors(application, transaction);
+        const score = scoreFromFactors(factors);
         scored.push({
           application_id: application.application_id,
           post_id: postId,
@@ -113,8 +140,15 @@ class MeritListService {
           score_snapshot: {
             submitted_at: application.submitted_at,
             application_no: application.application_no,
+            education_rank: factors.educationRank,
+            education_percentage: factors.educationPercentage,
+            is_local_candidate: factors.locality === 1,
+            experience_months: factors.experienceMonths,
+            age_score: factors.ageScore,
+            age_preference: factors.agePreference,
             calculated_at: new Date()
           },
+          factors,
           is_official: isOfficial,
           selection_status: application.selection_status || 'PENDING',
           generated_at: new Date(),
@@ -122,15 +156,8 @@ class MeritListService {
         });
       }
 
-      scored.sort((a, b) => {
-        const scoreDifference = Number(b.score) - Number(a.score);
-        if (scoreDifference !== 0) return scoreDifference;
-        const aApp = applications.find((item) => item.application_id === a.application_id);
-        const bApp = applications.find((item) => item.application_id === b.application_id);
-        const submittedDifference = new Date(aApp?.submitted_at || 0) - new Date(bApp?.submitted_at || 0);
-        if (submittedDifference !== 0) return submittedDifference;
-        return String(aApp?.application_no || '').localeCompare(String(bApp?.application_no || ''));
-      });
+      scored.sort(compareMeritEntries);
+      scored.forEach((entry) => { delete entry.factors; });
       scored.forEach((entry, index) => { entry.rank = index + 1; });
 
       if (scored.length) {
@@ -231,6 +258,31 @@ class MeritListService {
     const post = await db.PostMaster.findByPk(postId);
     if (!post) throw new ApiError(404, 'Post not found');
     const finalDistrictId = parseInt(districtId, 10) || post.district_id;
+
+    const alreadyPublished = await db.MeritGenerationRun.findOne({
+      where: {
+        post_id: postId,
+        district_id: finalDistrictId,
+        is_official: true,
+        status: 'PUBLISHED'
+      },
+      order: [['run_number', 'DESC']]
+    });
+    if (alreadyPublished) {
+      return {
+        post_id: postId,
+        merit_run_id: alreadyPublished.merit_run_id,
+        published_at: alreadyPublished.published_at
+      };
+    }
+
+    // Publishing always uses a fresh official generation so edits made after
+    // the previous generation cannot leave the published list stale.
+    const generated = await this.generateMeritList(postId, finalDistrictId, adminId);
+    if (!generated.isOfficial) {
+      throw new ApiError(409, 'Close the post or recruitment drive before publishing the merit list');
+    }
+
     const run = await db.MeritGenerationRun.findOne({
       where: {
         post_id: postId,
